@@ -337,7 +337,9 @@ async function rest(token: string, method: string, path: string, body?: unknown,
     const res = await fetchImpl(`${API}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15_000) });
     if (res.status === 429 && attempt === 0) {
       const j = (await res.json().catch(() => ({}))) as { retry_after?: number };
-      await new Promise((r) => unref(setTimeout(r, Math.min((Number(j.retry_after) || 1) * 1000, 10_000))));
+      // Not unref'd: a caller is awaiting this request, so the wait must hold
+      // the process (an unref'd timer let the test runner's loop drain first).
+      await new Promise((r) => setTimeout(r, Math.min((Number(j.retry_after) || 1) * 1000, 10_000)));
       continue;
     }
     if (res.status === 204) return null;

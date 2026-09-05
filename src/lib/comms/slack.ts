@@ -80,10 +80,9 @@ async function web(token: string, method: string, params: Record<string, unknown
     });
     if (res.status === 429 && attempt === 0) {
       const wait = Math.min((Number(res.headers.get('retry-after')) || 1) * 1000, 10_000);
-      await new Promise((r) => {
-        const t = setTimeout(r, wait);
-        (t as { unref?: () => void }).unref?.();
-      });
+      // Not unref'd: a caller is awaiting this request, so the wait must hold
+      // the process (an unref'd timer let the test runner's loop drain first).
+      await new Promise((r) => setTimeout(r, wait));
       continue;
     }
     const json = (await res.json().catch(() => null)) as any;

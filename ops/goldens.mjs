@@ -19,6 +19,10 @@ process.env.TOKEN_ENC_KEY = crypto.randomBytes(32).toString('base64'); // this i
 
 const targets = 'src/lib/targets.json';
 const keep = fs.existsSync(targets) ? fs.readFileSync(targets) : null;
+// The real list goes to a file first: a run killed mid-way must not leave the
+// example in its place with nothing to restore from.
+const backup = `${targets}.bak`;
+if (keep) fs.writeFileSync(backup, keep);
 let server;
 try {
   fs.copyFileSync('src/lib/targets.example.json', targets);
@@ -125,6 +129,9 @@ try {
       setTimeout(r, 10_000);
     });
   }
-  if (keep) fs.writeFileSync(targets, keep);
+  if (keep) {
+    fs.writeFileSync(targets, keep);
+    fs.rmSync(backup, { force: true });
+  }
   fs.rmSync(data, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
 }

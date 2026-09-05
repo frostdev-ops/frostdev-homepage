@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  The public splash at <a href="https://frostdev.io">frostdev.io</a>, the <b>Rimeward</b> dashboard behind the login, and the Rimeward desktop app.
+  A personal operations dashboard, the splash in front of it, and a desktop app that lends it your own connection.
   <br>
   <a href="https://github.com/frostdev-ops/frostdev-homepage/releases/latest">Latest desktop release</a> · macOS (signed, universal) · Windows · Linux
 </p>
@@ -27,9 +27,9 @@ that wires any of it to any of it.
 
 Rimeward has its own vocabulary, and the code follows it.
 
-**Frostdev** is the studio and the public site. **Rimeward** is the private dashboard behind the
-login and the desktop app. Rime is the frost that grows on the windward side of things; Rimeward is
-where you keep watch.
+**Rimeward** is the dashboard behind the login and the desktop app; the splash in front of it
+says whatever your instance's site settings say. Rime is the frost that grows on the windward
+side of things; Rimeward is where you keep watch.
 
 A **ward** is one card on the dashboard. Every ward is one thing to watch or one thing to do: the
 weather, an inbox, a Notion database, a routine timer, a real browser. Wards come from a catalog,
@@ -73,6 +73,7 @@ User-facing copy always says ward, leyline, Rime.
 
 Astro 5 (SSR, Node adapter) · TypeScript · Tailwind 4 · SQLite (`better-sqlite3`) · three.js
 for the splash · Playwright for the browser wards · Tauri 2 (Rust) for the desktop app.
+Node 22.18 or newer.
 
 ## Run it
 
@@ -85,18 +86,38 @@ npm test                        # node --test
 npm run build && npm run preview
 ```
 
-`node bin/rimeward.mjs doctor` lists what is still missing; `--help` lists the rest (users,
-settings, splash, brand, backup, restore). Google sign-in needs the OAuth pair in `.env`;
-`SSO_WORKSPACE_DOMAIN` lets one Workspace domain in without invites, otherwise invite addresses
-from the admin page or `users create --sso`.
+`node bin/rimeward.mjs doctor` lists what is still missing. The CLI also manages users,
+settings, the splash, the brand files, and backups (`--help`).
 
-Browser wards drive playwright-core's Chromium (`npx playwright-core install chromium`). Run the
-server as a non-root user, or point `BROWSER_EXECUTABLE` at a wrapper that drops root — as root
-without one, Chromium runs without its sandbox.
+## Configure
 
-`src/lib/targets.json` (created from the example on first run, never committed) is what the
-Services wards monitor: `http` and `tcp` probes, and the pm2 processes, docker containers and
-systemd units of the machine the app runs on:
+Everything an instance is comes from `.env`, the settings table, and the data directory. The
+repo carries nothing of yours.
+
+| Variable | What it is |
+|---|---|
+| `PUBLIC_BASE_URL` | The URL people reach the site on. Redirect URIs, the CSRF check and the Secure cookie flag derive from it. |
+| `PORT`, `HOST` | `3005` and `127.0.0.1` behind a reverse proxy; `0.0.0.0` in a container. |
+| `HOMEPAGE_DATA_DIR` | The database, uploads, browser profiles and the agent's files. Default `./data`. |
+| `TOKEN_ENC_KEY` | 32 bytes base64. Seals every stored credential; part of every backup. |
+| `GOOGLE_CLIENT_ID/SECRET` | Google sign-in and the Gmail / Calendar links. |
+| `SSO_WORKSPACE_DOMAIN` | A Google Workspace domain that may sign in without an invite (its first user becomes admin). Unset: invited addresses only. |
+| `MS_CLIENT_ID/SECRET`, `MS_TENANT_ID` | Outlook and Teams. The tenant defaults to `common`. |
+| `NOTION_CLIENT_ID/SECRET`, `ZOHO_CLIENT_ID/SECRET` | Notion pages and databases; Zoho Mail. |
+| `WEATHER_LAT`, `WEATHER_LON` | The weather ward's location (or the `weather_lat` / `weather_lon` settings). |
+| `BROWSER_EXECUTABLE`, `BROWSER_PROFILES` | A Chromium (or a wrapper that drops root) and where its profiles live. Unset: playwright-core's own, under the data dir. |
+| `PM2_BIN`, `DOCKER_BIN`, `SYSTEMCTL_BIN` | The tools behind pm2 / docker / systemd monitor targets when PATH does not carry them. |
+| `PUBLIC_APP_BUILD` | The build stamp on the dashboard. Default: the package version. |
+| `TZ` | Set in the process manager, not `.env`: the logic engine's clocks and due dates run in it. |
+
+**Site and brand.** The name, tagline, splash cards and footer are settings, edited on the
+admin page or with `node bin/rimeward.mjs splash`. The wordmark, emblem, header mark and icons
+are files in `data/brand/` (`brand install <slot> <file>` normalises them); without one the
+Rimeward crystal serves.
+
+**Monitoring.** `src/lib/targets.json` (created from the example on first run, never
+committed) is what the Services wards watch: `http` and `tcp` probes, and the pm2 processes,
+docker containers and systemd units of the machine the app runs on — it sees no other machine.
 
 ```json
 { "id": "web",   "label": "web",   "group": "processes", "kind": "pm2",     "name": "web" }
@@ -104,8 +125,38 @@ systemd units of the machine the app runs on:
 { "id": "proxy", "label": "nginx", "group": "system",    "kind": "systemd", "unit": "nginx" }
 ```
 
-`server.mjs` is the production entry (Astro's standalone server plus the websocket upgrade the
-desktop app needs); run it behind a reverse proxy that passes `Upgrade` headers on `/api/tunnel`.
+**Browser wards** drive playwright-core's Chromium (`npx playwright-core install chromium`). Run
+the server as a non-root user, or point `BROWSER_EXECUTABLE` at a wrapper that drops root; as
+root without one, Chromium runs without its sandbox. Every host a user names is checked against
+the private address ranges before it is dialled, the Docker bridge range included — reach a
+sibling container by its public name or with host networking.
+
+## Deploy
+
+`server.mjs` is the production entry: Astro's standalone server plus the websocket upgrade the
+desktop app needs. Run it under a process manager with `.env` loaded
+(`node --env-file=.env server.mjs`, `TZ` set there too) behind a reverse proxy that does not
+buffer `/api/status/stream` and `/api/browser/stream` and passes `Upgrade` on `/api/tunnel`.
+`ops/nginx.example.conf` is that proxy. Give the process ten seconds to stop: browser wards
+close Chromium gracefully so a fresh login's cookies are not lost.
+
+**Docker.** `compose.yaml` builds the image, keeps the data directory in a volume, and runs
+Chromium with the seccomp profile that lets it keep its sandbox as a non-root user.
+
+```sh
+cp .env.example .env            # HOST is set by the image; PUBLIC_BASE_URL is yours
+docker compose up -d --build
+docker compose exec app node bin/rimeward.mjs users create you@example.com --admin
+```
+
+**Back up** the whole data directory and `TOKEN_ENC_KEY`: `node bin/rimeward.mjs backup <dir>`
+takes an online copy of the database and the files beside it. The database alone restores to an
+agent with no memory and tokens nobody can decrypt.
+
+**Limits, on purpose.** Per user and hour: 10 mails, 30 button presses, 60 one-shot model
+calls, 60 chat messages (20 SMS), and each Rime ward's own cap on unattended turns. One server
+timezone. The login throttle keys on the address the server sees, which behind a proxy is the
+proxy's — stricter than trusting a forwarded header without a trusted-proxy list.
 
 ## Desktop app
 
@@ -116,18 +167,23 @@ on your machine entirely, driven from the dashboard and by the agent alike.
 ```sh
 cargo install tauri-cli --locked
 npm run desktop:dev             # against the dev server
-npm run desktop:build
+RIMEWARD_ORIGIN=https://dash.example.com npm run desktop:build
 ```
 
-Releases are built by `.github/workflows/desktop.yml` on a `desktop-v*` tag.
+The server a build opens is compiled in (`RIMEWARD_ORIGIN`, default the upstream instance):
+`desktop/prebuild.mjs` writes it into the window URL and the capability that lets that page
+reach the app. Releases are built by `.github/workflows/desktop.yml` on a `desktop-v*` tag; a
+fork sets the `RIMEWARD_ORIGIN` repository variable, its own bundle identifier in
+`desktop/tauri.conf.json`, and the Apple secrets the workflow lists.
 
 ## Layout
 
-- `src/pages` routes · `src/lib` the server (auth, wards, status, logic engine, agent, tunnel,
-  browser sessions, comms) · `src/scripts/app` the dashboard client · `src/styles/frost.css`
-  the token system
-- `migrations/` numbered SQL, applied on first open
-- `desktop/` the Tauri app · `ops/rimeward-brand.mjs` regenerates the mark, lockup and icon
+- `src/pages` routes · `src/lib` the server (auth, site, brand, wards, status, logic engine,
+  agent, tunnel, browser sessions, comms) · `src/scripts/app` the dashboard client ·
+  `src/styles/frost.css` the token system
+- `bin/rimeward.mjs` the CLI · `migrations/` numbered SQL, applied on first open
+- `desktop/` the Tauri app · `ops/` the nginx example, the seccomp profile, the brand and
+  goldens generators
 
 ## License
 

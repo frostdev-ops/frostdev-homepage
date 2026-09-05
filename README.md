@@ -3,16 +3,16 @@
 </p>
 
 <p align="center">
-  A personal operations dashboard, the splash in front of it, and a desktop app that lends it your own connection.
+  An agentic harness with a dashboard for a face: Rime, leylines, wards. And a desktop app that lends it your own connection.
   <br>
   <a href="https://github.com/frostdev-ops/rimeward/releases/latest">Latest desktop release</a> · macOS (signed, universal) · Windows · Linux
 </p>
 
-Rimeward is a personal operations dashboard: live service status for your own servers,
-weather, one inbox over every linked mailbox, a merged agenda, Notion wards, a notepad,
-routine timers, chat wards (Discord, Telegram, Slack, Twilio, push, Matrix, Teams), a real
-browser you and the built-in agent drive together, and **leylines**, a small automation graph
-that wires any of it to any of it.
+Rimeward is an agentic harness in the shape of a personal dashboard. **Rime**, the built-in
+agent, has real tools over everything on the board. **Leylines** wire what happens in one ward
+to what another one does. Every **ward**, from the inbox to a real browser, is one thing to
+watch or one thing to do. All of it is yours to shape: what runs, how it looks, and what the
+agent may do on its own.
 
 ## Screens
 
@@ -22,6 +22,29 @@ that wires any of it to any of it.
 <p align="center">
   <img src="docs/goldens/dashboard.png" alt="The dashboard, default layout" width="880">
 </p>
+
+## What it does
+
+- **An agent with the run of the place.** Rime reads and edits the same wards you do: the
+  layout, the theme, the leylines, service status, weather, mail, calendar, Notion, timers,
+  packets, a bash sandbox, the web, and a browser you both drive. It keeps its memory and skills
+  as wards, speaks to MCP servers, wakes on a schedule or on a message, and asks before anything
+  leaves the building. Several Rime wards can run side by side, each with its own model,
+  approvals and caps.
+- **Leylines, the automations.** A routine finishing, a button pressed, a service going down,
+  mail arriving, a chat message, the weather turning, a time of day; then a timer starts, a
+  Notion task is checked, a message is sent, a packet moves, Rime is asked. Conditions,
+  templates and fan-out, drawn on a canvas across every page.
+- **Wards for what you already use.** Service status for your own servers (http, tcp, pm2,
+  docker, systemd) with history, incidents and charts; one inbox over Gmail, Outlook, Zoho and
+  IMAP; a merged agenda over Google, Outlook, iCloud and a Notion database; Notion databases
+  and pages as tables, lists, calendars and capture lines; chat wards for Discord, Telegram,
+  Slack, Twilio, Matrix, Teams and push; routine timers, launchers, buttons and flows; a notepad
+  with ink, whose handwriting Rime transcribes.
+- **Make it yours.** Per-user themes with presets, accent and glass; 43 typefaces; six icon
+  sets; eighteen animated shader backgrounds or your own photo, and a header banner that runs
+  the same scenes; pages, containers and a Configure dialog on every ward. The splash, the
+  name and the brand art belong to the instance, not the repo.
 
 ## The words
 

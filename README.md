@@ -20,11 +20,54 @@ that wires any of it to any of it.
   <img src="docs/goldens/splash.png" alt="The splash: living topography" width="880">
 </p>
 <p align="center">
-  <img src="docs/goldens/login.png" alt="Sign in" width="430">
-  <img src="docs/goldens/dashboard.png" alt="The dashboard, default layout" width="430">
+  <img src="docs/goldens/dashboard.png" alt="The dashboard, default layout" width="880">
 </p>
 
-Regenerate them with `node ops/goldens.mjs` (a throwaway instance, nothing personal in them).
+## The words
+
+Rimeward has its own vocabulary, and the code follows it.
+
+**Frostdev** is the studio and the public site. **Rimeward** is the private dashboard behind the
+login and the desktop app. Rime is the frost that grows on the windward side of things; Rimeward is
+where you keep watch.
+
+A **ward** is one card on the dashboard. Every ward is one thing to watch or one thing to do: the
+weather, an inbox, a Notion database, a routine timer, a real browser. Wards come from a catalog,
+grouped by what they are for: *At a glance*, *Mail*, *Chat & messaging*, *Notion*, *Write &
+capture*, *Leylines & automation*, *Rime*, and *Layout & looks*. Wards live on **pages**, the tabs
+across the top; a **container** groups wards; a **spacer** is breathing room.
+
+<p align="center">
+  <img src="docs/goldens/wards.png" alt="The ward catalog, in edit mode" width="880">
+</p>
+
+A **leyline** is a wire from something that happens in one ward to something another ward does:
+a routine finishing, a button being pressed, a service going down, mail arriving, a message in a
+chat, the weather turning; then a timer starts, a Notion task is checked, a message is sent, a
+flow packet moves, Rime is asked. A leyline can carry conditions, and every leyline is one
+trigger, one action; fan-out is more leylines. **Leylines mode** is where you draw them, across
+every page at once.
+
+<p align="center">
+  <img src="docs/goldens/leylines.png" alt="Leylines mode" width="880">
+</p>
+
+**Rime** is the agent that lives in the dashboard. It reads the same wards you do, keeps its own
+memory and skills as wards, drives the same browser you drive, and asks before anything leaves
+the building: mail, chat, and the rest of the outbound tools wait for a confirm. A **routine** is
+a timer with rounds. A **packet** is what moves between flow wards. The **home route** is the
+desktop app's tunnel: a browser ward on the server egressing from your own connection, or running
+its Chromium on your machine entirely.
+
+<p align="center">
+  <img src="docs/goldens/rime.png" alt="The Rime ward" width="430">
+  <img src="docs/goldens/browser.png" alt="A browser ward" width="430">
+</p>
+
+In the code the words keep their engineering names where they were there first: a ward is a
+`WardInstance` from the `CATALOG` in `src/lib/wards.ts`; leylines are logic edges in
+`src/lib/logic*.ts` (triggers, conditions, actions, the `.wiring` mode); Rime is `src/lib/agent/`.
+User-facing copy always says ward, leyline, Rime.
 
 ## Stack
 

@@ -15,7 +15,7 @@ export interface SiteInfo {
   cards: SiteCard[];
 }
 
-export const SITE_DEFAULTS: SiteInfo = { name: 'Rimeward', tagline: 'Wards, leylines and Rime', footer: '', cards: [] };
+export const SITE_DEFAULTS: SiteInfo = { name: 'Rimeward', tagline: 'The rime remembers', footer: '', cards: [] };
 export const MAX_CARDS = 6;
 const MAX = { name: 60, tagline: 120, footer: 200, title: 60, blurb: 200 };
 

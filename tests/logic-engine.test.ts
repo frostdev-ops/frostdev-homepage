@@ -1,6 +1,7 @@
 import './_setup.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { TARGETS } from '../src/lib/targets.ts';
 import { getDb } from '../src/lib/db.ts';
 import { getDashboard, saveDashboard } from '../src/lib/dashboard.ts';
 import { validateLayout } from '../src/lib/wards.ts';
@@ -52,8 +53,8 @@ function seedUser(email: string): number {
       { i: 't2', type: 'timer', size: '1x1', config: { duration: 60 } },
       { i: 'f1', type: 'flow', size: '2x2' },
       { i: 'f2', type: 'flow', size: '2x2' },
-      { i: 'sv1', type: 'service-group', size: '1x1', config: { services: ['frostdev-io'] } },
-      { i: 'sg2', type: 'service-group', size: '2x1', config: { services: ['frostdev-io', 'rewind'] } },
+      { i: 'sv1', type: 'service-group', size: '1x1', config: { services: [TARGETS[0]!.id] } },
+      { i: 'sg2', type: 'service-group', size: '2x1', config: { services: [TARGETS[0]!.id, TARGETS[1]!.id] } },
       { i: 'h1', type: 'service-group', size: '2x1', config: { services: ['host:cpu', 'host:mem', 'host:disk'] } },
       { i: 'b1', type: 'button', size: '1x1' },
     ])!
@@ -431,7 +432,7 @@ test('a service trigger on a two-member group lands as an error run, not a fire'
 });
 
 test('soleService: a one-member group, nothing else', () => {
-  assert.equal(soleService({ services: ['frostdev-io'] }), 'frostdev-io');
+  assert.equal(soleService({ services: [TARGETS[0]!.id] }), TARGETS[0]!.id);
   assert.throws(() => soleService({ services: ['a', 'b'] }), /single-service/);
   assert.throws(() => soleService({ group: 'frostdev' }), /single-service/);
 });

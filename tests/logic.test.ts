@@ -1,6 +1,7 @@
 import './_setup.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { TARGETS } from '../src/lib/targets.ts';
 import type { WardInstance } from '../src/lib/wards.ts';
 import { edgeMatches, renderTemplate, validateGraph } from '../src/lib/logic.ts';
 
@@ -9,8 +10,8 @@ const LAYOUT: WardInstance[] = [
   { i: 't2', type: 'timer', size: '1x1' },
   { i: 'f1', type: 'flow', size: '2x2' },
   { i: 'w1', type: 'weather', size: '2x1' },
-  { i: 'sv1', type: 'service-group', size: '1x1', config: { services: ['frostdev-io'] } },
-  { i: 'sg1', type: 'service-group', size: '1x1', config: { services: ['frostdev-io'] } },
+  { i: 'sv1', type: 'service-group', size: '1x1', config: { services: [TARGETS[0]!.id] } },
+  { i: 'sg1', type: 'service-group', size: '1x1', config: { services: [TARGETS[0]!.id] } },
   { i: 'h1', type: 'service-group', size: '2x1', config: { services: ['host:cpu', 'host:mem', 'host:disk'] } },
   { i: 'nu1', type: 'next-up', size: '1x1' },
   { i: 'c1', type: 'calendar', size: '2x2' },
@@ -153,7 +154,7 @@ test('watcher triggers: filter params, minutes/percent kinds', () => {
   assert.ok(cond('host-above', { metric: 'mem', pct: 90 }));
   assert.equal(cond('host-above', { metric: 'gpu', pct: 90 }), null);
   assert.equal(cond('host-above', { metric: 'mem', pct: 0 }), null);
-  assert.ok(cond('service-is', { service: 'frostdev-io', state: 'down' }));
+  assert.ok(cond('service-is', { service: TARGETS[0]!.id, state: 'down' }));
   assert.equal(cond('service-is', { service: 'not-a-target', state: 'down' }), null);
 });
 

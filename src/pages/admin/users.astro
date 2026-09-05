@@ -3,6 +3,7 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import { listUsers } from '../../lib/users.ts';
 import { SESSION_COOKIE } from '../../lib/auth.ts';
 import { takeSetting } from '../../lib/settings.ts';
+import { WORKSPACE_DOMAIN } from '../../lib/google-sso.ts';
 
 const me = Astro.locals.user!;
 const users = listUsers();
@@ -43,7 +44,7 @@ const OK_MESSAGES: Record<string, string> = {
       <form method="post" action="/api/users" class="flex flex-wrap items-end gap-3">
         <div class="min-w-52 flex-1">
           <label for="new-email" class="label">Email</label>
-          <input id="new-email" name="email" type="email" required class="input" placeholder="name@frostdev.io" />
+          <input id="new-email" name="email" type="email" required class="input" placeholder="name@example.com" />
         </div>
         <div>
           <label for="new-role" class="label">Role</label>
@@ -62,7 +63,7 @@ const OK_MESSAGES: Record<string, string> = {
         <button type="submit" class="btn-primary">Add</button>
       </form>
       <p class="mt-2 text-xs text-ink-faint">
-        SSO invites let any Google account with that email in — including addresses outside frostdev.io.
+        SSO invites let any Google account with that email in{WORKSPACE_DOMAIN ? ` — including addresses outside ${WORKSPACE_DOMAIN}` : ''}.
       </p>
     </div>
 

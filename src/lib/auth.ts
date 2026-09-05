@@ -3,6 +3,9 @@ import { getDb } from './db.ts';
 
 export const SESSION_COOKIE = 'frost_session';
 export const SSO_STATE_COOKIE = 'frost_sso';
+/** Only an https site can set a Secure cookie: an install reached over plain
+ *  http (a LAN, Tailscale) would otherwise bounce on the login forever. */
+const SECURE = (process.env.PUBLIC_BASE_URL ?? '').startsWith('https:');
 
 const N = 16384;
 const R = 8;
@@ -82,7 +85,7 @@ export function destroySession(id: string): void {
 export function ssoStateCookieOptions() {
   return {
     httpOnly: true,
-    secure: import.meta.env.PROD,
+    secure: SECURE,
     sameSite: 'lax' as const,
     path: '/',
     maxAge: 15 * 60,
@@ -92,7 +95,7 @@ export function ssoStateCookieOptions() {
 export function sessionCookieOptions(expiresAt: string) {
   return {
     httpOnly: true,
-    secure: import.meta.env.PROD,
+    secure: SECURE,
     sameSite: 'lax' as const,
     path: '/',
     expires: new Date(expiresAt.replace(' ', 'T') + 'Z'),

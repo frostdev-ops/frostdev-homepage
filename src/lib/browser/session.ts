@@ -20,12 +20,19 @@ import { openStream, subscribeTunnel, tunnelOnline, tunnelStatus } from '../tunn
 // Browserbase (browserbase.ts), or the user's own computer through the
 // desktop app (app-backend.ts). Nothing above launch() knows which.
 
-/** Where local profiles live. Prod points this OUTSIDE data/ (ops/browser-setup.sh):
- *  the browser user must never be able to read homepage.db. */
+/** Where local profiles live. A server that runs chromium as a separate user
+ *  (BROWSER_EXECUTABLE) points this OUTSIDE data/: that user must never be able
+ *  to read homepage.db. */
 export const PROFILES = process.env.BROWSER_PROFILES ?? path.join(DATA_DIR, 'browser');
-/** Prod: a setpriv wrapper that drops root before exec, so chromium keeps its
- *  sandbox. Unset = Playwright's own chromium (dev). */
+/** A wrapper that drops root before exec, so chromium keeps its sandbox on a
+ *  root-run server. Unset = playwright-core's own chromium. */
 const EXE = process.env.BROWSER_EXECUTABLE;
+/** Playwright's default is --no-sandbox. These tabs load whatever the user
+ *  types; the renderer sandbox is the containment. Chromium refuses to sandbox
+ *  as root, so root without the wrapper runs unsandboxed — loudly. */
+const SANDBOX = !!EXE || process.getuid?.() !== 0;
+if (!SANDBOX)
+  console.warn('[browser] root without BROWSER_EXECUTABLE: chromium sandbox OFF — run as a non-root user or set BROWSER_EXECUTABLE to a wrapper that drops root');
 const MAX = Number(process.env.BROWSER_MAX_SESSIONS ?? 3);
 const IDLE_MS = 10 * 60_000;
 const CLOSE_MS = 5_000;
@@ -157,10 +164,7 @@ async function launchLocal(userId: number, ward: string, cfg: BrowserConfig): Pr
   const context = await chromium.launchPersistentContext(profileDir(userId, ward), {
     ...(EXE ? { executablePath: EXE } : { channel: 'chromium' }),
     headless: true,
-    // Playwright's default is --no-sandbox. These tabs load whatever the user
-    // types; the renderer sandbox is the containment — prod drops root through
-    // BROWSER_EXECUTABLE so chromium accepts this.
-    chromiumSandbox: true,
+    chromiumSandbox: SANDBOX,
     // Shutdown is ours (below): Playwright's handlers SIGKILL the browser and
     // exit, which loses the cookie writes chromium batches for up to 30s —
     // i.e. the login the human just finished.

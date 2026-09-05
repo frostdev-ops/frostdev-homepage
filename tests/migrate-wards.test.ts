@@ -1,6 +1,7 @@
 import './_setup.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { TARGETS } from '../src/lib/targets.ts';
 import { getDb } from '../src/lib/db.ts';
 import { getDashboard } from '../src/lib/dashboard.ts';
 import { getGraph } from '../src/lib/logic-engine.ts';
@@ -10,7 +11,7 @@ import { migrateGraph, migrateLayout, migrateLegacyWards, migrateWardKeys, wardK
 
 const HEX = 'deadbeef-dead-beef-dead-beefdeadbeef';
 const LEGACY = [
-  { i: 'sv', type: 'service', size: '1x1', config: { service: 'frostdev-io' } },
+  { i: 'sv', type: 'service', size: '1x1', config: { service: TARGETS[0]!.id } },
   { i: 'h', type: 'host', size: '2x1' },
   { i: 'nf', type: 'notion-fields', size: '2x1', config: { page: HEX, props: ['A'], head: false } },
   { i: 'nf2', type: 'notion-fields', size: '2x1', title: 'Mine', config: { page: HEX } },
@@ -29,7 +30,7 @@ test('migrateLayout: every legacy shape lands on the table, everything else is u
   assert.equal(changed, true);
   assert.deepEqual(skipped, []);
   const by = Object.fromEntries((layout as { i: string }[]).map((w) => [w.i, w]));
-  assert.deepEqual(by.sv, { i: 'sv', type: 'service-group', size: '1x1', config: { services: ['frostdev-io'] } });
+  assert.deepEqual(by.sv, { i: 'sv', type: 'service-group', size: '1x1', config: { services: [TARGETS[0]!.id] } });
   assert.deepEqual(by.h, { i: 'h', type: 'service-group', size: '2x1', title: 'Host', config: { services: ['host:cpu', 'host:mem', 'host:disk'] } });
   assert.deepEqual(by.nf, { i: 'nf', type: 'notion-page', size: '2x1', title: 'Page fields', config: { show: ['props'], page: HEX, props: ['A'], head: false } });
   assert.deepEqual(by.nf2, { i: 'nf2', type: 'notion-page', size: '2x1', title: 'Mine', config: { show: ['props'], page: HEX } });

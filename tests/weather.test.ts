@@ -3,6 +3,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { wmoLabel, getForecast } from '../src/lib/weather.ts';
 
+// No built-in town any more: the forecast needs a location before it fetches.
+process.env.WEATHER_LAT = '40.93';
+process.env.WEATHER_LON = '-74.13';
+
 test('wmoLabel: known codes', () => {
   assert.equal(wmoLabel(0), 'Clear');
   assert.equal(wmoLabel(2), 'Partly cloudy');

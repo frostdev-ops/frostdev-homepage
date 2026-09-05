@@ -1,65 +1,24 @@
 {
   "groups": {
     "site": "Site",
-    "processes": "Processes",
-    "system": "System"
+    "self": "This server"
   },
   "targets": [
     {
-      "id": "frostdev-io",
-      "label": "frostdev.io",
-      "group": "site",
-      "kind": "http",
-      "url": "https://frostdev.io",
-      "method": "HEAD"
-    },
-    {
-      "id": "rewind",
-      "label": "a second site",
+      "id": "site",
+      "label": "example.com",
       "group": "site",
       "kind": "http",
       "url": "https://example.com",
       "method": "HEAD"
     },
     {
-      "id": "api",
-      "label": "api",
-      "group": "site",
+      "id": "self",
+      "label": "dev server",
+      "group": "self",
       "kind": "http",
-      "url": "http://127.0.0.1:3005/api/status",
-      "expect": [
-        200,
-        401
-      ]
-    },
-    {
-      "id": "db",
-      "label": "postgres",
-      "group": "site",
-      "kind": "tcp",
-      "host": "127.0.0.1",
-      "port": 5432
-    },
-    {
-      "id": "pm2-self",
-      "label": "frostdev-homepage",
-      "group": "processes",
-      "kind": "pm2",
-      "name": "frostdev-homepage"
-    },
-    {
-      "id": "dk-redis",
-      "label": "redis",
-      "group": "processes",
-      "kind": "docker",
-      "container": "redis"
-    },
-    {
-      "id": "sd-nginx",
-      "label": "nginx",
-      "group": "system",
-      "kind": "systemd",
-      "unit": "nginx"
+      "url": "http://127.0.0.1:4321/api/status",
+      "expect": [200, 401]
     }
   ]
 }

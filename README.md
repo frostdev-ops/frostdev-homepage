@@ -78,16 +78,34 @@ for the splash · Playwright for the browser wards · Tauri 2 (Rust) for the des
 
 ```sh
 npm install
-cp .env.example .env            # fill in what you use; TOKEN_ENC_KEY is required
-cp src/lib/targets.example.json src/lib/targets.json   # what the status wards monitor
+cp .env.example .env            # PUBLIC_BASE_URL and TOKEN_ENC_KEY are required
+node bin/rimeward.mjs users create you@example.com --admin   # prints the password once
 npm run dev:env                 # http://localhost:4321 (.env loaded)
 npm test                        # node --test
 npm run build && npm run preview
 ```
 
-The first user to sign in becomes the admin. `server.mjs` is the production entry (Astro's
-standalone server plus the websocket upgrade the desktop app needs); run it behind a reverse
-proxy that passes `Upgrade` headers on `/api/tunnel`.
+`node bin/rimeward.mjs doctor` lists what is still missing; `--help` lists the rest (users,
+settings, splash, brand, backup, restore). Google sign-in needs the OAuth pair in `.env`;
+`SSO_WORKSPACE_DOMAIN` lets one Workspace domain in without invites, otherwise invite addresses
+from the admin page or `users create --sso`.
+
+Browser wards drive playwright-core's Chromium (`npx playwright-core install chromium`). Run the
+server as a non-root user, or point `BROWSER_EXECUTABLE` at a wrapper that drops root — as root
+without one, Chromium runs without its sandbox.
+
+`src/lib/targets.json` (created from the example on first run, never committed) is what the
+Services wards monitor: `http` and `tcp` probes, and the pm2 processes, docker containers and
+systemd units of the machine the app runs on:
+
+```json
+{ "id": "web",   "label": "web",   "group": "processes", "kind": "pm2",     "name": "web" }
+{ "id": "cache", "label": "redis", "group": "processes", "kind": "docker",  "container": "redis" }
+{ "id": "proxy", "label": "nginx", "group": "system",    "kind": "systemd", "unit": "nginx" }
+```
+
+`server.mjs` is the production entry (Astro's standalone server plus the websocket upgrade the
+desktop app needs); run it behind a reverse proxy that passes `Upgrade` headers on `/api/tunnel`.
 
 ## Desktop app
 

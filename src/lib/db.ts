@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { migrateLegacyWards, migrateWardKeys } from './migrate-wards.ts';
 
@@ -20,6 +21,17 @@ export function getDb(): Database.Database {
   return db;
 }
 
+/** The migrations folder ships beside the code, not the working directory:
+ *  src/lib/ sits two levels under the repo root, the built dist/server/chunks/
+ *  three — walk up from this module until it appears, cwd as the last resort. */
+export function migrationsDir(from = path.dirname(fileURLToPath(import.meta.url))): string {
+  for (let dir = from; ; dir = path.dirname(dir)) {
+    const candidate = path.join(dir, 'migrations');
+    if (fs.existsSync(candidate)) return candidate;
+    if (path.dirname(dir) === dir) return path.join(process.cwd(), 'migrations');
+  }
+}
+
 function migrate(handle: Database.Database): void {
   handle.exec(
     `CREATE TABLE IF NOT EXISTS applied_migrations (
@@ -27,7 +39,7 @@ function migrate(handle: Database.Database): void {
        applied_at TEXT NOT NULL DEFAULT (datetime('now'))
      )`
   );
-  const dir = path.join(process.cwd(), 'migrations');
+  const dir = migrationsDir();
   if (!fs.existsSync(dir)) return;
 
   const applied = new Set(

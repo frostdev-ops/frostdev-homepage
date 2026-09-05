@@ -64,16 +64,11 @@ export default defineConfig({
   // thing and is silently IGNORED here, which looks exactly like a build that
   // works and a font that never downloads.
   experimental: { fonts: FONT_FACES },
-  // Without this, Astro rewrites every request host to "localhost" and the
-  // built-in CSRF origin check 403s all form POSTs behind the nginx proxy.
-  security: {
-    allowedDomains: [
-      { hostname: 'frostdev.io', protocol: 'https' },
-      { hostname: 'www.frostdev.io', protocol: 'https' },
-      { hostname: '127.0.0.1' },
-      { hostname: 'localhost' },
-    ],
-  },
+  // Astro's CSRF check compares Origin with the request host, which behind a
+  // reverse proxy is the proxy's — src/lib/csrf.ts does the same check against
+  // PUBLIC_BASE_URL at runtime instead (middleware), so a build is not tied to
+  // one domain.
+  security: { checkOrigin: false },
   vite: {
     plugins: [/** @type {any} */ (tailwindcss())],
     // better-sqlite3 is a native module — never bundle it.

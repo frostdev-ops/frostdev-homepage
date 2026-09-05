@@ -299,12 +299,17 @@ function heartbeat(): void {
 /** Which Chromium the app must run: the build this server's playwright-core
  *  pins, told to the app on every connect so a playwright bump here never
  *  needs an app release. */
-export function chromiumSpec(): { version: string; base: string } {
-  const require = createRequire(import.meta.url);
-  const file = path.join(path.dirname(require.resolve('playwright-core/package.json')), 'browsers.json');
-  const json = JSON.parse(fs.readFileSync(file, 'utf8')) as { browsers: { name: string; browserVersion?: string }[] };
-  const version = json.browsers.find((b) => b.name === 'chromium')?.browserVersion ?? '';
-  return { version, base: `https://cdn.playwright.dev/builds/cft/${version}/` };
+export function chromiumSpec(): { version: string; base: string } | null {
+  try {
+    const require = createRequire(import.meta.url);
+    const file = path.join(path.dirname(require.resolve('playwright-core/package.json')), 'browsers.json');
+    const json = JSON.parse(fs.readFileSync(file, 'utf8')) as { browsers: { name: string; browserVersion?: string }[] };
+    const version = json.browsers.find((b) => b.name === 'chromium')?.browserVersion;
+    return version ? { version, base: `https://cdn.playwright.dev/builds/cft/${version}/` } : null;
+  } catch {
+    // A pruned install without browsers.json: the app keeps the build it has.
+    return null;
+  }
 }
 
 /** Boot once per process (middleware): publish the upgrade handler for the raw

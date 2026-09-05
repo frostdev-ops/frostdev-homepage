@@ -27,10 +27,11 @@ export interface Forecast {
   hourly: { t: string; tempF: number; code: number; precipPct: number }[];
 }
 
-function coords(): { lat: number; lon: number } {
-  const lat = Number(getSetting('weather_lat') ?? process.env.WEATHER_LAT ?? '40.93');
-  const lon = Number(getSetting('weather_lon') ?? process.env.WEATHER_LON ?? '-74.13');
-  return { lat, lon };
+/** Settings rows beat env; no built-in town — until one is set the ward says so. */
+export function coords(): { lat: number; lon: number } | null {
+  const lat = Number(getSetting('weather_lat') ?? process.env.WEATHER_LAT ?? NaN);
+  const lon = Number(getSetting('weather_lon') ?? process.env.WEATHER_LON ?? NaN);
+  return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
 }
 
 /** Successes cache 30 min; failures reject inside cached() (nothing stored) and
@@ -38,7 +39,9 @@ function coords(): { lat: number; lon: number } {
 export function getForecast(): Promise<Forecast | null> {
   return cached('weather', 30 * 60_000, async (): Promise<Forecast> => {
     {
-      const { lat, lon } = coords();
+      const at = coords();
+      if (!at) throw new Error('no location');
+      const { lat, lon } = at;
       const url =
         `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
         '&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m' +

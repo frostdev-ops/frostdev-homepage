@@ -74,9 +74,9 @@ test('applink/embed config: http(s) only, junk stripped', () => {
   assert.equal(mk({ url: 'javascript:alert(1)' }, 'embed'), null);
 
   // a legacy single link normalizes to links:[…]
-  const ok = mk({ url: 'https://grafana.frostdev.io', icon: '📊', statusService: 'frostdev-io', evil: 'x' });
+  const ok = mk({ url: 'https://grafana.example.com', icon: '📊', statusService: TARGETS[0]!.id, evil: 'x' });
   assert.ok(ok);
-  assert.deepEqual(ok[0]!.config, { links: [{ url: 'https://grafana.frostdev.io/', icon: '📊', statusService: 'frostdev-io' }] });
+  assert.deepEqual(ok[0]!.config, { links: [{ url: 'https://grafana.example.com/', icon: '📊', statusService: TARGETS[0]!.id }] });
 
   assert.equal(mk({ url: 'https://x.dev', statusService: 'not-a-target' }), null);
   // a launcher holds 1..12 links; one bad link or a non-object entry rejects the layout
@@ -93,11 +93,11 @@ test('service / service-group config validated against TARGETS and GROUPS', () =
   const one = (type: string, config: unknown) => validateLayout([{ i: 'a', type, size: '1x1', config }]);
   assert.ok(one('service-group', { group: GROUPS[0] }));
   assert.equal(one('service-group', { group: 'nope' }), null);
-  assert.ok(one('service-group', { services: ['frostdev-io', 'rewind'] }));
-  assert.equal(one('service-group', { services: ['frostdev-io', 'nope'] }), null);
+  assert.ok(one('service-group', { services: [TARGETS[0]!.id, TARGETS[1]!.id] }));
+  assert.equal(one('service-group', { services: [TARGETS[0]!.id, 'nope'] }), null);
   assert.equal(one('service-group', {}), null);
   // host metrics are members too; the dots view is stored, the default wards view is not
-  assert.deepEqual(one('service-group', { services: ['host:disk', 'frostdev-io'], view: 'dots' })![0]!.config, { services: ['host:disk', 'frostdev-io'], view: 'dots' });
+  assert.deepEqual(one('service-group', { services: ['host:disk', TARGETS[0]!.id], view: 'dots' })![0]!.config, { services: ['host:disk', TARGETS[0]!.id], view: 'dots' });
   assert.deepEqual(one('service-group', { group: GROUPS[0], view: 'wards' })![0]!.config, { group: GROUPS[0] });
   assert.equal(one('service-group', { services: ['host:gpu'] }), null);
   // the stock host ward is a Services ward of the host rows
@@ -124,12 +124,12 @@ test('wardTitle: override > group title > sole member label > catalog', () => {
   assert.equal(t({ type: 'service-group', config: { services: [TARGETS[0]!.id] } }), TARGETS[0]!.label);
   assert.equal(t({ type: 'service-group', config: { services: ['host:disk'] } }), 'Disk');
   assert.equal(t({ type: 'service-group', config: { services: [TARGETS[0]!.id, TARGETS[1]!.id] } }), 'Services');
-  assert.equal(t({ type: 'chart', config: { service: 'frostdev-io' } }), 'Chart'); // only status wards derive from a service
+  assert.equal(t({ type: 'chart', config: { service: TARGETS[0]!.id } }), 'Chart'); // only status wards derive from a service
 });
 
 test('chart config: per-source rules, hours clamped', () => {
   const one = (config: unknown) => validateLayout([{ i: 'a', type: 'chart', size: '2x2', config }]);
-  const ok = one({ source: 'status', service: 'frostdev-io', metric: 'latency', chart: 'line', hours: 9999 });
+  const ok = one({ source: 'status', service: TARGETS[0]!.id, metric: 'latency', chart: 'line', hours: 9999 });
   assert.ok(ok);
   assert.equal((ok[0]!.config as { hours: number }).hours, 168);
   assert.equal(one({ source: 'status', metric: 'latency', chart: 'line', hours: 24 }), null); // no service

@@ -1,5 +1,6 @@
 import { defineMiddleware } from 'astro:middleware';
 import { SESSION_COOKIE, getSession } from './lib/auth.ts';
+import { csrfBlocked } from './lib/csrf.ts';
 import { ensureStatusEngine } from './lib/status.ts';
 import { ensureLogicEngine } from './lib/logic-engine.ts';
 import { ensureBrowser } from './lib/browser/session.ts';
@@ -38,6 +39,12 @@ const ADMIN_PREFIXES = ['/admin', '/api/users'];
 
 export const onRequest = defineMiddleware((context, next) => {
   const { pathname } = context.url;
+  if (csrfBlocked(context.request)) {
+    return new Response(JSON.stringify({ error: 'forbidden origin' }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
   if (pathname === '/') return next();
   if (PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return next();
 

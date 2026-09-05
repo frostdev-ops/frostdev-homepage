@@ -166,7 +166,7 @@ async function renderWeather(w: WardInstance): Promise<void> {
   if (!b) return;
   const { status, data } = await getJson('/api/weather');
   if (status !== 200 || !data?.current) {
-    note(w.i, 'Weather unavailable.');
+    note(w.i, data?.error === 'no-location' ? 'No location set — WEATHER_LAT and WEATHER_LON in .env.' : 'Weather unavailable.');
     return;
   }
   const [cols, rows] = sizeParts(w.size);

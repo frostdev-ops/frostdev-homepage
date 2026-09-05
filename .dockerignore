@@ -1,0 +1,13 @@
+node_modules
+dist
+.astro
+data
+.env
+.env.*
+!.env.example
+.git
+.claude
+desktop/target
+desktop/gen
+docs
+*.log

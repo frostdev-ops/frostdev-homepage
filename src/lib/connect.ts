@@ -14,6 +14,11 @@ export const GOOGLE_DATA_SCOPES = [
 
 export const MS_SCOPES_FULL = 'openid profile email offline_access Mail.ReadWrite Mail.Send Calendars.Read';
 export const MS_SCOPES_READONLY = 'openid profile email offline_access Mail.Read Calendars.Read';
+/** The Microsoft identity endpoint's tenant segment: `common` (any account)
+ *  unless the app registration is single-tenant, which only issues tokens
+ *  through its own tenant id. */
+export const msTenant = (): string => (process.env.MS_TENANT_ID ?? '').trim() || 'common';
+
 // The Teams ward (lib/comms/teams.ts) speaks as the user: chats need the
 // delegated pair, team channels ChannelMessage.Read.All (admin consent in
 // most tenants). Asked for only from /api/connect/microsoft?teams.
@@ -51,7 +56,7 @@ export function microsoftConnectUrl(state: string, readonly: boolean, teams = fa
     scope: readonly ? MS_SCOPES_READONLY : teams ? MS_SCOPES_TEAMS : MS_SCOPES_FULL,
     state,
   });
-  return `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${p}`;
+  return `https://login.microsoftonline.com/${msTenant()}/oauth2/v2.0/authorize?${p}`;
 }
 
 export function notionConnectUrl(state: string): string {
@@ -111,7 +116,7 @@ export interface TokenResponse {
 }
 
 export async function exchangeMicrosoftCode(code: string): Promise<TokenResponse> {
-  const res = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+  const res = await fetch(`https://login.microsoftonline.com/${msTenant()}/oauth2/v2.0/token`, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({

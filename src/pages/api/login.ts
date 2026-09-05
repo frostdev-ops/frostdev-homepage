@@ -5,7 +5,9 @@ import { getUserByEmail, verifyUserPassword } from '../../lib/users.ts';
 export const prerender = false;
 
 // 5 failures / 15 min per IP+email. In-memory: a pm2 restart resets it, which
-// is fine — this blunts scripts, not nation-states.
+// is fine — this blunts scripts, not nation-states. Behind a reverse proxy the
+// address is the proxy's, so the key is effectively the email alone: stricter
+// than trusting X-Forwarded-For without a trusted-proxy list, and enough.
 const failures = new Map<string, { n: number; at: number }>();
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILS = 5;

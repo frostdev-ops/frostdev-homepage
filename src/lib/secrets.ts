@@ -1,8 +1,8 @@
 import { getDb } from './db.ts';
 
-// OAuth client credentials can be set in the admin UI (settings table, same
-// 0600 SQLite file as everything else) — the matching env vars still work, but
-// a value entered in the app wins.
+// OAuth client credentials come from the environment (.env.example lists the
+// pairs). A `secret:<KEY>` settings row still wins when one exists — nothing
+// writes those any more; the admin UI that once did was never built.
 
 export type SecretKey =
   | 'GOOGLE_CLIENT_ID'
@@ -22,30 +22,4 @@ const row = (key: SecretKey): string =>
 
 export function secret(key: SecretKey): string {
   return row(key) || (process.env[key] ?? '').trim();
-}
-
-export function setSecret(key: SecretKey, value: string): void {
-  const v = value.trim();
-  const db = getDb();
-  if (!v) {
-    db.prepare('DELETE FROM settings WHERE key = ?').run(`secret:${key}`);
-    return;
-  }
-  db.prepare(
-    `INSERT INTO settings (key, value) VALUES (?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
-  ).run(`secret:${key}`, v);
-}
-
-/** Where the value in force came from — drives the "set in .env" hint in the UI. */
-export function secretSource(key: SecretKey): 'app' | 'env' | null {
-  if (row(key)) return 'app';
-  return (process.env[key] ?? '').trim() ? 'env' : null;
-}
-
-/** Never render a stored secret back into a page: show enough to recognise it. */
-export function maskSecret(value: string): string {
-  if (!value) return '';
-  if (value.length <= 8) return '••••';
-  return `${value.slice(0, 4)}••••${value.slice(-4)}`;
 }

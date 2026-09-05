@@ -124,7 +124,7 @@ test('one tunnel per user: HELLO on connect, 409 for a second device, streams ec
   const app = await connectApp();
   const ws = app.ws;
   await until(() => !!app.hello);
-  assert.equal(app.hello?.chromium.version, chromiumSpec().version);
+  assert.equal(app.hello?.chromium.version, chromiumSpec()?.version);
   assert.match(app.hello!.chromium.base, /cdn\.playwright\.dev\/builds\/cft\//);
   assert.equal(tunnelOnline(userId), true);
   assert.deepEqual(seen, [true]);

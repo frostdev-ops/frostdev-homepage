@@ -1,6 +1,7 @@
 import { getDb } from './db.ts';
 import { sealToken, openToken } from './crypto.ts';
 import { secret, type SecretKey } from './secrets.ts';
+import { msTenant } from './connect.ts';
 
 export type Provider = 'google' | 'microsoft' | 'notion' | 'zoho' | 'mailbox' | 'icloud';
 
@@ -100,7 +101,7 @@ const TOKEN_ENDPOINTS: Record<
     secret: 'GOOGLE_CLIENT_SECRET',
   },
   microsoft: {
-    url: () => 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+    url: () => `https://login.microsoftonline.com/${msTenant()}/oauth2/v2.0/token`,
     id: 'MS_CLIENT_ID',
     secret: 'MS_CLIENT_SECRET',
   },

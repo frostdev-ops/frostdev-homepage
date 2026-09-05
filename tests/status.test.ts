@@ -59,9 +59,9 @@ test('summarizePm2: cluster instances merge — any online wins, cpu/mem/restart
   assert.equal(m.get('legacy')!.memMb, 0);
 });
 
-test('buildInfo: dev stamp under plain node, live rss, stable boot time', () => {
+test('buildInfo: the package version under plain node, live rss, stable boot time', () => {
   const b = buildInfo();
-  assert.equal(b.stamp, process.env.PUBLIC_APP_BUILD ?? 'dev');
+  assert.match(b.stamp, process.env.PUBLIC_APP_BUILD ? /./ : /^v\d+\.\d+\.\d+$/);
   assert.ok(b.rssMb > 0);
   assert.equal(buildInfo().bootedAt, b.bootedAt);
 });

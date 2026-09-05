@@ -1,0 +1,28 @@
+# docker compose up -d   (after: cp .env.example .env and fill it in; then
+#   docker compose exec app node bin/rimeward.mjs users create you@example.com --admin)
+services:
+  app:
+    build: .
+    env_file: .env
+    environment:
+      # The logic engine's clocks and due dates run in this zone.
+      TZ: ${TZ:-UTC}
+    ports:
+      - '127.0.0.1:3005:3005'
+    volumes:
+      - data:/data
+    # Chromium (the browser wards): its sandbox as a non-root user needs user
+    # namespaces, which Docker's default seccomp profile denies — this one is
+    # Playwright's, with clone/setns/unshare allowed. Host IPC keeps Chromium
+    # from running out of shared memory; init reaps its zombies.
+    security_opt:
+      - seccomp:ops/seccomp-chromium.json
+    ipc: host
+    init: true
+    # The browser wards close gracefully (Chromium batches cookie writes for up
+    # to 30 s after a login); pm2's default 1.6 s would lose them.
+    stop_grace_period: 15s
+    restart: unless-stopped
+
+volumes:
+  data:

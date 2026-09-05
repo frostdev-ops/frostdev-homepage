@@ -31,7 +31,7 @@ interface Snapshot {
   host: {
     disk: { usedPct: number; freeGb: number };
     mem: { usedPct: number };
-    load: number[];
+    load: number[] | null;
     cores: number;
   };
   alerts: string[];
@@ -148,7 +148,7 @@ function statusWord(ok: boolean | null): string {
  *  from snap.host: the value is a percent, `ok` flips at the banner's
  *  thresholds (lib/status.ts alerts: disk ≥90, mem ≥92, load > 2×cores). */
 const HOST_ROWS: Record<string, [label: string, read: (h: Snapshot['host']) => number, warn: number]> = {
-  'host:cpu': ['Load', (h) => ((h.load[0] ?? 0) / h.cores) * 100, 200], // the number status_history stores as host:cpu
+  'host:cpu': ['Load', (h) => ((h.load?.[0] ?? 0) / h.cores) * 100, 200], // the number status_history stores as host:cpu
   'host:mem': ['Memory', (h) => h.mem.usedPct, 92],
   'host:disk': ['Disk', (h) => h.disk.usedPct, 90],
 };
@@ -156,7 +156,7 @@ function hostRow(id: string, snap: Snapshot): ServiceStatus | undefined {
   const r = HOST_ROWS[id];
   if (!r) return;
   const pct = Math.round(r[1](snap.host));
-  const detail = id === 'host:disk' ? `${snap.host.disk.freeGb} GB free` : id === 'host:cpu' ? `load ${snap.host.load[0]} · ${snap.host.cores} cores` : '';
+  const detail = id === 'host:disk' ? `${snap.host.disk.freeGb} GB free` : id === 'host:cpu' ? `load ${snap.host.load?.[0] ?? '—'} · ${snap.host.cores} cores` : '';
   return { id, label: HOST_LABELS[id] ?? r[0], group: 'host', kind: 'host', ok: pct < r[2], latencyMs: pct, unit: '%', detail, since: null };
 }
 

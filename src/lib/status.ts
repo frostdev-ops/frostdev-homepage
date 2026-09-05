@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import net from 'node:net';
 import os from 'node:os';
 import fs from 'node:fs';
-import { getDb } from './db.ts';
+import { DATA_DIR, getDb, repoDir } from './db.ts';
 import { cached, invalidate } from './cache.ts';
 import { TARGETS, type Target } from './targets.ts';
 
@@ -17,11 +17,20 @@ const HISTORY_DAYS = 7;
 export const BOOT_ID = crypto.randomUUID();
 const BOOTED_AT = new Date().toISOString();
 
+/** The stamp when no build passes PUBLIC_APP_BUILD: the package version. */
+const VERSION = (() => {
+  try {
+    return `v${(JSON.parse(fs.readFileSync(repoDir('package.json'), 'utf8')) as { version: string }).version}`;
+  } catch {
+    return 'dev';
+  }
+})();
+
 /** The build actually running, per SSE send (rss is live). import.meta.env is
  *  guarded: tests import this file under plain Node, which has none. */
 export function buildInfo(): { stamp: string; bootedAt: string; node: string; rssMb: number } {
   return {
-    stamp: (import.meta as { env?: Record<string, string> }).env?.PUBLIC_APP_BUILD ?? process.env.PUBLIC_APP_BUILD ?? 'dev',
+    stamp: (import.meta as { env?: Record<string, string> }).env?.PUBLIC_APP_BUILD ?? process.env.PUBLIC_APP_BUILD ?? VERSION,
     bootedAt: BOOTED_AT,
     node: process.version,
     rssMb: Math.round(process.memoryUsage.rss() / 1048576),
@@ -50,7 +59,8 @@ export interface ServiceStatus {
 export interface HostStats {
   disk: { usedPct: number; freeGb: number };
   mem: { usedPct: number };
-  load: number[];
+  /** 1/5/15-minute load averages; null on Windows, which has none. */
+  load: number[] | null;
   cores: number;
 }
 
@@ -133,18 +143,22 @@ export function summarizePm2(procs: Pm2Proc[]): Map<string, Pm2Summary> {
   return map;
 }
 
-async function readPm2(): Promise<Map<string, Pm2Summary> | null> {
+/** null = the tool errored (unreachable); 'missing' = not installed on this host. */
+type Read<T> = T | null | 'missing';
+const missing = (err: unknown): boolean => (err as NodeJS.ErrnoException)?.code === 'ENOENT';
+
+async function readPm2(): Promise<Read<Map<string, Pm2Summary>>> {
   try {
     const { stdout } = await run(process.env.PM2_BIN ?? 'pm2', ['jlist'], { timeout: 15_000, maxBuffer: 8 * 1024 * 1024 });
     return summarizePm2(JSON.parse(stdout.slice(stdout.indexOf('['))) as Pm2Proc[]);
-  } catch {
-    return null;
+  } catch (err) {
+    return missing(err) ? 'missing' : null;
   }
 }
 
-async function readDocker(): Promise<Map<string, string> | null> {
+async function readDocker(): Promise<Read<Map<string, string>>> {
   try {
-    const { stdout } = await run('docker', ['ps', '--format', '{{.Names}}\t{{.Status}}'], { timeout: 15_000 });
+    const { stdout } = await run(process.env.DOCKER_BIN ?? 'docker', ['ps', '--format', '{{.Names}}\t{{.Status}}'], { timeout: 15_000 });
     return new Map(
       stdout
         .split('\n')
@@ -154,31 +168,36 @@ async function readDocker(): Promise<Map<string, string> | null> {
           return [name!, rest.join(' ')] as const;
         })
     );
-  } catch {
-    return null;
+  } catch (err) {
+    return missing(err) ? 'missing' : null;
   }
 }
 
-async function readSystemd(units: string[]): Promise<Map<string, string> | null> {
+async function readSystemd(units: string[]): Promise<Read<Map<string, string>>> {
   if (units.length === 0) return new Map();
   try {
     // is-active exits non-zero when any unit is inactive — the output is still
     // one state per line, index-aligned with the unit list.
-    const result = await run('systemctl', ['is-active', ...units], { timeout: 15_000 }).catch(
-      (err: Error & { stdout?: string; code?: unknown }) => ({ stdout: err.stdout ?? '' })
+    const result = await run(process.env.SYSTEMCTL_BIN ?? 'systemctl', ['is-active', ...units], { timeout: 15_000 }).catch(
+      (err: Error & { stdout?: string; code?: unknown }) => {
+        if (missing(err)) throw err;
+        return { stdout: err.stdout ?? '' };
+      }
     );
     const lines = result.stdout.trim().split('\n');
     if (lines.length !== units.length) return null;
     return new Map(units.map((u, i) => [u, lines[i]!.trim()]));
-  } catch {
-    return null;
+  } catch (err) {
+    return missing(err) ? 'missing' : null;
   }
 }
 
 function readHost(): HostStats {
   let disk = { usedPct: 0, freeGb: 0 };
   try {
-    const s = fs.statfsSync('/');
+    // The data directory's filesystem, not "/": in a container the root is the
+    // wrong disk, and the database is what fills up.
+    const s = fs.statfsSync(DATA_DIR);
     const total = s.blocks * s.bsize;
     const free = s.bavail * s.bsize;
     disk = { usedPct: Math.round(((total - free) / total) * 100), freeGb: Math.round((free / 1e9) * 10) / 10 };
@@ -193,7 +212,7 @@ function readHost(): HostStats {
   return {
     disk,
     mem: { usedPct: Math.round(((os.totalmem() - available) / os.totalmem()) * 100) },
-    load: os.loadavg().map((l) => Math.round(l * 100) / 100),
+    load: process.platform === 'win32' ? null : os.loadavg().map((l) => Math.round(l * 100) / 100),
     cores: os.cpus().length,
   };
 }
@@ -230,26 +249,26 @@ async function tick(): Promise<void> {
     if (t.kind === 'http' || t.kind === 'tcp') {
       r = probeById.get(t.id)!;
     } else if (t.kind === 'pm2') {
-      const p = pm2Map?.get(t.name);
+      const p = pm2Map instanceof Map ? pm2Map.get(t.name) : undefined;
       // detail is unchanged, so status_history rows stay byte-identical; the
       // typed extras ride the snapshot only.
-      r = pm2Map
-        ? p
+      r = !(pm2Map instanceof Map)
+        ? { ok: null, latencyMs: null, detail: pm2Map === 'missing' ? 'pm2 not installed' : 'pm2 unreachable' }
+        : p
           ? { ok: p.status === 'online', latencyMs: null, detail: `${p.status}, ↺${p.restarts}`, cpu: p.cpu, memMb: p.memMb, restarts: p.restarts, ...(p.limitMb !== undefined ? { limitMb: p.limitMb } : {}) }
-          : { ok: false, latencyMs: null, detail: 'not in pm2 list' }
-        : { ok: null, latencyMs: null, detail: 'pm2 unreachable' };
+          : { ok: false, latencyMs: null, detail: 'not in pm2 list' };
     } else if (t.kind === 'docker') {
-      const s = dockerMap?.get(t.container);
-      r = dockerMap
-        ? s
+      const s = dockerMap instanceof Map ? dockerMap.get(t.container) : undefined;
+      r = !(dockerMap instanceof Map)
+        ? { ok: null, latencyMs: null, detail: dockerMap === 'missing' ? 'docker not installed' : 'docker unreachable' }
+        : s
           ? { ok: s.startsWith('Up'), latencyMs: null, detail: s }
-          : { ok: false, latencyMs: null, detail: 'not running' }
-        : { ok: null, latencyMs: null, detail: 'docker unreachable' };
+          : { ok: false, latencyMs: null, detail: 'not running' };
     } else {
-      const s = systemdMap?.get(t.unit);
-      r = systemdMap
-        ? { ok: s === 'active', latencyMs: null, detail: s ?? 'unknown' }
-        : { ok: null, latencyMs: null, detail: 'systemctl unreachable' };
+      const s = systemdMap instanceof Map ? systemdMap.get(t.unit) : undefined;
+      r = !(systemdMap instanceof Map)
+        ? { ok: null, latencyMs: null, detail: systemdMap === 'missing' ? 'systemctl not installed' : 'systemctl unreachable' }
+        : { ok: s === 'active', latencyMs: null, detail: s ?? 'unknown' };
     }
 
     const prev = sinceMap.get(t.id);
@@ -263,7 +282,7 @@ async function tick(): Promise<void> {
   // see shownServiceIds + renderAlerts (scripts/app/status.ts).
   const alerts: string[] = [];
   if (host.disk.usedPct >= 90) alerts.push(`disk ${host.disk.usedPct}% used (${host.disk.freeGb} GB free)`);
-  if (host.load[0]! > host.cores * 2) alerts.push(`load ${host.load[0]} on ${host.cores} cores`);
+  if (host.load && host.load[0]! > host.cores * 2) alerts.push(`load ${host.load[0]} on ${host.cores} cores`);
 
   snapshot = { at: now, host, alerts, services, baselineAt };
 
@@ -276,7 +295,7 @@ async function tick(): Promise<void> {
     const ins = db.prepare('INSERT INTO status_history (service, ok, latency_ms, detail) VALUES (?, ?, ?, ?)');
     db.transaction(() => {
       for (const s of services) ins.run(s.id, s.ok === null ? null : s.ok ? 1 : 0, s.latencyMs, s.detail);
-      ins.run('host:cpu', 1, Math.round(((host.load[0] ?? 0) / host.cores) * 100), '');
+      ins.run('host:cpu', 1, Math.round(((host.load?.[0] ?? 0) / host.cores) * 100), '');
       ins.run('host:mem', 1, host.mem.usedPct, '');
       ins.run('host:disk', 1, host.disk.usedPct, '');
       db.prepare(`DELETE FROM status_history WHERE checked_at < datetime('now', '-${HISTORY_DAYS} days')`).run();
@@ -308,7 +327,7 @@ export function getSnapshot(): Snapshot | null {
 /** cpu = 1-min load ÷ cores as a percent — the same number status_history
  *  stores as host:cpu. Shared by the logic engine's host condition + watcher. */
 export function hostPct(host: HostStats, metric: string): number {
-  return metric === 'cpu' ? ((host.load[0] ?? 0) / host.cores) * 100 : metric === 'mem' ? host.mem.usedPct : host.disk.usedPct;
+  return metric === 'cpu' ? ((host.load?.[0] ?? 0) / host.cores) * 100 : metric === 'mem' ? host.mem.usedPct : host.disk.usedPct;
 }
 
 export function subscribe(fn: Subscriber): () => void {

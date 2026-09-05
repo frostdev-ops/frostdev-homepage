@@ -228,7 +228,7 @@ export const TRIGGERS: Record<string, TriggerSpec> = {
   'service-restarted': { label: 'Process restarted', icon: '🔁', wardType: 'service-group', params: {} },
   // Fires once per user on the first tick after a server (re)start; the
   // watcher's state is a settings row, since memory is empty on every boot.
-  'deploy-landed': { label: 'Deploy landed', icon: '🚀', wardType: 'service-group', params: {} },
+  'deploy-landed': { label: 'Server restarted', icon: '🚀', wardType: 'service-group', params: {} },
   'service-down-for': {
     label: 'Service down for N minutes',
     icon: '🚨',

@@ -1,0 +1,137 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import { Font, getImage } from 'astro:assets';
+import { mark } from '../lib/brand.ts';
+import { fontVar, normalizeTheme, parseTheme, type FontId } from '../lib/theme.ts';
+
+interface Props {
+  title: string;
+  /** The Notion search box is wired by the dashboard's wards.ts — pages that
+   *  do not load it (the account editor) ask for the header without it. */
+  search?: boolean;
+  /** Faces this page paints beyond the theme's own two — the dashboard passes
+   *  its wards' overrides. Anything else is fetched on demand (fonts.ts). */
+  fonts?: (FontId | undefined)[];
+}
+
+const { search = true } = Astro.props;
+const me = Astro.locals.user!;
+
+// The brand block is per-user: everything about it but the words and the
+// picture is a CSS var (lib/theme.ts brand* knobs, derived in frost.css).
+// The built-in mark still goes through the image pipeline; its URL rides the
+// <img> so the account editor's live preview can switch back to it.
+const brand = parseTheme(me.theme) ?? normalizeTheme({});
+const defaultLogo = (await getImage({ src: mark, width: 56 })).src;
+// ONLY the faces this page paints: the catalogue is 43 families and declaring
+// all of them costs ~42KB of head CSS on every load for nothing. The two the
+// theme names are preloaded (they paint immediately); a ward's override is
+// declared but not preloaded, and everything else arrives from /fonts when a
+// picker opens or a font is chosen (scripts/app/fonts.ts).
+const themeFaces = [fontVar(brand.uiFont), fontVar(brand.brandFont)];
+const extra = (Astro.props.fonts ?? []).map((id) => (id ? fontVar(id) : null));
+const faces = [...new Set([...themeFaces, ...extra])].filter((v): v is string => v !== null);
+// What fonts.ts must NOT re-fetch: the ids this page already declared.
+const declared = [...new Set([brand.uiFont, brand.brandFont, ...(Astro.props.fonts ?? [])])].filter(Boolean).join(',');
+---
+
+<BaseLayout title={Astro.props.title}>
+  <Fragment slot="head">
+    {/* cast: cssVariable is typed as the union of the names registered in
+        astro.config.mjs, and this list is derived rather than literal. */}
+    {faces.map((v) => <Font cssVariable={v as any} preload={themeFaces.includes(v)} />)}
+    <meta name="fd-faces" content={declared} />
+  </Fragment>
+
+  <header class="app-header">
+    <div class="mx-auto flex max-w-7xl items-center gap-3 px-4">
+      <a href="/dash" class="app-brand">
+        <img
+          id="brand-logo"
+          src={brand.brandLogo ? `/api/bg/${brand.brandLogo}` : defaultLogo}
+          data-default={defaultLogo}
+          alt=""
+          width="56"
+          height="56"
+          class="app-brand-logo"
+        />
+        <span id="brand-text" class="app-brand-text hidden sm:inline">{brand.brandText}</span>
+      </a>
+
+      {search ? (
+        <div class="app-hdr-mid relative mx-auto w-full max-w-md">
+          <input
+            id="notion-search"
+            type="search"
+            placeholder="Search Notion…"
+            autocomplete="off"
+            class="input min-h-9 bg-surface text-sm"
+          />
+          <div id="notion-search-results" class="card absolute inset-x-0 top-full z-30 mt-1 hidden max-h-80 overflow-y-auto p-1 shadow-xl"></div>
+        </div>
+      ) : (
+        <div class="app-hdr-mid mx-auto"></div>
+      )}
+
+      <span id="clock" class="hidden text-sm text-ink-muted tabular-nums md:inline"></span>
+
+      <button id="theme-toggle" type="button" class="btn min-h-9 px-2 py-1" aria-label="Toggle theme" title="Toggle theme">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path class="theme-icon-dark" d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+          <g class="theme-icon-light">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4" />
+          </g>
+        </svg>
+      </button>
+
+      <details class="relative">
+        <summary class="btn min-h-9 cursor-pointer list-none px-2 py-1 text-xs">{me.email.split('@')[0]}</summary>
+        <div class="card absolute right-0 z-30 mt-1 flex w-44 flex-col gap-1 p-2 shadow-lg">
+          <a href="/account" class="btn w-full text-xs">Account</a>
+          {me.role === 'admin' && <a href="/admin/users" class="btn w-full text-xs">Users</a>}
+          <form method="post" action="/api/logout">
+            <button type="submit" class="btn w-full text-xs">Sign out</button>
+          </form>
+        </div>
+      </details>
+    </div>
+  </header>
+
+  <slot />
+
+  <style>
+    /* Moon while light (click → dark), sun while dark. */
+    html.dark .theme-icon-dark,
+    html:not(.dark) .theme-icon-light {
+      display: none;
+    }
+  </style>
+
+  <script>
+    import { bootNotionSearch } from '../scripts/app/notion-search.ts';
+    bootNotionSearch();
+
+    // Theme toggle: html.dark + localStorage['fd-theme'] (dark is the default),
+    // persisted server-side so other devices agree.
+    document.getElementById('theme-toggle')?.addEventListener('click', () => {
+      const dark = document.documentElement.classList.toggle('dark');
+      const mode = dark ? 'dark' : 'light';
+      document.documentElement.dataset.mode &&= mode;
+      try {
+        localStorage.setItem('fd-theme', mode);
+      } catch {}
+      const form = new FormData();
+      form.set('mode', mode);
+      void fetch('/api/account/theme', { method: 'POST', body: form }).catch(() => {});
+    });
+
+    const clock = document.getElementById('clock');
+    const tickClock = () => {
+      if (clock)
+        clock.textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    };
+    tickClock();
+    setInterval(tickClock, 30_000);
+  </script>
+</BaseLayout>

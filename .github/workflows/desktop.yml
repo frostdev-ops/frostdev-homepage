@@ -1,0 +1,77 @@
+# Rimeward (desktop/): signed + notarized macOS DMG, Windows and Linux
+# bundles, attached to a GitHub Release. Tag `desktop-vX.Y.Z` to run it.
+#
+# Secrets (repo settings → Secrets → Actions):
+#   APPLE_CERTIFICATE            base64 of the Developer ID Application .p12
+#   APPLE_CERTIFICATE_PASSWORD   its password
+#   APPLE_SIGNING_IDENTITY       "Developer ID Application: Name (TEAMID)"
+#   APPLE_API_ISSUER             App Store Connect API issuer id
+#   APPLE_API_KEY                App Store Connect API key id
+#   APPLE_API_KEY_B64            base64 of the AuthKey_<id>.p8 file
+name: Rimeward desktop
+
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target universal-apple-darwin
+          - platform: ubuntu-22.04
+            args: ''
+          - platform: windows-latest
+            args: ''
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+
+      # Rust-only project (no package.json): the CLI comes from cargo, prebuilt.
+      - uses: cargo-bins/cargo-binstall@main
+      - run: cargo binstall -y --locked tauri-cli@^2
+
+      - name: Linux build deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: App Store Connect key
+        if: matrix.platform == 'macos-latest'
+        run: echo "$APPLE_API_KEY_B64" | base64 -d > "$RUNNER_TEMP/AuthKey.p8"
+        env:
+          APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY_B64 }}
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+        with:
+          projectPath: desktop
+          tauriScript: cargo tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: Rimeward ${{ github.ref_name }}
+          releaseBody: Download the build for your platform below.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}

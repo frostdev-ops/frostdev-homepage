@@ -1,0 +1,67 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import Database from 'better-sqlite3';
+import { migrateLegacyWards, migrateWardKeys } from './migrate-wards.ts';
+
+export const DATA_DIR = process.env.HOMEPAGE_DATA_DIR ?? path.join(process.cwd(), 'data');
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
+let db: Database.Database | null = null;
+
+export function getDb(): Database.Database {
+  if (db) return db;
+  const handle = new Database(path.join(DATA_DIR, 'homepage.db'));
+  handle.pragma('journal_mode = WAL');
+  handle.pragma('busy_timeout = 5000');
+  handle.pragma('foreign_keys = ON');
+  migrate(handle);
+  db = handle;
+  return db;
+}
+
+function migrate(handle: Database.Database): void {
+  handle.exec(
+    `CREATE TABLE IF NOT EXISTS applied_migrations (
+       name TEXT PRIMARY KEY,
+       applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+     )`
+  );
+  const dir = path.join(process.cwd(), 'migrations');
+  if (!fs.existsSync(dir)) return;
+
+  const applied = new Set(
+    (handle.prepare('SELECT name FROM applied_migrations').all() as { name: string }[]).map((r) => r.name)
+  );
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+  const record = handle.prepare('INSERT INTO applied_migrations (name) VALUES (?)');
+
+  for (const file of files) {
+    if (applied.has(file)) continue;
+    const sql = fs.readFileSync(path.join(dir, file), 'utf8');
+    handle.transaction(() => {
+      handle.exec(sql);
+      record.run(file);
+    })();
+  }
+
+  // A data migration, not SQL: stored layouts and graphs move off the legacy
+  // ward ids once (after 010_timer_step.sql; the row name keeps the sequence).
+  const LEGACY_WARDS = '011_legacy_tiles';
+  if (!applied.has(LEGACY_WARDS)) {
+    handle.transaction(() => {
+      migrateLegacyWards(handle);
+      record.run(LEGACY_WARDS);
+    })();
+  }
+
+  // Tiles became wards (012_wards.sql renamed the columns): the JSON keys
+  // inside saved graphs and packet histories follow, once.
+  const WARD_KEYS = '013_ward_keys';
+  if (!applied.has(WARD_KEYS)) {
+    handle.transaction(() => {
+      migrateWardKeys(handle);
+      record.run(WARD_KEYS);
+    })();
+  }
+}

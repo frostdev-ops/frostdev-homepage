@@ -1,0 +1,626 @@
+import './_setup.ts';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { getDb } from '../src/lib/db.ts';
+import { NOTES_CAP, NOTES_FILE, ensureNotes, workDir } from '../src/lib/agent/history.ts';
+import { getDashboard, saveDashboard } from '../src/lib/dashboard.ts';
+import { validateLayout } from '../src/lib/wards.ts';
+import { getSetting, setSetting } from '../src/lib/settings.ts';
+import { subscribeLogic } from '../src/lib/logic-engine.ts';
+import {
+  activeConversation,
+  addMessage,
+  appendItems,
+  getConversation,
+  transcript,
+} from '../src/lib/agent/conversations.ts';
+import {
+  specSheet,
+  agentWardConfig,
+  buildInstructions,
+  claimConfirm,
+  parkConfirm,
+  resolveConfirmTurn,
+  runCommand,
+  runLoop,
+  summarize,
+  type AgentEvent,
+  type LoopCfg,
+} from '../src/lib/agent/core.ts';
+import { TOOLS } from '../src/lib/agent/tools.ts';
+import { completeCommand, parseCommand } from '../src/lib/agent/commands.ts';
+import { agentRounds, parseRounds, ROUND_DEFAULT } from '../src/lib/agent/provider.ts';
+import type { AgentProvider, ProviderResult } from '../src/lib/agent/provider.ts';
+import { repairResponsesItems } from '../src/lib/agent/codex.ts';
+
+function seedUser(email: string, approvals: 'outbound' | 'all' | 'off' = 'outbound'): number {
+  getDb().prepare(`INSERT INTO users (email, password_hash, role) VALUES (?, 'x', 'admin')`).run(email);
+  const id = (getDb().prepare('SELECT id FROM users WHERE email = ?').get(email) as { id: number }).id;
+  saveDashboard(
+    id,
+    validateLayout([
+      { i: 'ag1', type: 'agent', size: '2x2', config: { provider: 'codex', approvals } },
+      { i: 'w1', type: 'weather', size: '2x1' },
+    ])!
+  );
+  return id;
+}
+
+/** A scripted provider: each run() shifts the next canned result. */
+function fakeProvider(script: ProviderResult[]): AgentProvider {
+  return {
+    id: 'codex',
+    run: async () => {
+      const next = script.shift();
+      if (!next) throw new Error('script exhausted');
+      return next;
+    },
+    userItem: (text) => ({ type: 'message', role: 'user', content: [{ type: 'input_text', text }] }),
+    toolOutputItem: (callId, json) => ({ type: 'function_call_output', call_id: callId, output: json }),
+    repairItems: repairResponsesItems,
+  };
+}
+
+const call = (call_id: string, name: string, args: Record<string, unknown>) => ({
+  call_id,
+  name,
+  arguments: JSON.stringify(args),
+});
+
+function cfgFor(userId: number, provider: AgentProvider): LoopCfg {
+  return {
+    provider,
+    wardCfg: agentWardConfig(userId, 'ag1')!,
+    conv: activeConversation(userId, 'ag1', 'codex'),
+    headless: false,
+  };
+}
+
+test('agentWardConfig rebuilds from the stored layout only', () => {
+  const u = seedUser('core-cfg@x.dev');
+  const cfg = agentWardConfig(u, 'ag1')!;
+  assert.equal(cfg.provider, 'codex');
+  assert.equal(cfg.approvals, 'outbound');
+  assert.equal(cfg.tools, 'all');
+  assert.equal(agentWardConfig(u, 'w1'), null); // not an agent ward
+  assert.equal(agentWardConfig(u, 'nope'), null);
+});
+
+test('runLoop: missing reason is rejected and the model is told to retry', async () => {
+  const u = seedUser('core-reason@x.dev');
+  const provider = fakeProvider([
+    { text: '', calls: [call('c1', 'get_layout', {})], items: [{ type: 'function_call', call_id: 'c1', name: 'get_layout', arguments: '{}' }] },
+    { text: 'done', calls: [], items: [] },
+  ]);
+  const items: unknown[] = [];
+  const turn = await runLoop(cfgFor(u, provider), items);
+  assert.equal(turn.reply, 'done');
+  const output = items.find((it: any) => it.type === 'function_call_output' && it.call_id === 'c1') as any;
+  assert.match(String(output.output), /requires a `reason`/);
+});
+
+test('runLoop: unknown tool and throwing tool are model-visible, never fatal', async () => {
+  const u = seedUser('core-err@x.dev');
+  const provider = fakeProvider([
+    {
+      text: '',
+      calls: [call('c1', 'no_such_tool', { reason: 'r' }), call('c2', 'list_packets', { reason: 'r', ward: 'nope' })],
+      items: [],
+    },
+    { text: 'ok', calls: [], items: [] },
+  ]);
+  const items: unknown[] = [];
+  const turn = await runLoop(cfgFor(u, provider), items);
+  assert.equal(turn.reply, 'ok');
+  const o1 = items.find((it: any) => it.call_id === 'c1') as any;
+  assert.match(String(o1.output), /no such tool/);
+  const o2 = items.find((it: any) => it.call_id === 'c2') as any;
+  assert.match(String(o2.output), /no flow ward/);
+});
+
+test('runLoop: a confirm-gated call parks after its batch ran; a second gated call is answered', async () => {
+  const u = seedUser('core-confirm@x.dev');
+  const provider = fakeProvider([
+    {
+      text: 'removing',
+      calls: [
+        call('c1', 'remove_ward', { reason: 'r', ward: 'w1' }),
+        call('c2', 'get_layout', { reason: 'r' }),
+        call('c3', 'remove_ward', { reason: 'r', ward: 'ag1' }),
+      ],
+      items: [],
+    },
+  ]);
+  const items: unknown[] = [];
+  const events: AgentEvent[] = [];
+  const turn = await runLoop(cfgFor(u, provider), items, (e) => events.push(e));
+  assert.ok(turn.pending, 'turn parked');
+  assert.match(turn.pending!.summary, /Remove the “Weather” ward/);
+  // The read beside it still ran — the batch settles before the pause.
+  const read = items.find((it: any) => it.call_id === 'c2') as any;
+  assert.ok(JSON.parse(String(read.output)).layout, 'the independent read ran');
+  // The other gated call got a synthetic answer; only c1 stays open.
+  const behind = items.find((it: any) => it.call_id === 'c3') as any;
+  assert.match(String(behind.output), /waiting on the user to confirm remove_ward/);
+  assert.ok(!items.some((it: any) => it.call_id === 'c1'), 'the parked call is unanswered on purpose');
+  assert.equal(getDashboard(u).length, 2, 'nothing removed yet');
+  // And the row round-trips through the KV claim.
+  const conv = getConversation(activeConversation(u, 'ag1', 'codex').id)!;
+  const parked = claimConfirm(u, conv, turn.pending!.confirmId);
+  assert.equal(parked.name, 'remove_ward');
+});
+
+test("runLoop runs a round's calls concurrently, streams every start first, and answers in call order", async () => {
+  const u = seedUser('core-par@x.dev');
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const params = { type: 'object', properties: {}, required: [] };
+  // slow_probe cannot finish until fast_probe has RUN: one-after-another
+  // execution deadlocks here, and the race below turns that into a failure.
+  TOOLS.slow_probe = { kind: 'read', description: 't', parameters: params, run: async () => (await gate, { slow: true }) };
+  TOOLS.fast_probe = { kind: 'read', description: 't', parameters: params, run: () => (release(), { fast: true }) };
+  try {
+    const provider = fakeProvider([
+      { text: '', calls: [call('c1', 'slow_probe', { reason: 'slow' }), call('c2', 'fast_probe', { reason: 'fast' })], items: [] },
+      { text: 'fin', calls: [], items: [] },
+    ]);
+    const items: unknown[] = [];
+    const events: AgentEvent[] = [];
+    const turn = await Promise.race([
+      runLoop(cfgFor(u, provider), items, (e) => events.push(e)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('the calls ran one after another')), 3000).unref()),
+    ]);
+    assert.equal(turn.reply, 'fin');
+    // Both starts stream before either finish, and the finishes stream as they land.
+    const flow = events.filter((e) => e.type === 'step_start' || e.type === 'step');
+    assert.deepEqual(flow.map((e) => e.type), ['step_start', 'step_start', 'step', 'step']);
+    assert.equal((flow[2] as { step: { tool: string } }).step.tool, 'fast_probe');
+    // The record and the replay are in CALL order, tagged with the round.
+    assert.deepEqual(turn.steps.map((s) => [s.id, s.round, s.tool]), [['c1', 0, 'slow_probe'], ['c2', 0, 'fast_probe']]);
+    const outs = items.filter((it: any) => it.type === 'function_call_output').map((it: any) => it.call_id);
+    assert.deepEqual(outs, ['c1', 'c2']);
+  } finally {
+    delete TOOLS.slow_probe;
+    delete TOOLS.fast_probe;
+  }
+});
+
+test('approvals policy: off runs confirm tools inline; all pauses writes', async () => {
+  const uOff = seedUser('core-off@x.dev', 'off');
+  const off = await runLoop(
+    cfgFor(uOff, fakeProvider([
+      { text: '', calls: [call('c1', 'remove_ward', { reason: 'r', ward: 'w1' })], items: [] },
+      { text: 'gone', calls: [], items: [] },
+    ])),
+    []
+  );
+  assert.equal(off.pending, undefined);
+  assert.equal(getDashboard(uOff).length, 1, 'ward actually removed with approvals off');
+
+  const uAll = seedUser('core-all@x.dev', 'all');
+  const all = await runLoop(
+    cfgFor(uAll, fakeProvider([
+      { text: '', calls: [call('c1', 'resize_ward', { reason: 'r', ward: 'w1', size: '2x2' })], items: [] },
+    ])),
+    []
+  );
+  assert.ok(all.pending, 'plain write paused under approvals=all');
+});
+
+test('headless runs auto-decline what the policy would park', async () => {
+  const u = seedUser('core-headless@x.dev');
+  const cfg = { ...cfgFor(u, fakeProvider([
+    { text: '', calls: [call('c1', 'remove_ward', { reason: 'r', ward: 'w1' })], items: [] },
+    { text: 'skipped it', calls: [], items: [] },
+  ])), headless: true };
+  const items: unknown[] = [];
+  const turn = await runLoop(cfg, items);
+  assert.equal(turn.pending, undefined);
+  assert.equal(getDashboard(u).length, 2, 'nothing removed');
+  const declined = items.find((it: any) => it.call_id === 'c1') as any;
+  assert.match(String(declined.output), /declined/);
+  assert.equal(turn.reply, 'skipped it');
+});
+
+test('oversized tool output degrades to a well-formed error, never torn JSON', async () => {
+  const u = seedUser('core-big@x.dev');
+  // The exec registry is the seam (same pattern as tests/logic-engine.test.ts).
+  TOOLS.huge_probe = {
+    kind: 'read',
+    description: 'test probe',
+    parameters: { type: 'object', properties: {}, required: [] },
+    run: () => ({ blob: 'x'.repeat(30_000) }),
+  };
+  try {
+    const provider = fakeProvider([
+      { text: '', calls: [call('c1', 'huge_probe', { reason: 'r' })], items: [] },
+      { text: 'fin', calls: [], items: [] },
+    ]);
+    const items: unknown[] = [];
+    await runLoop(cfgFor(u, provider), items);
+    const out = items.find((it: any) => it.call_id === 'c1') as any;
+    // Not a slice: the model must get well-formed JSON that says what happened.
+    const parsed = JSON.parse(String(out.output));
+    assert.match(parsed.error, /result too large/);
+    assert.ok(String(out.output).length < 12_000);
+  } finally {
+    delete TOOLS.huge_probe;
+  }
+});
+
+test('the agent ward\'s conversation rides on the tool ctx, not a module global', async () => {
+  const u = seedUser('core-ctx@x.dev');
+  let sawCtx: any = null;
+  TOOLS.ctx_probe = {
+    kind: 'read',
+    description: 'test probe',
+    parameters: { type: 'object', properties: {}, required: [] },
+    run: (_a, ctx) => {
+      sawCtx = ctx;
+      return { ok: true };
+    },
+  };
+  try {
+    const conv = activeConversation(u, 'ag1', 'codex');
+    const provider = fakeProvider([
+      { text: '', calls: [call('c1', 'ctx_probe', { reason: 'r' })], items: [] },
+      { text: 'fin', calls: [], items: [] },
+    ]);
+    await runLoop(cfgFor(u, provider), []);
+    assert.equal(sawCtx.userId, u);
+    assert.equal(sawCtx.ward, 'ag1');
+    assert.equal(sawCtx.conv, conv.id, 'conversation id came from the ctx');
+  } finally {
+    delete TOOLS.ctx_probe;
+  }
+});
+
+test('a confirm whose call fell out of the replay is refused, not run', async () => {
+  const u = seedUser('core-orphan@x.dev');
+  const conv = activeConversation(u, 'ag1', 'codex');
+  const pending = parkConfirm(conv, { call_id: 'gone', name: 'remove_ward', args: { ward: 'w1' } });
+  // The conversation never held that function_call (compaction/truncation).
+  const turn = await resolveConfirmTurn(u, 'ag1', pending.confirmId, true, () => {});
+  assert.match(turn.reply, /aged out/);
+  assert.equal(getDashboard(u).length, 2, 'the side effect did NOT run');
+});
+
+test('confirm KV: consume-once, echo mismatch, cross-user probe burns the row', () => {
+  const u1 = seedUser('core-kv1@x.dev');
+  const u2 = seedUser('core-kv2@x.dev');
+  const conv = activeConversation(u1, 'ag1', 'codex');
+  const pending = parkConfirm(conv, { call_id: 'k1', name: 'send_mail', args: { to: ['a@b.c'], subject: 's', body: 'hey' } });
+  assert.match(pending.summary, /Email a@b.c/);
+
+  const fresh = getConversation(conv.id)!;
+  // Wrong echo id rejected without consuming.
+  assert.throws(() => claimConfirm(u1, fresh, 'A'.repeat(24)), /no longer current/);
+  // Cross-user probe: consumed FIRST, then rejected — the row burns.
+  assert.throws(() => claimConfirm(u2, fresh, pending.confirmId), /not your confirmation/);
+  assert.equal(getSetting(`agent_confirm:${pending.confirmId}`), null, 'row burned');
+  // The rightful owner now finds it gone.
+  const again = getConversation(conv.id)!;
+  assert.throws(() => claimConfirm(u1, { ...again, pending_confirm_id: pending.confirmId }, pending.confirmId), /expired or already decided/);
+});
+
+test('summarize is DB-derived for confirm tools and generic otherwise', () => {
+  const u = seedUser('core-sum@x.dev');
+  assert.match(summarize('remove_ward', { ward: 'w1' }, u), /Weather/);
+  assert.match(summarize('mystery_tool', { reason: 'do the thing' }, u), /do the thing — go ahead\?/);
+});
+
+test('runLoop banks work every round, not only at the end of the turn', async () => {
+  const u = seedUser('core-flush@x.dev');
+  let flushes = 0;
+  const provider = fakeProvider([
+    { text: '', calls: [call('c1', 'get_layout', { reason: 'r' })], items: [] },
+    { text: '', calls: [call('c2', 'get_layout', { reason: 'r' })], items: [] },
+    { text: 'done', calls: [], items: [] },
+  ]);
+  // Without the per-round flush a pm2 reload mid-turn loses the outputs of
+  // tools that already ran, and the next load tells the model "nothing was done".
+  await runLoop(cfgFor(u, provider), [], undefined, () => void flushes++);
+  assert.equal(flushes, 2, 'one bank per round that executed tools');
+});
+
+// The other half of the prod failure: the agent was told `notify.flash [global]
+// (text*)` and had no way to know 60 was the ceiling. Every capped param must
+// state its cap, or the only way to find one is to trip over it.
+test('specSheet states every param length cap', () => {
+  const sheet = specSheet();
+  assert.match(sheet, /notify\.flash \[global\] \(text\*≤60\)/);
+  assert.match(sheet, /speak\.say \[global\] \(text\*≤200\)/);
+  // Options and caps coexist on one param list.
+  assert.match(sheet, /account\*∈\{google\|microsoft\|zoho\|mailbox\}/);
+  // Nothing capped may be printed bare.
+  for (const line of sheet.split('\n')) {
+    assert.ok(!/\(text\*?\)/.test(line), `uncapped text param in: ${line}`);
+  }
+});
+
+// ------------------------------------------------------------------- rounds
+
+test('agentRounds: unset is the default, 0 is unlimited, garbage never uncaps', () => {
+  assert.equal(agentRounds(7777), ROUND_DEFAULT);
+  for (const [stored, want] of [['1', 1], ['0', 0], ['500', 500], ['12.9', 12]] as const) {
+    setSetting('agent_rounds:7777', stored);
+    assert.equal(agentRounds(7777), want, stored);
+  }
+  // A bad value must fall back to the default, never to 0. '' is the one that
+  // matters: Number('') is 0, so a cleared field would otherwise uncap the agent.
+  for (const bad of ['', '   ', 'lots', '-1', 'NaN', 'Infinity']) {
+    setSetting('agent_rounds:7777', bad);
+    assert.equal(agentRounds(7777), ROUND_DEFAULT, JSON.stringify(bad));
+    assert.equal(parseRounds(bad), null, JSON.stringify(bad));
+  }
+  assert.equal(parseRounds(null), null);
+  assert.equal(parseRounds(0), 0);
+});
+
+// ------------------------------------------------------------------- notes
+
+test('ensureNotes seeds a template once, then never overwrites the agent', () => {
+  const file = path.join(workDir(4242), NOTES_FILE);
+  fs.rmSync(file, { force: true });
+  // First read writes the template and returns it.
+  const seeded = ensureNotes(4242);
+  assert.match(seeded, /^# Rime's notes/);
+  assert.ok(fs.existsSync(file));
+  // The agent's own rewrite survives — a seed on every turn would erase it.
+  fs.writeFileSync(file, '\n  user prefers terse answers  \n');
+  assert.equal(ensureNotes(4242), 'user prefers terse answers');
+  // Emptied on purpose stays empty; it is not a missing file.
+  fs.writeFileSync(file, '');
+  assert.equal(ensureNotes(4242), '');
+  // A runaway notes file must not eat the context window.
+  fs.writeFileSync(file, 'x'.repeat(20_000));
+  assert.equal(ensureNotes(4242).length, NOTES_CAP);
+  // Per user: 4243 gets its own /work and its own fresh template.
+  assert.match(ensureNotes(4243), /^# Rime's notes/);
+  fs.rmSync(file, { force: true });
+  fs.rmSync(path.join(workDir(4243), NOTES_FILE), { force: true });
+});
+
+test('every ward prompt carries /work/AGENTS.md verbatim, whatever the ward config', () => {
+  const file = path.join(workDir(4244), NOTES_FILE);
+  fs.writeFileSync(file, '# notes\nuser likes tabs, never spaces\n');
+  const base = { provider: 'codex' as const, model: 'm', tools: 'all' as const, effort: 'medium' as const, headlessCap: 6 };
+  for (const cfg of [
+    { ...base, persona: '', approvals: 'outbound' as const },
+    { ...base, persona: 'be a pirate', approvals: 'off' as const, tools: 'read-only' as const },
+  ]) {
+    const prompt = buildInstructions(cfg, 4244, 'agent-x');
+    assert.match(prompt, /Your notes, verbatim:\n# notes\nuser likes tabs, never spaces/);
+    assert.ok(prompt.includes(`/work/${NOTES_FILE}`));
+  }
+  fs.rmSync(file, { force: true });
+});
+
+test('the instructions are a stable, cacheable prefix: no clock, static bulk first, notes last', () => {
+  const u = seedUser('core-cache@x.dev');
+  const cfg = agentWardConfig(u, 'ag1')!;
+  const a = buildInstructions(cfg, u, 'ag1');
+  const b = buildInstructions(cfg, u, 'ag1');
+  // Byte-identical across calls — a timestamp in here would miss the cache every turn.
+  assert.equal(a, b);
+  assert.doesNotMatch(a, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+  // The parts that change (ward list, notes) sit after the spec sheet.
+  const spec = a.indexOf('Logic system spec');
+  assert.ok(spec > 0);
+  assert.ok(a.indexOf('Current wards:') > spec);
+  assert.ok(a.indexOf('Your notes, verbatim:') > a.indexOf('Current wards:'));
+});
+
+// ------------------------------------------------------------ slash commands
+
+test('parseCommand matches known commands and aliases, never paths or prose', () => {
+  assert.deepEqual(parseCommand('/clear'), { name: 'clear', args: '' });
+  assert.deepEqual(parseCommand('  /CLEAR  '), { name: 'clear', args: '' });
+  assert.deepEqual(parseCommand('/new'), { name: 'clear', args: '' });
+  assert.deepEqual(parseCommand('/summarize'), { name: 'compact', args: '' });
+  assert.deepEqual(parseCommand('/?'), { name: 'help', args: '' });
+  // Everything after the command is the focus hint, kept verbatim.
+  assert.deepEqual(parseCommand('/compact keep the notion work'), { name: 'compact', args: 'keep the notion work' });
+  // Everything else is ordinary text for the model. A path or a typo that
+  // errored here would be a worse failure than just answering it.
+  for (const text of ['/usr/bin/x', '/opt is full', '/compct', 'clear', '', '/', 'tell me about /clear']) {
+    assert.equal(parseCommand(text), null, `should be text: ${JSON.stringify(text)}`);
+  }
+});
+
+test('/clear retires the thread and tells every other client', async () => {
+  const u = seedUser('cmd-clear@x.dev');
+  const conv = activeConversation(u, 'ag1', 'codex');
+  addMessage(conv, { role: 'user', text: 'hello' });
+  assert.equal(transcript(conv.id).length, 1);
+
+  const seen: { event: string; data: any }[] = [];
+  const off = subscribeLogic(u, (event, data) => seen.push({ event, data }));
+  const res = await runCommand(u, 'ag1', 'clear');
+  off();
+
+  assert.equal(res.command, 'clear');
+  assert.equal(getConversation(conv.id)!.active, 0, 'the old thread is archived, not deleted');
+  assert.equal(transcript(conv.id).length, 1, 'its messages survive on disk');
+  // A fresh thread starts empty — and the other clients are told to repaint.
+  assert.notEqual(activeConversation(u, 'ag1', 'codex').id, conv.id);
+  assert.ok(seen.some((s) => s.event === 'agent' && s.data.ward === 'ag1'));
+});
+
+test('/size and /compact report the thread, and /compact refuses mid-turn', async () => {
+  const u = seedUser('cmd-size@x.dev');
+  const conv = activeConversation(u, 'ag1', 'codex');
+  const size = await runCommand(u, 'ag1', 'size');
+  assert.match(size.text, /0 items/);
+
+  appendItems(conv.id, [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'x' }] }]);
+  // Under the 4-item floor there is no older half worth folding, and the
+  // command says so rather than reporting a fold that did nothing.
+  const short = await runCommand(u, 'ag1', 'compact');
+  assert.match(short.text, /Nothing worth folding/);
+});
+
+test('completeCommand drives the popup: opens on "/", filters, closes on a space', () => {
+  const names = (t: string) => completeCommand(t)?.map((c) => c.name) ?? null;
+  // A bare slash offers everything, in catalog order.
+  assert.deepEqual(names('/'), ['clear', 'compact', 'size', 'help']);
+  assert.deepEqual(names('/c'), ['clear', 'compact']);
+  assert.deepEqual(names('/co'), ['compact']);
+  assert.deepEqual(names('/CL'), ['clear']);
+  // Aliases are a typing shortcut, not menu rows — they must not silently pull
+  // a command into a list where nothing explains the match.
+  assert.equal(names('/sum'), null);
+  assert.deepEqual(parseCommand('/summarize'), { name: 'compact', args: '' }, 'but it still runs');
+  // Closed: not at the start, already typing arguments, or nothing matches.
+  for (const text of ['', 'hi', 'tell me about /clear', '/compact now', '/ ', '/zzz']) {
+    assert.equal(names(text), null, `menu must be closed for ${JSON.stringify(text)}`);
+  }
+});
+
+test('every command the popup offers is one the server will actually run', () => {
+  // The popup and the parser read one catalog; this is the guard that they stay
+  // the same one. A command listed but unparsed would be a dead menu row.
+  for (const c of completeCommand('/')!) {
+    assert.deepEqual(parseCommand(`/${c.name}`), { name: c.name, args: '' }, `/${c.name} must parse`);
+  }
+});
+
+// ------------------------------------------------------------ agent ↔ agent
+
+test('peerAgents is the discovery registry: every OTHER agent ward, from the stored layout', async () => {
+  const u = seedUser('core-peers@x.dev');
+  const { peerAgents } = await import('../src/lib/agent/core.ts');
+  const { askAgent } = await import('../src/lib/agent/inbox.ts');
+  assert.deepEqual(peerAgents(u, 'ag1'), []);
+  assert.doesNotMatch(buildInstructions(agentWardConfig(u, 'ag1')!, u, 'ag1'), /Other Rime agents/);
+
+  saveDashboard(
+    u,
+    validateLayout([
+      ...getDashboard(u),
+      { i: 'ag2', type: 'agent', size: '2x2', title: 'Researcher', config: { provider: 'openrouter', persona: 'You dig up sources.\nCite them.' } },
+    ])!
+  );
+  const peers = peerAgents(u, 'ag1');
+  assert.equal(peers.length, 1);
+  assert.equal(peers[0]!.ward, 'ag2');
+  assert.equal(peers[0]!.title, 'Researcher');
+  assert.equal(peers[0]!.busy, false);
+  // The list_agents tool is that registry; ag2 sees ag1 and not itself.
+  const seen = (await TOOLS.list_agents!.run({}, { userId: u, ward: 'ag2', conv: 0 })) as { agents: { ward: string }[] };
+  assert.deepEqual(seen.agents.map((a) => a.ward), ['ag1']);
+  // The prompt names the peer by title and the first persona line only.
+  const prompt = buildInstructions(agentWardConfig(u, 'ag1')!, u, 'ag1');
+  assert.match(prompt, /ag2 \("Researcher": You dig up sources\.\)/);
+  assert.ok(prompt.indexOf('Other Rime agents') > prompt.indexOf('Current wards:'));
+
+  // askAgent's guards, cheapest first: self, unknown, the sync cycle, then credentials.
+  const ctx = { userId: u, ward: 'ag1' };
+  await assert.rejects(askAgent(ctx, 'ag1', 'hi'), /that is you/);
+  await assert.rejects(askAgent(ctx, 'nope', 'hi'), /no agent ward "nope"/);
+  await assert.rejects(askAgent({ ...ctx, via: ['ag2'] }, 'ag2', 'hi'), /waiting on YOUR answer/);
+  await assert.rejects(askAgent(ctx, 'ag2', '   '), /say something/);
+  // No provider is linked in tests, so the last gate is the one that fires —
+  // for both the sync and the fire-and-forget path.
+  await assert.rejects(askAgent(ctx, 'ag2', 'hi'), /openrouter is not configured/);
+  await assert.rejects(askAgent({ ...ctx, via: ['ag2'] }, 'ag2', 'hi', { wait: false }), /openrouter is not configured/);
+});
+
+test('steer: a message queued mid-turn is the next round\'s user message, and one during the final call forces another round', async () => {
+  const u = seedUser('core-steer@x.dev');
+  const { steerTurn } = await import('../src/lib/agent/core.ts');
+  const seen: unknown[][] = [];
+  let receipt = '';
+  const provider: AgentProvider = {
+    ...fakeProvider([]),
+    run: async (c) => {
+      seen.push([...c.items]);
+      if (seen.length === 1) {
+        // A steer lands while the model is answering — with no calls pending.
+        steerTurn(u, 'ag1', { text: 'also check the weather', from: 'user' });
+        return { text: 'first answer', calls: [], items: [{ type: 'message', role: 'assistant', content: 'first answer' }] };
+      }
+      if (seen.length === 2) {
+        steerTurn(u, 'ag1', { id: 7, text: 'and hurry', from: 'ag2', done: (r) => (receipt = r) });
+        return { text: '', calls: [call('c1', 'get_layout', { reason: 'looking' })], items: [] };
+      }
+      return { text: 'final', calls: [], items: [] };
+    },
+  };
+  const events: AgentEvent[] = [];
+  const turn = await runLoop(cfgFor(u, provider), [provider.userItem('hi')], (e) => events.push(e));
+  assert.equal(turn.reply, 'final');
+  assert.equal(seen.length, 3);
+  // Round 2 saw the user's steer after the first answer; round 3 saw the peer's.
+  const text = (it: unknown) => JSON.stringify(it);
+  assert.match(text(seen[1]!.at(-1)), /Sent while you were working[\s\S]*also check the weather/);
+  assert.match(text(seen[2]!.at(-1)), /from \\"ag2\\" \(ward ag2\)[\s\S]*and hurry/);
+  const users = events.filter((e) => e.type === 'user') as { text: string; source?: string }[];
+  assert.deepEqual(users.map((e) => [e.text, e.source]), [['also check the weather', 'chat'], ['🤝 ag2 (mid-turn): and hurry', 'agent']]);
+  assert.ok(events.some((e) => e.type === 'says' && e.text === 'first answer'));
+  assert.equal(receipt, 'final', 'the absorbing turn closes the steer\'s receipt');
+  // Both steers are in the transcript as user messages, stamped by origin.
+  const t = transcript(activeConversation(u, 'ag1', 'codex').id).filter((m) => m.role === 'user');
+  assert.deepEqual(t.map((m) => [m.text, m.source]), [['also check the weather', 'chat'], ['🤝 ag2 (mid-turn): and hurry', 'agent']]);
+});
+
+test('interrupt: aborts the call in flight, else ends the turn after the round it is in', async () => {
+  const u = seedUser('core-interrupt@x.dev');
+  const { interruptTurn, steerTurn } = await import('../src/lib/agent/core.ts');
+  // Nothing running: nothing to stop.
+  assert.equal(interruptTurn(u, 'ag1', 'the user'), false);
+
+  // runLoop is not on the chain here, so the flag is set from inside the fake
+  // provider — the same moment a Stop click would reach a running turn.
+  const { setBusyForTest } = await import('../src/lib/agent/core.ts');
+  setBusyForTest(u, 'ag1', true);
+  let rounds = 0;
+  const provider: AgentProvider = {
+    ...fakeProvider([]),
+    run: async (c) => {
+      rounds++;
+      if (rounds === 1) {
+        assert.equal(interruptTurn(u, 'ag1', 'the user'), true);
+        // The abort reached the in-flight call.
+        assert.equal(c.signal?.aborted, true);
+        throw new Error('codex: interrupted');
+      }
+      return { text: 'unreachable', calls: [], items: [] };
+    },
+  };
+  const events: AgentEvent[] = [];
+  const t1 = await runLoop(cfgFor(u, provider), [provider.userItem('go')], (e) => events.push(e));
+  assert.equal(t1.reply, '⏹ Interrupted by the user.');
+  assert.equal(rounds, 1);
+
+  // Round boundary: the batch's calls are answered first, then the turn ends.
+  rounds = 0;
+  const p2: AgentProvider = {
+    ...fakeProvider([]),
+    run: async () => {
+      rounds++;
+      if (rounds === 1) {
+        assert.equal(interruptTurn(u, 'ag1', 'agent "Ops"'), true);
+        return { text: '', calls: [call('c1', 'get_layout', { reason: 'looking' })], items: [{ type: 'function_call', call_id: 'c1', name: 'get_layout', arguments: '{}' }] };
+      }
+      return { text: 'unreachable', calls: [], items: [] };
+    },
+  };
+  const items: unknown[] = [p2.userItem('go')];
+  const t2 = await runLoop(cfgFor(u, p2), items);
+  assert.equal(t2.reply, '⏹ Interrupted by agent "Ops".');
+  assert.equal(rounds, 1);
+  assert.equal(t2.steps.length, 1, 'the call in the batch still ran and was answered');
+  assert.ok(items.some((it) => (it as { call_id?: string }).call_id === 'c1' && (it as { type?: string }).type === 'function_call_output'));
+  // A stale interrupt does not kill the next turn; a stale steer opens it.
+  assert.equal(interruptTurn(u, 'ag1', 'the user'), true);
+  setBusyForTest(u, 'ag1', false);
+  steerTurn(u, 'ag1', { text: 'late note', from: 'user' });
+  const seen: unknown[][] = [];
+  const p3: AgentProvider = { ...fakeProvider([]), run: async (c) => (seen.push([...c.items]), { text: 'ok', calls: [], items: [] }) };
+  const t3 = await runLoop(cfgFor(u, p3), [p3.userItem('next')]);
+  assert.equal(t3.reply, 'ok');
+  assert.match(JSON.stringify(seen[0]!.at(-1)), /late note/);
+});

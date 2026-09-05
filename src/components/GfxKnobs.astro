@@ -1,0 +1,218 @@
+---
+// The graphics knobs for one scene surface (the page background or the header
+// banner): render scale, frame-rate cap, noise detail — and, on the surface
+// that owns them, the two global switches (governor, hi-DPI). Every control is
+// a plain field of the theme form; the impact meters and the load line are
+// re-scored by the account page's script (lib/gfx.ts) on every input.
+import { DETAIL_MAX, DETAIL_MIN, FPS_OPTIONS, type ThemeConfig } from '../lib/theme.ts';
+
+interface Props {
+  /** Field prefix: bg* knobs or hdr* knobs. */
+  prefix: 'bg' | 'hdr';
+  theme: ThemeConfig;
+  /** Render the surface-independent switches here too. */
+  global?: boolean;
+}
+const { prefix: p, theme, global = false } = Astro.props;
+const res = p === 'bg' ? theme.bgRes : theme.hdrRes;
+const fps = p === 'bg' ? theme.bgFps : theme.hdrFps;
+const detail = p === 'bg' ? theme.bgDetail : theme.hdrDetail;
+const IMPACT = ['gpu', 'battery'] as const;
+const METER_LABEL = { gpu: 'GPU', battery: 'Battery' };
+---
+
+<fieldset class="gfx" data-gfx={p}>
+  <legend class="gfx-head">
+    <span class="section-title">Graphics</span>
+    <span class="gfx-load" data-load={p} title="Estimated fragment work per second, relative to this scene's own defaults"></span>
+  </legend>
+
+  <div class="acct-grid">
+    <div class="gfx-knob">
+      <label for={`th-${p}res`} class="label">Resolution <span data-val={`${p}Res`} data-fmt="pct"></span></label>
+      <input id={`th-${p}res`} name={`${p}Res`} form="theme-form" type="range" min="0.25" max="1" step="0.05" value={res} />
+      <span class="gfx-impact" data-impact={`${p}:res`}>
+        {IMPACT.map((m) => (
+          <span class="gfx-meter" data-meter={m}><span class="gfx-meter-k">{METER_LABEL[m]}</span><i></i><i></i><i></i><i></i></span>
+        ))}
+        <em class="gfx-note" data-note></em>
+      </span>
+    </div>
+
+    <div class="gfx-knob">
+      <span class="label">Frame rate <span data-val={`${p}Fps`} data-unit=" fps"></span></span>
+      <div class="seg" role="radiogroup" aria-label="Frame rate cap">
+        {FPS_OPTIONS.map((f) => (
+          <label>
+            <input type="radio" name={`${p}Fps`} value={f} form="theme-form" checked={f === fps} />
+            <span>{f}</span>
+          </label>
+        ))}
+      </div>
+      <span class="gfx-impact" data-impact={`${p}:fps`}>
+        {IMPACT.map((m) => (
+          <span class="gfx-meter" data-meter={m}><span class="gfx-meter-k">{METER_LABEL[m]}</span><i></i><i></i><i></i><i></i></span>
+        ))}
+        <em class="gfx-note" data-note></em>
+      </span>
+    </div>
+
+    <div class="gfx-knob">
+      <label for={`th-${p}detail`} class="label">Detail <span data-val={`${p}Detail`} data-unit=" octaves"></span></label>
+      <input id={`th-${p}detail`} name={`${p}Detail`} form="theme-form" type="range" min={DETAIL_MIN} max={DETAIL_MAX} step="1" value={detail} />
+      <span class="gfx-impact" data-impact={`${p}:detail`}>
+        {IMPACT.map((m) => (
+          <span class="gfx-meter" data-meter={m}><span class="gfx-meter-k">{METER_LABEL[m]}</span><i></i><i></i><i></i><i></i></span>
+        ))}
+        <em class="gfx-note" data-note></em>
+      </span>
+    </div>
+  </div>
+
+  {global && (
+    <div class="acct-grid mt-3">
+      <div class="gfx-knob">
+        {/* The empty hidden twin is what an UNCHECKED box submits. */}
+        <input type="hidden" name="gfxGovern" value="" form="theme-form" />
+        <label class="switch">
+          <input id="th-govern" name="gfxGovern" type="checkbox" value="on" form="theme-form" checked={theme.gfxGovern} />
+          Auto-throttle
+        </label>
+        <span class="gfx-impact" data-impact="bg:govern">
+          {IMPACT.map((m) => (
+            <span class="gfx-meter" data-meter={m}><span class="gfx-meter-k">{METER_LABEL[m]}</span><i></i><i></i><i></i><i></i></span>
+          ))}
+          <em class="gfx-note" data-note></em>
+        </span>
+      </div>
+      <div class="gfx-knob">
+        <input type="hidden" name="gfxHiDpi" value="" form="theme-form" />
+        <label class="switch">
+          <input id="th-hidpi" name="gfxHiDpi" type="checkbox" value="on" form="theme-form" checked={theme.gfxHiDpi} />
+          Hi-DPI rendering
+        </label>
+        <span class="gfx-impact" data-impact="bg:hidpi">
+          {IMPACT.map((m) => (
+            <span class="gfx-meter" data-meter={m}><span class="gfx-meter-k">{METER_LABEL[m]}</span><i></i><i></i><i></i><i></i></span>
+          ))}
+          <em class="gfx-note" data-note></em>
+        </span>
+      </div>
+      <p class="gfx-hint text-xs text-ink-faint">
+        Resolution, frame rate and detail are per scene and reset when you pick another preset. The two switches cover the
+        header banner too. Meters are a rule of thumb: pixels × frames × per-pixel work — a phone pays for all three.
+      </p>
+    </div>
+  )}
+</fieldset>
+
+<style>
+  .gfx {
+    margin-top: 1rem;
+    padding: 0.875rem 1rem 1rem;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
+  }
+  .gfx-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem 0.75rem;
+    padding: 0 0.375rem;
+    /* A legend sits in the border; pulling it back in and giving it the card
+       colour behind keeps the frame line from running through the label. */
+    margin-left: -0.375rem;
+  }
+  .gfx-load {
+    font-size: 0.6875rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    background: var(--color-surface);
+    color: var(--color-ink-muted);
+    border: 1px solid var(--color-line);
+    transition:
+      color 0.2s var(--fd-ease),
+      border-color 0.2s var(--fd-ease);
+  }
+  .gfx-load:empty {
+    display: none;
+  }
+  .gfx-load[data-band='light'] {
+    color: var(--color-ok);
+    border-color: color-mix(in srgb, var(--color-ok) 40%, transparent);
+  }
+  .gfx-load[data-band='heavy'] {
+    color: var(--color-warn);
+    border-color: color-mix(in srgb, var(--color-warn) 40%, transparent);
+  }
+  .gfx-load[data-band='hot'] {
+    color: var(--color-err);
+    border-color: color-mix(in srgb, var(--color-err) 40%, transparent);
+  }
+  .gfx-knob {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .gfx-knob .switch {
+    min-height: 2.25rem;
+  }
+  /* ---------------------------------------------------- impact meters */
+  .gfx-impact {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.875rem;
+    min-height: 1.125rem;
+    font-size: 0.6875rem;
+    color: var(--color-ink-faint);
+  }
+  .gfx-meter {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    --lvl: 0;
+  }
+  .gfx-meter-k {
+    margin-right: 0.25rem;
+    letter-spacing: 0.02em;
+  }
+  .gfx-meter i {
+    width: 0.5rem;
+    height: 0.375rem;
+    border-radius: 1px;
+    background: currentColor;
+    /* Dot k lights when the level clears it; the rest stay as faint stubs. */
+    opacity: clamp(0.18, var(--lvl) - var(--k), 1);
+    transition:
+      opacity 0.25s var(--fd-ease),
+      background-color 0.25s var(--fd-ease);
+  }
+  .gfx-meter i:nth-of-type(1) { --k: 0; }
+  .gfx-meter i:nth-of-type(2) { --k: 1; }
+  .gfx-meter i:nth-of-type(3) { --k: 2; }
+  .gfx-meter i:nth-of-type(4) { --k: 3; }
+  .gfx-meter[data-lvl='1'] i,
+  .gfx-meter[data-lvl='2'] i {
+    background: var(--color-ok);
+  }
+  .gfx-meter[data-lvl='3'] i {
+    background: var(--color-warn);
+  }
+  .gfx-meter[data-lvl='4'] i {
+    background: var(--color-err);
+  }
+  .gfx-note {
+    font-style: normal;
+  }
+  .gfx-note:empty {
+    display: none;
+  }
+  .gfx-hint {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+</style>

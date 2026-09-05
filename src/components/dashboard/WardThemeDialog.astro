@@ -1,0 +1,109 @@
+---
+// One ward's own theme. The knobs are the card-scoped slice of the account
+// editor's — see WardTheme in lib/theme.ts — and every one of them is
+// OPTIONAL: a select left on "Dashboard's" and an unchecked group mean the
+// card inherits. Wired by scripts/app/edit.ts, which previews on every input
+// and saves once the drag settles; the card itself is the preview.
+import { FONTS, FONT_GROUPS, FONT_IDS, previewStack } from '../../lib/theme.ts';
+
+const FONT_LIST = FONT_GROUPS.map((g) => ({
+  label: g.label,
+  ids: FONT_IDS.filter((id) => FONTS[id].cat === g.cat),
+})).filter((g) => g.ids.length);
+
+const RANGES = [
+  { id: 'radius', label: 'Corner radius', min: 0, max: 1.25, step: 0.05, group: 'shape' },
+  { id: 'border', label: 'Border width', min: 0, max: 4, step: 0.5, group: 'shape' },
+  { id: 'rim', label: 'Edge trim', min: 0, max: 1, step: 0.05, group: 'shape' },
+  { id: 'shadow', label: 'Shadow', min: 0, max: 1, step: 0.05, group: 'shape' },
+  { id: 'glassAlpha', label: 'Surface opacity', min: 0.3, max: 1, step: 0.01, group: 'glass' },
+  { id: 'glassBlur', label: 'Blur', min: 0, max: 30, step: 1, group: 'glass' },
+] as const;
+---
+
+<dialog id="ward-theme" class="fd-dialog">
+  <form method="dialog" class="space-y-4 p-4">
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="section-title" data-tt-title>Theme</h2>
+      <span class="text-xs text-ink-faint">This card only</span>
+    </div>
+
+    <div class="flex flex-wrap items-end gap-3">
+      <div class="min-w-40 flex-1" data-font-picker>
+        <label for="tt-font" class="label">Font</label>
+        <select id="tt-font" class="input">
+          <option value="">Dashboard's</option>
+          {FONT_LIST.map((g) => (
+            <optgroup label={g.label}>
+              {g.ids.map((id) => (
+                <option value={id} data-font={previewStack(id)}>{FONTS[id].label}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
+      <div class="min-w-28 flex-1">
+        <label for="tt-mode" class="label">Light / dark</label>
+        <select id="tt-mode" class="input">
+          <option value="">Dashboard's</option>
+          <option value="dark">dark</option>
+          <option value="light">light</option>
+        </select>
+      </div>
+      <div class="min-w-28 flex-1">
+        <label for="tt-density" class="label">Density</label>
+        <select id="tt-density" class="input">
+          <option value="">Dashboard's</option>
+          <option value="compact">compact</option>
+          <option value="cozy">cozy</option>
+          <option value="comfortable">comfortable</option>
+        </select>
+      </div>
+    </div>
+
+    <div>
+      <label class="flex items-center gap-1.5 text-sm">
+        <input type="checkbox" id="tt-colours" /> Its own colours
+      </label>
+      <div class="mt-2 flex flex-wrap items-end gap-3" data-tt-group="colours" hidden>
+        <div>
+          <label for="tt-accent" class="label">Accent</label>
+          <input id="tt-accent" type="color" class="h-10 w-16 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+        </div>
+        <div>
+          <label for="tt-surface" class="label">Card</label>
+          <input id="tt-surface" type="color" class="h-10 w-16 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+        </div>
+        <div>
+          <label for="tt-line" class="label">Border</label>
+          <input id="tt-line" type="color" class="h-10 w-16 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+        </div>
+        <p class="min-w-40 flex-1 text-xs text-ink-faint">Text inside re-derives off the card colour, so a pale card stays readable.</p>
+      </div>
+    </div>
+
+    {['shape', 'glass'].map((group) => (
+      <div>
+        <label class="flex items-center gap-1.5 text-sm">
+          <input type="checkbox" id={`tt-${group}`} />
+          {group === 'shape' ? 'Its own shape' : 'Its own glass'}
+        </label>
+        <div class="mt-2 flex flex-wrap items-end gap-3" data-tt-group={group} hidden>
+          {RANGES.filter((r) => r.group === group).map((r) => (
+            <div class="min-w-32 flex-1">
+              <label for={`tt-${r.id}`} class="label">
+                {r.label} <span data-tt-val={r.id} class="text-ink-faint"></span>
+              </label>
+              <input id={`tt-${r.id}`} type="range" min={r.min} max={r.max} step={r.step} class="w-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+    ))}
+
+    <div class="flex items-center justify-between gap-2">
+      <button type="button" class="btn" data-tt-reset>Reset to dashboard</button>
+      <button type="submit" class="btn btn-primary">Done</button>
+    </div>
+  </form>
+</dialog>

@@ -1,0 +1,17 @@
+---
+import Icon from '../Icon.astro';
+// One dialog serves every notepad ward: Expand moves the ward's editor (the
+// SAME element — one document, one ink canvas, no second copy of either) into
+// the host below, where the full toolbar shows. note.ts owns all behavior;
+// everything here is inert markup.
+---
+
+<dialog id="note-dialog" class="fd-dialog fd-dialog-full">
+  <form method="dialog" class="flex h-full flex-col gap-2 p-3">
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="section-title truncate" data-nd-title>Notepad</h2>
+      <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-nd-close aria-label="Close"><Icon id="close" /></button>
+    </div>
+    <div class="flex min-h-0 flex-1 flex-col" data-nd-host></div>
+  </form>
+</dialog>

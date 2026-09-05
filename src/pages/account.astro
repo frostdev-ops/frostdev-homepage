@@ -1,0 +1,1690 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import { getDb } from '../lib/db.ts';
+import { hasPassword } from '../lib/users.ts';
+import { getLink, getMeta } from '../lib/linked-accounts.ts';
+import { mailboxConfig } from '../lib/mailbox.ts';
+import { notionDatabases, notionRecent, type NotionHit } from '../lib/notion.ts';
+import { FONTS, FONT_GROUPS, FONT_IDS, previewStack, normalizeTheme, parseTheme, PRESETS, SCENES, SCENE_IDS } from '../lib/theme.ts';
+import { GENERAL_ICON_SETS, ICON_SETS } from '../lib/icon-names.ts';
+import Icon from '../components/Icon.astro';
+import { Image } from 'astro:assets';
+import GfxKnobs from '../components/GfxKnobs.astro';
+import { mark } from '../lib/brand.ts';
+import { listBackgrounds, MAX_PER_USER } from '../lib/backgrounds.ts';
+import { getSetting } from '../lib/settings.ts';
+import { ALERT_MODES } from './api/account/prefs.ts';
+import { getAgentAccount } from '../lib/agent/accounts.ts';
+import { browserbaseKey } from '../lib/browser/browserbase.ts';
+import { codexOauthPending } from '../lib/agent/codex.ts';
+import { agentLastError, agentRounds } from '../lib/agent/provider.ts';
+
+const me = Astro.locals.user!;
+const theme = parseTheme(me.theme) ?? normalizeTheme({});
+
+/** Both scene pickers group by SceneDef.solid: a solid preset paints the whole
+ *  frame, an airy one lets the page theme through behind it. */
+/** The font pickers (wordmark + dashboard text) are the same list, grouped by
+ *  the catalogue's categories. Every row previews itself — in a glyph subset
+ *  of its own face (previewStack), fetched by scripts/app/fonts.ts the first
+ *  time a [data-font-picker] is touched: ~220KB for all 43, and nothing at all
+ *  for someone who never opens one. */
+const FONT_LIST = FONT_GROUPS.map((g) => ({ label: g.label, ids: FONT_IDS.filter((id) => FONTS[id].cat === g.cat) })).filter((g) => g.ids.length);
+
+const SCENE_GROUPS = [
+  { label: 'Over your theme', ids: SCENE_IDS.filter((id) => !SCENES[id].solid) },
+  { label: 'Full frame', ids: SCENE_IDS.filter((id) => SCENES[id].solid) },
+].filter((g) => g.ids.length);
+const links = new Map(
+  (
+    getDb()
+      .prepare('SELECT provider, account_label, scopes FROM linked_accounts WHERE user_id = ?')
+      .all(me.userId) as { provider: string; account_label: string; scopes: string }[]
+  ).map((r) => [r.provider, r])
+);
+const pwSet = hasPassword(me.userId);
+const bgImages = listBackgrounds(me.userId);
+const alertMode = getSetting(`alerts:${me.userId}`) ?? 'visible';
+
+// Notion ward configuration (tasks database + capture page), rendered only
+// when linked. A dead token must not break the account page.
+let notionCfg: { databases: NotionHit[]; pages: NotionHit[]; tasksDbId: string; capturePageId: string; calendarDbId: string } | null = null;
+let notionCfgError = false;
+const notionLink = getLink(me.userId, 'notion');
+if (notionLink) {
+  try {
+    const [databases, pages] = await Promise.all([notionDatabases(me.userId), notionRecent(me.userId)]);
+    const meta = getMeta(notionLink);
+    notionCfg = {
+      databases,
+      pages,
+      tasksDbId: (meta.tasks_db_id as string) ?? '',
+      capturePageId: (meta.capture_page_id as string) ?? '',
+      calendarDbId: (meta.calendar_db_id as string) ?? '',
+    };
+  } catch {
+    notionCfgError = true;
+  }
+}
+
+const ok = Astro.url.searchParams.get('ok');
+const err = Astro.url.searchParams.get('err');
+const connected = Astro.url.searchParams.get('connected');
+
+const PROVIDERS = [
+  { id: 'google', name: 'Google', hint: 'Gmail + Calendar wards, send mail' },
+  { id: 'microsoft', name: 'Microsoft', hint: 'Outlook mail + calendar' },
+  { id: 'zoho', name: 'Zoho Mail', hint: 'Zoho inbox, compose and reply' },
+  { id: 'notion', name: 'Notion', hint: 'Tasks, capture, recent pages, search' },
+] as const;
+
+// The generic mailbox has no OAuth to redirect through, so its card is a form.
+// The password is write-only: what comes back is the seal, never the value.
+const mailbox = mailboxConfig(me.userId);
+const mailboxLink = links.get('mailbox');
+// iCloud Calendar is the same shape: no OAuth, an app-specific password sealed server-side.
+const icloudLink = links.get('icloud');
+
+// Agent ward credentials (per-user; the agent ward reads these).
+const codexAccount = getAgentAccount(me.userId, 'codex');
+const codexPending = codexAccount ? null : codexOauthPending(me.userId);
+const AGENT_KEYS = [
+  { id: 'openrouter', name: 'OpenRouter API key', hint: 'powers the openrouter provider — openrouter.ai/keys' },
+  { id: 'brave', name: 'Brave Search key', hint: 'web_search (keyword) — api.search.brave.com' },
+  { id: 'exa', name: 'Exa key', hint: 'web_search (semantic) — exa.ai' },
+] as const;
+const agentKeys = AGENT_KEYS.map((k) => ({ ...k, label: getAgentAccount(me.userId, k.id)?.label ?? '' }));
+const bbKey = browserbaseKey(me.userId);
+const bbLabel = bbKey ? `${bbKey.slice(0, 4)}••••${bbKey.slice(-4)}` : '';
+const agentRoundCap = agentRounds(me.userId);
+const shellNet = getSetting(`agent_shell_network:${me.userId}`) === 'true';
+const agentErr = agentLastError(me.userId);
+
+// Panel order = tab order. The id is also the deep-link hash; the API routes
+// redirect to #background / #dashboard / #agent, and a hash naming a card
+// INSIDE a panel resolves to that panel (see the tab script).
+const TABS = [
+  { id: 'theme', label: 'Theme' },
+  { id: 'background', label: 'Background' },
+  { id: 'header', label: 'Header' },
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'accounts', label: 'Accounts' },
+  { id: 'agent', label: 'Agent' },
+  { id: 'security', label: 'Security' },
+] as const;
+---
+
+<AppLayout title="Account — Rimeward" search={false}>
+  <main class="mx-auto max-w-2xl px-4 py-10">
+    <div class="page-head">
+      <h1 class="page-title">Account</h1>
+      <div class="flex items-center gap-3">
+        <span id="acct-save" class="acct-save" aria-live="polite"></span>
+        <button type="button" id="acct-undo" class="btn min-h-0 px-2 py-1 text-xs hidden">Undo</button>
+        <a href="/dash" class="link">← Dashboard</a>
+      </div>
+    </div>
+
+    {ok === 'theme' && <p class="banner banner-ok">Theme saved.</p>}
+    {ok === 'bg' && <p class="banner banner-ok">Background updated.</p>}
+    {ok === 'prefs' && <p class="banner banner-ok">Dashboard settings saved.</p>}
+    {ok === 'password' && <p class="banner banner-ok">Password updated. Other sessions were signed out.</p>}
+    {connected && <p class="banner banner-ok">{connected} connected.</p>}
+    {ok?.startsWith('agent') && <p class="banner banner-ok">Agent settings saved.</p>}
+    {ok === 'codex-start' && <p class="banner banner-info">ChatGPT sign-in started — follow the two steps in the Agent section.</p>}
+    {err === 'short' && <p class="banner banner-err">Password must be at least 10 characters.</p>}
+    {err === 'wrong' && <p class="banner banner-err">Current password is incorrect.</p>}
+    {err && !['short', 'wrong'].includes(err) && <p class="banner banner-err">{err}</p>}
+
+    {/* Sticky under the app header. The strip owns the border and clips; the
+        scroller inside carries the tabs and the sliding indicator, so nothing
+        a tab paints can be cut off by the scroll box. */}
+    <nav class="acct-nav" aria-label="Account sections">
+      <div class="acct-strip">
+        <div class="acct-tabs" role="tablist">
+          {TABS.map((t, i) => (
+            <button type="button" role="tab" class="acct-tab" data-tab={t.id} aria-controls={t.id} aria-current={i === 0 ? 'page' : undefined}>
+              {t.label}
+            </button>
+          ))}
+          <span class="acct-ind" aria-hidden="true"></span>
+        </div>
+      </div>
+    </nav>
+
+    {/* ============================================================= theme */}
+    <section id="theme" class="acct-panel">
+      <div class="card mb-6 p-4">
+        <div class="acct-card-head">
+          <h2 class="section-title">Theme</h2>
+          <button type="submit" form="theme-form" name="reset" value="1" class="btn min-h-0 px-2 py-1 text-xs">Reset everything</button>
+        </div>
+        <form method="post" action="/api/account/theme" class="space-y-4" id="theme-form">
+          <div class="acct-grid">
+            <div class="min-w-40 flex-1">
+              <label for="th-preset" class="label">Preset</label>
+              <select id="th-preset" name="preset" class="input">
+                {Object.values(PRESETS).map((p) => (
+                  <option value={p.preset} selected={p.preset === theme.preset}>{p.label}</option>
+                ))}
+              </select>
+            </div>
+            <div class="min-w-40 flex-1">
+              <span class="label">Mode</span>
+              <div class="flex min-h-9 items-center gap-4">
+                {(['dark', 'light', 'system'] as const).map((m) => (
+                  <label class="switch">
+                    <input type="radio" name="mode" value={m} checked={m === theme.mode} /> {m}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div class="acct-grid">
+            <div>
+              <label for="th-accent" class="label">Accent</label>
+              <input id="th-accent" name="accent" type="color" value={theme.accent} class="h-10 w-16 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-alpha" class="label">Glass opacity</label>
+              <input id="th-alpha" name="glassAlpha" type="range" min="0.3" max="1" step="0.01" value={theme.glassAlpha} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-blur" class="label">Glass blur</label>
+              <input id="th-blur" name="glassBlur" type="range" min="0" max="30" step="1" value={theme.glassBlur} class="w-full" />
+            </div>
+          </div>
+
+          <div class="acct-grid">
+            <div class="min-w-36 flex-1">
+              <label for="th-radius" class="label">Corner radius</label>
+              <input id="th-radius" name="radius" type="range" min="0" max="1.25" step="0.05" value={theme.radius} class="w-full" />
+            </div>
+            <div class="min-w-32 flex-1">
+              <label for="th-density" class="label">Density</label>
+              <select id="th-density" name="density" class="input">
+                {(['compact', 'cozy', 'comfortable'] as const).map((d) => (
+                  <option value={d} selected={d === theme.density}>{d}</option>
+                ))}
+              </select>
+            </div>
+            <div class="min-w-40 flex-1" data-font-picker>
+              {/* Every bit of text on the dashboard, wards included — a single
+                  ward can still overrule it from its own menu. */}
+              <label for="th-uifont" class="label">Text</label>
+              <select id="th-uifont" name="uiFont" class="input">
+                {FONT_LIST.map((g) => (
+                  <optgroup label={g.label}>
+                    {g.ids.map((id) => (
+                      <option value={id} data-font={previewStack(id)} selected={id === theme.uiFont}>
+                        {FONTS[id].label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-4">
+            <div class="min-w-40 flex-1">
+              <label for="th-iconset" class="label">Icons</label>
+              <select id="th-iconset" name="iconSet" class="input">
+                {GENERAL_ICON_SETS.map((id) => (
+                  <option value={id} selected={id === theme.iconSet}>{ICON_SETS[id].label}</option>
+                ))}
+              </select>
+            </div>
+            <div class="min-w-40 flex-1" data-icon-style hidden={!Object.keys(ICON_SETS[theme.iconSet].styles).length}>
+              <label for="th-iconstyle" class="label">Icon style</label>
+              {/* Options are the CURRENT set's; the script swaps them from data-styles on a set change. */}
+              <select id="th-iconstyle" name="iconStyle" class="input" data-styles={JSON.stringify(Object.fromEntries(GENERAL_ICON_SETS.map((id) => [id, Object.keys(ICON_SETS[id].styles)])))}>
+                {Object.keys(ICON_SETS[theme.iconSet].styles).map((st) => (
+                  <option value={st} selected={st === theme.iconStyle}>{st.replace('-', ' ')}</option>
+                ))}
+              </select>
+            </div>
+            <div class="min-w-40 flex-1">
+              <label for="th-weathericons" class="label">Weather icons</label>
+              <select id="th-weathericons" name="weatherIcons" class="input">
+                <option value="follow" selected={theme.weatherIcons === 'follow'}>Same as icons</option>
+                <option value="meteocons" selected={theme.weatherIcons === 'meteocons'}>Meteocons — line</option>
+                <option value="meteocons-fill" selected={theme.weatherIcons === 'meteocons-fill'}>Meteocons — fill</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="acct-grid">
+            <div class="min-w-36 flex-1">
+              <label for="th-icontint" class="label">Icon tint <span class="text-ink-faint">(emoji become flat silhouettes; Meteocons keep their colours)</span></label>
+              <div class="flex items-center gap-2">
+                <select id="th-icontint" name="iconTint" class="input">
+                  <option value="ink" selected={theme.iconTint === 'ink'}>Text colour</option>
+                  <option value="accent" selected={theme.iconTint === 'accent'}>Accent</option>
+                  <option value="custom" selected={theme.iconTint === 'custom'}>Custom</option>
+                </select>
+                <input id="th-iconcolor" name="iconColor" type="color" value={theme.iconColor} aria-label="Icon colour" class="h-10 w-14 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+              </div>
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-iconop" class="label">Icon opacity <span data-val="iconOpacity" class="text-ink-faint"></span></label>
+              <input id="th-iconop" name="iconOpacity" type="range" min="0.1" max="1" step="0.05" value={theme.iconOpacity} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-iconsize" class="label">Icon size <span data-val="iconSize" class="text-ink-faint"></span></label>
+              <input id="th-iconsize" name="iconSize" type="range" min="0.5" max="2" step="0.05" value={theme.iconSize} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-iconstroke" class="label">Stroke (Lucide, Tabler) <span data-val="iconStroke" class="text-ink-faint"></span></label>
+              <input id="th-iconstroke" name="iconStroke" type="range" min="0.5" max="4" step="0.25" value={theme.iconStroke} class="w-full" />
+            </div>
+          </div>
+          <div class="fd-icon-preview" aria-hidden="true">
+            {(['host', 'mail', 'calendar', 'database', 'page', 'folder', 'chart', 'bot', 'sun', 'rain', 'storm'] as const).map((id) => (
+              <Icon id={id} />
+            ))}
+          </div>
+
+          <div class="acct-grid">
+            <div class="min-w-36 flex-1">
+              <label for="th-border" class="label">Border width <span data-val="border" class="text-ink-faint"></span></label>
+              <input id="th-border" name="border" type="range" min="0" max="4" step="0.5" value={theme.border} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-rim" class="label">Edge trim <span data-val="rim" class="text-ink-faint"></span></label>
+              <input id="th-rim" name="rim" type="range" min="0" max="1" step="0.05" value={theme.rim} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-shadow" class="label">Shadow <span data-val="shadow" class="text-ink-faint"></span></label>
+              <input id="th-shadow" name="shadow" type="range" min="0" max="1" step="0.05" value={theme.shadow} class="w-full" />
+            </div>
+          </div>
+
+          <div>
+            {/* The empty hidden twin is what an UNCHECKED box submits. */}
+            <input type="hidden" name="surfaceCustom" value="" />
+            <label class="switch">
+              <input id="th-surf" name="surfaceCustom" type="checkbox" value="on" checked={theme.surfaceCustom} />
+              Custom surface colours
+            </label>
+            <div class="acct-grid mt-3" data-surfpane hidden={!theme.surfaceCustom}>
+              <div>
+                <label for="th-surface" class="label">Ward / glass</label>
+                <input id="th-surface" name="surface" type="color" value={theme.surface} class="h-10 w-16 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+              </div>
+              <div>
+                <label for="th-surface2" class="label">Page</label>
+                <input id="th-surface2" name="surface2" type="color" value={theme.surface2} class="h-10 w-16 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+              </div>
+              <div>
+                <label for="th-line" class="label">Border</label>
+                <input id="th-line" name="line" type="color" value={theme.line} class="h-10 w-16 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+              </div>
+              <p class="min-w-48 flex-1 text-xs text-ink-faint">These replace the palette in <em>both</em> modes; text and the strong border colour derive from them.</p>
+            </div>
+          </div>
+
+          <p class="text-xs text-ink-faint">Changes save as you make them. Contrast is on you — pick an accent that stays legible in both modes.</p>
+        </form>
+      </div>
+    </section>
+
+    {/* ======================================================== background */}
+    {/* Its knobs belong to the theme form via form="theme-form", so they save
+        with everything else; uploads/deletes are their own multipart form,
+        which cannot nest inside it. */}
+    <section id="background" class="acct-panel">
+      <div class="card mb-6 p-4">
+        <h2 class="section-title mb-3">Background</h2>
+
+        <div class="acct-grid">
+          <div class="min-w-40 flex-1">
+            <label for="th-bg" class="label">Kind</label>
+            <select id="th-bg" name="background" form="theme-form" class="input">
+              <option value="flat" selected={theme.background === 'flat'}>flat — page colour only</option>
+              <option value="aurora" selected={theme.background === 'aurora'}>aurora — accent blobs (CSS)</option>
+              <option value="image" selected={theme.background === 'image'}>photo — your own image</option>
+              <option value="scene" selected={theme.background === 'scene'}>scene — animated (three.js)</option>
+            </select>
+          </div>
+          <div class="min-w-36 flex-1" data-bgpane="image scene" hidden={theme.background === 'flat' || theme.background === 'aurora'}>
+            <label for="th-bgop" class="label">Layer opacity <span data-val="bgOpacity" class="text-ink-faint"></span></label>
+            <input id="th-bgop" name="bgOpacity" form="theme-form" type="range" min="0.05" max="1" step="0.01" value={theme.bgOpacity} class="w-full" />
+          </div>
+        </div>
+
+        {/* ---------------------------------------------------------- photo */}
+        <div data-bgpane="image" class="mt-4 space-y-3" hidden={theme.background !== 'image'}>
+          {bgImages.length > 0 && (
+            <div class="bg-gallery">
+              {bgImages.map((name) => (
+                <div class="bg-thumb">
+                  <label>
+                    <input type="radio" name="bgImage" value={name} form="theme-form" checked={name === theme.bgImage} />
+                    <img src={`/api/bg/${name}`} alt="" loading="lazy" width="160" height="90" />
+                  </label>
+                  <button form="bg-upload" name="delete" value={name} class="bg-thumb-del" title="Delete" aria-label="Delete background">×</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form id="bg-upload" method="post" action="/api/account/background" enctype="multipart/form-data" class="flex flex-wrap items-center gap-2">
+            <input type="file" name="image" accept="image/*" class="input min-h-0 flex-1 px-2 py-1 text-xs" />
+            <button type="submit" class="btn min-h-0 px-2 py-1 text-xs">Upload</button>
+            <span class="text-[11px] text-ink-faint">{bgImages.length}/{MAX_PER_USER} · re-encoded to webp, max 2560px, EXIF stripped</span>
+          </form>
+
+          <div class="acct-grid">
+            <div class="min-w-36 flex-1">
+              <label for="th-bgblur" class="label">Blur <span data-val="bgBlur" class="text-ink-faint"></span></label>
+              <input id="th-bgblur" name="bgBlur" form="theme-form" type="range" min="0" max="60" step="1" value={theme.bgBlur} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-bgdim" class="label">Dim <span data-val="bgDim" class="text-ink-faint"></span></label>
+              <input id="th-bgdim" name="bgDim" form="theme-form" type="range" min="0" max="0.95" step="0.01" value={theme.bgDim} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-bgsat" class="label">Saturation <span data-val="bgSat" class="text-ink-faint"></span></label>
+              <input id="th-bgsat" name="bgSat" form="theme-form" type="range" min="0" max="2" step="0.05" value={theme.bgSat} class="w-full" />
+            </div>
+          </div>
+          <div class="acct-grid">
+            <div class="min-w-36 flex-1">
+              <label for="th-bgbright" class="label">Brightness <span data-val="bgBright" class="text-ink-faint"></span></label>
+              <input id="th-bgbright" name="bgBright" form="theme-form" type="range" min="0.2" max="1.8" step="0.05" value={theme.bgBright} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-bgzoom" class="label">Zoom <span data-val="bgZoom" class="text-ink-faint"></span></label>
+              <input id="th-bgzoom" name="bgZoom" form="theme-form" type="range" min="1" max="1.6" step="0.02" value={theme.bgZoom} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              {/* The empty hidden twin is what an UNCHECKED box submits. */}
+              <input type="hidden" name="bgFixed" value="" form="theme-form" />
+              <label class="switch min-h-9">
+                <input type="checkbox" name="bgFixed" form="theme-form" checked={theme.bgFixed} /> Fixed (does not scroll)
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* ---------------------------------------------------------- scene */}
+        <div data-bgpane="scene" class="mt-4 space-y-3" hidden={theme.background !== 'scene'}>
+          <div class="acct-grid">
+            <div class="min-w-40 flex-1">
+              <label for="th-scene" class="label">Preset</label>
+              <select id="th-scene" name="bgScene" form="theme-form" class="input" data-scene-preview>
+                {SCENE_GROUPS.map((g) => (
+                  <optgroup label={g.label}>
+                    {g.ids.map((id) => (
+                      <option value={id} selected={id === theme.bgScene}>{SCENES[id].label} — {SCENES[id].hint}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+            <div class="flex items-end gap-2">
+              <div>
+                <label for="th-c1" class="label">Colour 1</label>
+                <input id="th-c1" name="bgColor1" form="theme-form" type="color" value={theme.bgColor1} class="h-10 w-14 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+              </div>
+              <div>
+                <label for="th-c2" class="label">2</label>
+                <input id="th-c2" name="bgColor2" form="theme-form" type="color" value={theme.bgColor2} class="h-10 w-14 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+              </div>
+              <div>
+                <label for="th-c3" class="label">3</label>
+                <input id="th-c3" name="bgColor3" form="theme-form" type="color" value={theme.bgColor3} class="h-10 w-14 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+              </div>
+            </div>
+          </div>
+
+          <div class="acct-grid">
+            <div class="min-w-36 flex-1">
+              <label for="th-speed" class="label">Speed <span data-val="bgSpeed" class="text-ink-faint"></span></label>
+              <input id="th-speed" name="bgSpeed" form="theme-form" type="range" min="0" max="3" step="0.05" value={theme.bgSpeed} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-glow" class="label">Glow <span data-val="bgGlow" class="text-ink-faint"></span></label>
+              <input id="th-glow" name="bgGlow" form="theme-form" type="range" min="0" max="2" step="0.05" value={theme.bgGlow} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-scale" class="label">Scale <span data-val="bgScale" class="text-ink-faint"></span></label>
+              <input id="th-scale" name="bgScale" form="theme-form" type="range" min="0.25" max="4" step="0.05" value={theme.bgScale} class="w-full" />
+            </div>
+          </div>
+          <div class="acct-grid">
+            <div class="min-w-36 flex-1">
+              <label for="th-warp" class="label">Movement <span data-val="bgWarp" class="text-ink-faint"></span></label>
+              <input id="th-warp" name="bgWarp" form="theme-form" type="range" min="0" max="2" step="0.05" value={theme.bgWarp} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-para" class="label">Pointer parallax <span data-val="bgParallax" class="text-ink-faint"></span></label>
+              <input id="th-para" name="bgParallax" form="theme-form" type="range" min="0" max="1" step="0.05" value={theme.bgParallax} class="w-full" />
+            </div>
+          </div>
+
+          <GfxKnobs prefix="bg" theme={theme} global />
+
+          <p class="text-xs text-ink-faint">
+            Runs on the GPU and pauses in background tabs. Speed 0 freezes it, and reduced-motion systems get a single still frame.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    {/* ============================================================ header */}
+    {/* Same deal as Background: the knobs belong to the theme form via
+        form="theme-form", and the banner reuses the background's scene
+        catalogue, renderer and shaders — only the canvas host differs. The
+        header at the top of this page IS the preview. */}
+    <section id="header" class="acct-panel">
+      <div class="card mb-6 p-4">
+        <h2 class="section-title mb-3">Header</h2>
+
+        <div class="acct-grid">
+          <div class="min-w-36 flex-1">
+            <label for="th-hpad" class="label">Height <span data-val="hdrPad" class="text-ink-faint"></span></label>
+            <input id="th-hpad" name="hdrPad" form="theme-form" type="range" min="0.25" max="1.5" step="0.025" value={theme.hdrPad} class="w-full" />
+          </div>
+          <div class="min-w-36 flex-1">
+            <label for="th-halpha" class="label">Opacity <span data-val="hdrAlpha" class="text-ink-faint"></span></label>
+            <input id="th-halpha" name="hdrAlpha" form="theme-form" type="range" min="0.2" max="1" step="0.01" value={theme.hdrAlpha} class="w-full" />
+          </div>
+          <div class="min-w-36 flex-1">
+            <label for="th-hblur" class="label">Blur <span data-val="hdrBlur" class="text-ink-faint"></span></label>
+            <input id="th-hblur" name="hdrBlur" form="theme-form" type="range" min="0" max="30" step="1" value={theme.hdrBlur} class="w-full" />
+          </div>
+        </div>
+
+        <div class="acct-grid mt-4">
+          <div class="min-w-36 flex-1">
+            <label for="th-hborder" class="label">Bottom border <span data-val="hdrBorder" class="text-ink-faint"></span></label>
+            <input id="th-hborder" name="hdrBorder" form="theme-form" type="range" min="0" max="4" step="0.5" value={theme.hdrBorder} class="w-full" />
+          </div>
+          <div class="min-w-36 flex-1">
+            <label for="th-hhalo" class="label">Accent glow <span data-val="hdrHalo" class="text-ink-faint"></span></label>
+            <input id="th-hhalo" name="hdrHalo" form="theme-form" type="range" min="0" max="1" step="0.05" value={theme.hdrHalo} class="w-full" />
+          </div>
+          <div class="min-w-36 flex-1">
+            <label for="th-hsweep" class="label">Sweep <span data-val="hdrSweep" class="text-ink-faint"></span></label>
+            <input id="th-hsweep" name="hdrSweep" form="theme-form" type="range" min="0" max="1" step="0.05" value={theme.hdrSweep} class="w-full" />
+          </div>
+        </div>
+
+        <div class="mt-4">
+          {/* The empty hidden twin is what an UNCHECKED box submits. */}
+          <input type="hidden" name="hdrCustom" value="" form="theme-form" />
+          <label class="switch">
+            <input id="th-hcustom" name="hdrCustom" type="checkbox" value="on" form="theme-form" checked={theme.hdrCustom} />
+            Its own colour
+          </label>
+          <div class="acct-grid mt-3" data-hdrpane hidden={!theme.hdrCustom}>
+            <div>
+              <label for="th-hbg" class="label">Bar colour</label>
+              <input id="th-hbg" name="hdrBg" form="theme-form" type="color" value={theme.hdrBg} class="h-10 w-16 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+            </div>
+            <p class="min-w-48 flex-1 text-xs text-ink-faint">Off, the bar follows the page colour.</p>
+          </div>
+        </div>
+
+        {/* ----------------------------------------------- banner (three.js) */}
+        <div class="acct-grid mt-4">
+          <div class="min-w-40 flex-1">
+            <label for="th-hscene" class="label">Banner</label>
+            <select id="th-hscene" name="hdrScene" form="theme-form" class="input" data-scene-preview>
+              <option value="none" selected={theme.hdrScene === 'none'}>none — flat bar</option>
+              {SCENE_GROUPS.map((g) => (
+                <optgroup label={g.label}>
+                  {g.ids.map((id) => (
+                    <option value={id} selected={id === theme.hdrScene}>{SCENES[id].label} — {SCENES[id].hint}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+          <div class="min-w-36 flex-1" data-hdrscene hidden={theme.hdrScene === 'none'}>
+            <label for="th-hop" class="label">Banner opacity <span data-val="hdrOpacity" class="text-ink-faint"></span></label>
+            <input id="th-hop" name="hdrOpacity" form="theme-form" type="range" min="0.05" max="1" step="0.01" value={theme.hdrOpacity} class="w-full" />
+          </div>
+        </div>
+
+        <div data-hdrscene class="mt-4 space-y-4" hidden={theme.hdrScene === 'none'}>
+          <div class="acct-grid">
+            <div class="flex items-end gap-2">
+              <div>
+                <label for="th-hc1" class="label">Colour 1</label>
+                <input id="th-hc1" name="hdrColor1" form="theme-form" type="color" value={theme.hdrColor1} class="h-10 w-14 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+              </div>
+              <div>
+                <label for="th-hc2" class="label">2</label>
+                <input id="th-hc2" name="hdrColor2" form="theme-form" type="color" value={theme.hdrColor2} class="h-10 w-14 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+              </div>
+              <div>
+                <label for="th-hc3" class="label">3</label>
+                <input id="th-hc3" name="hdrColor3" form="theme-form" type="color" value={theme.hdrColor3} class="h-10 w-14 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+              </div>
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-hspeed" class="label">Speed <span data-val="hdrSpeed" class="text-ink-faint"></span></label>
+              <input id="th-hspeed" name="hdrSpeed" form="theme-form" type="range" min="0" max="3" step="0.05" value={theme.hdrSpeed} class="w-full" />
+            </div>
+          </div>
+          <div class="acct-grid">
+            <div class="min-w-36 flex-1">
+              <label for="th-hglow" class="label">Glow <span data-val="hdrGlow" class="text-ink-faint"></span></label>
+              <input id="th-hglow" name="hdrGlow" form="theme-form" type="range" min="0" max="2" step="0.05" value={theme.hdrGlow} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-hscale" class="label">Scale <span data-val="hdrScale" class="text-ink-faint"></span></label>
+              <input id="th-hscale" name="hdrScale" form="theme-form" type="range" min="0.25" max="4" step="0.05" value={theme.hdrScale} class="w-full" />
+            </div>
+            <div class="min-w-36 flex-1">
+              <label for="th-hwarp" class="label">Movement <span data-val="hdrWarp" class="text-ink-faint"></span></label>
+              <input id="th-hwarp" name="hdrWarp" form="theme-form" type="range" min="0" max="2" step="0.05" value={theme.hdrWarp} class="w-full" />
+            </div>
+          </div>
+
+          <GfxKnobs prefix="hdr" theme={theme} />
+        </div>
+
+        <p class="mt-3 text-xs text-ink-faint">
+          The banner is the same GPU scene as the background — it pauses in background tabs and shows one still frame under
+          reduced motion. Auto-throttle and Hi-DPI are set once, under Background. A banner starts coarser than the background:
+          the bar is a far wider box, so the same scale repeats features many more times across it.
+        </p>
+      </div>
+
+      {/* --------------------------------------------------------- brand */}
+      {/* The wordmark and the logo. Same deal again: knobs live in the theme
+          form, the header above IS the preview, and the logo picker shares the
+          uploads store (and therefore the /api/bg route) with backgrounds. */}
+      <div class="card mb-6 p-4">
+        <h2 class="section-title mb-3">Brand</h2>
+
+        <div class="acct-grid">
+          <div class="min-w-40 flex-1">
+            <label for="th-btext" class="label">Wordmark</label>
+            <input id="th-btext" name="brandText" form="theme-form" type="text" maxlength="24" value={theme.brandText} placeholder="leave empty for none" class="input" />
+          </div>
+          <div class="min-w-36 flex-1" data-font-picker>
+            <label for="th-bfont" class="label">Font</label>
+            {/* data-font is what SearchSelect renders each row (and the closed
+                control) in — the picker shows the fonts, not their names. */}
+            <select id="th-bfont" name="brandFont" form="theme-form" class="input">
+              {FONT_LIST.map((g) => (
+                <optgroup label={g.label}>
+                  {g.ids.map((id) => (
+                    <option value={id} data-font={previewStack(id)} selected={id === theme.brandFont}>
+                      {FONTS[id].label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+          <div class="min-w-32 flex-1">
+            <label for="th-bpos" class="label">Position</label>
+            <select id="th-bpos" name="brandPos" form="theme-form" class="input">
+              {(['left', 'center', 'right'] as const).map((p) => (
+                <option value={p} selected={p === theme.brandPos}>{p}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div class="acct-grid mt-4">
+          <div class="min-w-36 flex-1">
+            <label for="th-bsize" class="label">Text size <span data-val="brandSize" class="text-ink-faint"></span></label>
+            <input id="th-bsize" name="brandSize" form="theme-form" type="range" min="0.6" max="2.5" step="0.025" value={theme.brandSize} class="w-full" />
+          </div>
+          <div class="min-w-36 flex-1">
+            <label for="th-bweight" class="label">Weight <span data-val="brandWeight" class="text-ink-faint"></span></label>
+            <input id="th-bweight" name="brandWeight" form="theme-form" type="range" min="100" max="900" step="100" value={theme.brandWeight} class="w-full" />
+          </div>
+          <div class="min-w-36 flex-1">
+            <label for="th-btrack" class="label">Letter spacing <span data-val="brandTrack" class="text-ink-faint"></span></label>
+            <input id="th-btrack" name="brandTrack" form="theme-form" type="range" min="0" max="0.5" step="0.01" value={theme.brandTrack} class="w-full" />
+          </div>
+        </div>
+
+        <div class="acct-grid mt-4">
+          <div class="min-w-36 flex-1">
+            <label for="th-bglow" class="label">Glow <span data-val="brandGlow" class="text-ink-faint"></span></label>
+            <input id="th-bglow" name="brandGlow" form="theme-form" type="range" min="0" max="1" step="0.05" value={theme.brandGlow} class="w-full" />
+          </div>
+          <div class="min-w-36 flex-1">
+            <label for="th-bshadow" class="label">Shadow <span data-val="brandShadow" class="text-ink-faint"></span></label>
+            <input id="th-bshadow" name="brandShadow" form="theme-form" type="range" min="0" max="1" step="0.05" value={theme.brandShadow} class="w-full" />
+          </div>
+          <div class="min-w-36 flex-1">
+            <label for="th-blogosize" class="label">Logo size <span data-val="brandLogoSize" class="text-ink-faint"></span></label>
+            <input id="th-blogosize" name="brandLogoSize" form="theme-form" type="range" min="0" max="3" step="0.05" value={theme.brandLogoSize} class="w-full" />
+          </div>
+        </div>
+
+        <div class="mt-4">
+          {/* The empty hidden twin is what an UNCHECKED box submits. */}
+          <input type="hidden" name="brandCustom" value="" form="theme-form" />
+          <label class="switch">
+            <input id="th-bcustom" name="brandCustom" type="checkbox" value="on" form="theme-form" checked={theme.brandCustom} />
+            Its own text colour
+          </label>
+          <div class="acct-grid mt-3" data-brandpane hidden={!theme.brandCustom}>
+            <div>
+              <label for="th-bcolor" class="label">Wordmark colour</label>
+              <input id="th-bcolor" name="brandColor" form="theme-form" type="color" value={theme.brandColor} class="h-10 w-16 cursor-pointer rounded-md border border-line-strong bg-surface p-1" />
+            </div>
+            <p class="min-w-48 flex-1 text-xs text-ink-faint">Off, it follows the header's text colour.</p>
+          </div>
+        </div>
+
+        {/* ------------------------------------------------------ the logo */}
+        <div class="mt-4 space-y-3">
+          <span class="label">Logo</span>
+          <div class="bg-gallery bg-gallery-logo">
+            <div class="bg-thumb">
+              <label>
+                <input type="radio" name="brandLogo" value="" form="theme-form" checked={theme.brandLogo === ''} />
+                <Image src={mark} alt="" width={96} title="Built-in mark" />
+              </label>
+            </div>
+            {bgImages.map((name) => (
+              <div class="bg-thumb">
+                <label>
+                  <input type="radio" name="brandLogo" value={name} form="theme-form" checked={name === theme.brandLogo} />
+                  <img src={`/api/bg/${name}`} alt="" loading="lazy" width="96" height="96" />
+                </label>
+                <button form="logo-upload" name="delete" value={name} class="bg-thumb-del" title="Delete" aria-label="Delete image">×</button>
+              </div>
+            ))}
+          </div>
+
+          <form id="logo-upload" method="post" action="/api/account/background" enctype="multipart/form-data" class="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="logo" value="1" />
+            <input type="file" name="image" accept="image/*" class="input min-h-0 flex-1 px-2 py-1 text-xs" />
+            <button type="submit" class="btn min-h-0 px-2 py-1 text-xs">Upload</button>
+            <span class="text-[11px] text-ink-faint">{bgImages.length}/{MAX_PER_USER} · shared with background photos · webp, transparency kept</span>
+          </form>
+
+          <p class="text-xs text-ink-faint">Logo size 0 hides the picture; an empty wordmark hides the text. Both at once leaves the bar with nothing to click home from.</p>
+        </div>
+      </div>
+    </section>
+
+    {/* ========================================================= dashboard */}
+    <section id="dashboard" class="acct-panel">
+      <div class="card mb-6 p-4">
+        <h2 class="section-title mb-3">Dashboard</h2>
+        <form method="post" action="/api/account/prefs" class="acct-grid">
+          <div class="min-w-48 flex-1">
+            <label for="pf-alerts" class="label">Alert banner</label>
+            <select id="pf-alerts" name="alerts" class="input">
+              <option value="visible" selected={alertMode === 'visible'}>only services shown on my dashboard</option>
+              <option value="all" selected={alertMode === 'all'}>every monitored service</option>
+              <option value="off" selected={alertMode === 'off'}>never show it</option>
+            </select>
+          </div>
+          <noscript><button type="submit" class="btn">Save</button></noscript>
+        </form>
+        <p class="mt-2 text-xs text-ink-faint">
+          Controls the “N services down” banner above the ward grid. Host warnings (disk nearly full, load spike) are about the
+          machine the dashboard itself runs on, so they keep showing unless you pick “never”.
+        </p>
+      </div>
+    </section>
+
+    {/* ========================================================== accounts */}
+    <section id="accounts" class="acct-panel">
+      <div class="card mb-6 p-4">
+        <h2 class="section-title mb-1">Signed in as</h2>
+        <p class="text-sm">
+          {me.email} <span class="pill ml-1" data-status={me.role}>{me.role}</span>
+        </p>
+      </div>
+
+      <div class="card mb-6 p-4">
+        <h2 class="section-title mb-3">Connected accounts</h2>
+        <ul class="divide-y divide-line">
+          {
+            PROVIDERS.map((p) => {
+              const link = links.get(p.id);
+              return (
+                <li class="flex items-center justify-between gap-3 py-3">
+                  <div>
+                    <p class="text-sm font-medium">{p.name}</p>
+                    <p class="text-xs text-ink-muted">{link ? link.account_label || 'connected' : p.hint}</p>
+                  </div>
+                  {link ? (
+                    <form method="post" action="/api/connect/disconnect">
+                      <input type="hidden" name="provider" value={p.id} />
+                      <button type="submit" class="btn text-xs">Disconnect</button>
+                    </form>
+                  ) : (
+                    <a href={`/api/connect/${p.id}`} class="btn-primary text-xs">Connect</a>
+                  )}
+                </li>
+              );
+            })
+          }
+        </ul>
+      </div>
+
+      <div class="card mb-6 p-4" id="mailbox">
+        <h2 class="section-title mb-1">Mailbox (IMAP / POP3 / SMTP)</h2>
+        <p class="mb-3 text-[11px] text-ink-faint">
+          Any mail server you have credentials for. IMAP can flag, archive and file; POP3 can only
+          read and download, so the Mailbox ward hides those buttons. Sending always goes over SMTP.
+        </p>
+        <form method="post" action="/api/connect/mailbox" class="space-y-4">
+          <div class="acct-grid">
+            <div class="min-w-40 flex-1">
+              <label for="mb-address" class="label">Mailbox address</label>
+              <input id="mb-address" name="address" type="email" class="input" required
+                placeholder="you@example.com" value={mailboxLink?.account_label ?? ''} />
+            </div>
+            <div class="min-w-40 flex-1">
+              <label for="mb-user" class="label">Login user</label>
+              <input id="mb-user" name="user" class="input" placeholder="usually the address" value={mailbox?.user ?? ''} />
+            </div>
+          </div>
+
+          <div class="acct-grid">
+            <div class="min-w-32 flex-1">
+              <label for="mb-proto" class="label">Read with</label>
+              <select id="mb-proto" name="proto" class="input">
+                <option value="imap" selected={mailbox?.proto !== 'pop3'}>IMAP</option>
+                <option value="pop3" selected={mailbox?.proto === 'pop3'}>POP3</option>
+              </select>
+            </div>
+            <div class="min-w-40 flex-1">
+              <label for="mb-host" class="label">Incoming host</label>
+              <input id="mb-host" name="host" class="input" placeholder="imap.example.com" value={mailbox?.host ?? ''} />
+            </div>
+            <div class="min-w-24">
+              <label for="mb-port" class="label">Port</label>
+              <input id="mb-port" name="port" type="number" class="input" placeholder="993" value={mailbox?.port ?? ''} />
+            </div>
+            <div class="min-w-32 flex-1">
+              <label for="mb-secure" class="label">Encryption</label>
+              <select id="mb-secure" name="secure" class="input">
+                <option value="true" selected={mailbox?.secure !== false}>TLS (993 / 995)</option>
+                <option value="false" selected={mailbox?.secure === false}>STARTTLS (143 / 110)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="acct-grid">
+            <div class="min-w-40 flex-1">
+              <label for="mb-smtp" class="label">SMTP host</label>
+              <input id="mb-smtp" name="smtpHost" class="input" placeholder="smtp.example.com" value={mailbox?.smtpHost ?? ''} />
+            </div>
+            <div class="min-w-24">
+              <label for="mb-smtp-port" class="label">Port</label>
+              <input id="mb-smtp-port" name="smtpPort" type="number" class="input" placeholder="587" value={mailbox?.smtpPort ?? ''} />
+            </div>
+            <div class="min-w-32 flex-1">
+              <label for="mb-smtp-secure" class="label">Encryption</label>
+              <select id="mb-smtp-secure" name="smtpSecure" class="input">
+                <option value="false" selected={!mailbox?.smtpSecure}>STARTTLS (587)</option>
+                <option value="true" selected={mailbox?.smtpSecure}>TLS (465)</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label for="mb-pass" class="label">Password</label>
+            <input id="mb-pass" name="password" type="password" class="input" autocomplete="new-password"
+              placeholder={mailboxLink ? '— stored; leave blank to keep —' : 'mailbox or app password'} />
+            <p class="mt-1 text-[11px] text-ink-faint">
+              Sealed with the same key that protects OAuth refresh tokens. Use an app password where
+              the provider offers one.
+            </p>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <button type="submit" class="btn-primary text-xs">{mailboxLink ? 'Save mailbox' : 'Connect mailbox'}</button>
+            {mailboxLink && (
+              <span class="text-xs text-ink-muted">
+                {mailboxLink.account_label} · {mailbox?.proto ?? 'imap'}
+              </span>
+            )}
+          </div>
+        </form>
+        {mailboxLink && (
+          <form method="post" action="/api/connect/disconnect" class="mt-3 border-t border-line pt-3">
+            <input type="hidden" name="provider" value="mailbox" />
+            <button type="submit" class="btn text-xs">Remove this mailbox</button>
+          </form>
+        )}
+      </div>
+
+      <div class="card mb-6 p-4" id="icloud">
+        <h2 class="section-title mb-1">iCloud Calendar</h2>
+        <p class="mb-3 text-[11px] text-ink-faint">
+          Apple has no sign-in that grants calendar access, so this reads your calendars over CalDAV with an
+          app-specific password. Generate one at account.apple.com → Sign-In and Security → App-Specific Passwords.
+          Events land in the Agenda ward, the calendar logic triggers and the agent's calendar tool.
+        </p>
+        <form method="post" action="/api/connect/icloud" class="space-y-4">
+          <div class="acct-grid">
+            <div class="min-w-40 flex-1">
+              <label for="ic-id" class="label">Apple ID</label>
+              <input id="ic-id" name="appleId" type="email" class="input" required
+                placeholder="you@icloud.com" value={icloudLink?.account_label ?? ''} />
+            </div>
+            <div class="min-w-40 flex-1">
+              <label for="ic-pass" class="label">App-specific password</label>
+              <input id="ic-pass" name="password" type="password" class="input" autocomplete="new-password"
+                placeholder={icloudLink ? '— stored; leave blank to keep —' : 'xxxx-xxxx-xxxx-xxxx'} />
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <button type="submit" class="btn-primary text-xs">{icloudLink ? 'Save' : 'Connect iCloud'}</button>
+            {icloudLink && <span class="text-xs text-ink-muted">{icloudLink.account_label} · connected</span>}
+          </div>
+        </form>
+        {icloudLink && (
+          <form method="post" action="/api/connect/disconnect" class="mt-3 border-t border-line pt-3">
+            <input type="hidden" name="provider" value="icloud" />
+            <button type="submit" class="btn text-xs">Disconnect iCloud</button>
+          </form>
+        )}
+      </div>
+
+      {
+        notionLink && (
+          <div class="card mb-6 p-4" id="notion">
+            <h2 class="section-title mb-3">Notion wards</h2>
+            {notionCfgError && <p class="banner banner-warn mb-3">Notion didn't answer — reconnect it above and reload.</p>}
+            {notionCfg && (
+              <form method="post" action="/api/notion/config" class="space-y-4" data-autosave-check>
+                <div>
+                  <label for="tasksDbId" class="label">Default tasks database</label>
+                  <p class="mb-1 text-[11px] text-ink-faint">
+                    Used by a Tasks ward that hasn't picked its own database (⚙ on the ward) and by the agent's
+                    notion_tasks tool. A checkbox, status or select column is detected as the done column.
+                  </p>
+                  <select id="tasksDbId" name="tasksDbId" class="input">
+                    <option value="">— keep current —</option>
+                    {notionCfg.databases.map((d) => (
+                      <option value={d.id} selected={d.id === notionCfg!.tasksDbId}>
+                        {d.icon ? `${d.icon} ` : ''}{d.title || '(untitled)'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label for="calendarDbId" class="label">Calendar database</label>
+                  <p class="mb-1 text-[11px] text-ink-faint">
+                    Any database with a date column. Its rows show up in the Agenda ward alongside Google, Outlook and
+                    iCloud, and fire the calendar logic triggers. The Date / When / Start / Due column is used, else the first date column.
+                  </p>
+                  <select id="calendarDbId" name="calendarDbId" class="input">
+                    <option value="">— keep current —</option>
+                    <option value="none">— none —</option>
+                    {notionCfg.databases.map((d) => (
+                      <option value={d.id} selected={d.id === notionCfg!.calendarDbId}>
+                        {d.icon ? `${d.icon} ` : ''}{d.title || '(untitled)'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label for="capturePageId" class="label">Quick-capture page (pick one, or paste a Notion URL)</label>
+                  <select id="capture-select" class="input mb-2">
+                    <option value="">— recent pages —</option>
+                    {notionCfg.pages.map((p) => (
+                      <option value={p.id} selected={p.id === notionCfg!.capturePageId}>
+                        {p.icon ? `${p.icon} ` : ''}{p.title || '(untitled)'}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    id="capturePageId"
+                    name="capturePageId"
+                    type="text"
+                    class="input"
+                    placeholder="https://www.notion.so/…"
+                    value={notionCfg.capturePageId}
+                  />
+                </div>
+                <noscript><button type="submit" class="btn-primary">Save Notion config</button></noscript>
+              </form>
+            )}
+          </div>
+        )
+      }
+    </section>
+
+    {/* ============================================================= agent */}
+    <section id="agent" class="acct-panel">
+      <div class="card mb-6 p-4">
+        <h2 class="section-title mb-3">Agent</h2>
+        <p class="mb-3 text-xs text-ink-muted">
+          Credentials for Rime, the agent dashboard ward. Each user connects their own — the ward picks its provider in its ⚙ config.
+        </p>
+        {agentErr && (
+          <p class="banner banner-warn text-xs">
+            Last {agentErr.provider} failure: {agentErr.reason} <span class="text-ink-faint">({agentErr.at})</span>
+          </p>
+        )}
+
+        <div class="flex items-center justify-between gap-3 border-b border-line py-3">
+          <div>
+            <p class="text-sm font-medium">ChatGPT (codex)</p>
+            <p class="text-xs text-ink-muted">
+              {codexAccount
+                ? codexAccount.label || 'connected'
+                : 'Unofficial Codex backend, billed to your ChatGPT plan — may break without notice.'}
+            </p>
+          </div>
+          {codexAccount ? (
+            <form method="post" action="/api/account/agent">
+              <button type="submit" name="action" value="codex-disconnect" class="btn text-xs">Disconnect</button>
+            </form>
+          ) : !codexPending ? (
+            <form method="post" action="/api/account/agent">
+              <button type="submit" name="action" value="codex-start" class="btn-primary text-xs">Connect ChatGPT</button>
+            </form>
+          ) : null}
+        </div>
+        {codexPending && (
+          <div class="space-y-2 border-b border-line py-3">
+            <p class="text-xs">
+              1. <a class="link" href={codexPending.url} target="_blank" rel="noreferrer">Sign in with ChatGPT</a> — you will land on a
+              dead <code>localhost:1455</code> page. 2. Copy that page's FULL address and paste it here:
+            </p>
+            <form method="post" action="/api/account/agent" class="flex gap-2">
+              <input name="pasted" type="text" class="input min-h-0 flex-1 px-2 py-1 text-xs" placeholder="http://localhost:1455/auth/callback?code=…" />
+              <button type="submit" name="action" value="codex-finish" class="btn-primary min-h-0 px-2 py-1 text-xs">Finish</button>
+              <button type="submit" name="action" value="codex-cancel" class="btn min-h-0 px-2 py-1 text-xs">Cancel</button>
+            </form>
+          </div>
+        )}
+
+        {/* A key saves when the field loses focus (or on Enter). `action` is a
+            hidden INPUT, not a button — there is no submitter to carry it. */}
+        {agentKeys.map((k) => (
+          <form method="post" action="/api/account/agent" class="flex items-center gap-2 border-b border-line py-3">
+            <input type="hidden" name="action" value={`${k.id}-key`} />
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium">{k.name}</p>
+              <p class="truncate text-xs text-ink-muted">{k.label ? `saved: ${k.label}` : k.hint}</p>
+            </div>
+            <input name="key" type="password" class="input min-h-0 w-40 px-2 py-1 text-xs" placeholder={k.label ? 'replace…' : 'paste key…'} autocomplete="off" />
+            {k.label && (
+              <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-clear-key>Clear</button>
+            )}
+          </form>
+        ))}
+
+        <form method="post" action="/api/account/agent" class="flex items-center gap-2 border-b border-line py-3">
+          <input type="hidden" name="action" value="browserbase-key" />
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium">Browserbase API key</p>
+            <p class="truncate text-xs text-ink-muted">{bbLabel ? `saved: ${bbLabel}` : 'browser wards set to run on Browserbase — browserbase.com'}</p>
+          </div>
+          <input name="key" type="password" class="input min-h-0 w-40 px-2 py-1 text-xs" placeholder={bbLabel ? 'replace…' : 'paste key…'} autocomplete="off" />
+          {bbLabel && (
+            <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-clear-key>Clear</button>
+          )}
+        </form>
+
+        <div class="flex flex-wrap items-center gap-4 pt-3">
+          <form method="post" action="/api/account/agent" class="flex items-center gap-2">
+            <input type="hidden" name="action" value="rounds" />
+            <label for="ag-rounds" class="text-xs text-ink-muted">Tool rounds</label>
+            <input id="ag-rounds" name="rounds" type="number" min="0" step="1" value={agentRoundCap} class="input min-h-0 w-20 px-2 py-1 text-xs" />
+          </form>
+          <form method="post" action="/api/account/agent" class="flex items-center gap-2">
+            <input type="hidden" name="action" value="shell-network" />
+            <label class="switch text-xs">
+              <input type="checkbox" name="enabled" checked={shellNet} />
+              Sandbox internet access
+            </label>
+          </form>
+        </div>
+        <p class="mt-2 text-[11px] text-ink-faint">
+          Tool rounds cap one turn: at the limit it stops and waits for you to say "continue". A Rime ward can set its own under ⚙ Configure. <strong>0 removes the cap entirely</strong> — a turn then runs until the agent stops calling tools, and there is no way to stop it early short of restarting the server.
+        </p>
+        <p class="mt-2 text-[11px] text-ink-faint">
+          The sandbox network lets the agent fetch web pages — and lets a prompt injection in something it reads phone home. Off by default; leave it off unless you use web_fetch.
+        </p>
+      </div>
+    </section>
+
+    {/* ========================================================== security */}
+    <section id="security" class="acct-panel">
+      <div class="card p-4">
+        <h2 class="section-title mb-3">{pwSet ? 'Change password' : 'Set a password'}</h2>
+        {/* Deliberately NOT autosaved: two fields that only mean anything
+            together, and a wrong-current-password answer to show. */}
+        <form method="post" action="/api/account/password" class="space-y-4">
+          {
+            pwSet && (
+              <div>
+                <label for="current" class="label">Current password</label>
+                <input id="current" name="current" type="password" required autocomplete="current-password" class="input" />
+              </div>
+            )
+          }
+          <div>
+            <label for="next" class="label">New password (10+ characters)</label>
+            <input id="next" name="next" type="password" required minlength="10" autocomplete="new-password" class="input" />
+          </div>
+          <button type="submit" class="btn-primary">Save</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  {/* Global on purpose: GfxKnobs renders .acct-grid, .label and range inputs of
+      its own, and a scoped sheet would not reach them. Everything here is
+      .acct-* prefixed or nested under .acct-panel. */}
+  <style is:global>
+    /* ------------------------------------------------------------ tabs */
+    /* Sticky just under the app header (--acct-top is measured by the tab
+       script — the header's height is a theme knob). Bleeds to the page edge
+       so the scrolled content never peeks past it. */
+    .acct-nav {
+      position: sticky;
+      top: var(--acct-top, 0px);
+      z-index: 10;
+      margin: 0 -1rem 1.25rem;
+      padding: 0.5rem 1rem;
+      background: color-mix(in srgb, var(--color-surface-2) 86%, transparent);
+    }
+    .acct-strip {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--color-line);
+      border-radius: var(--radius-lg);
+      background: var(--color-surface);
+    }
+    .acct-tabs {
+      position: relative;
+      display: flex;
+      gap: 0.125rem;
+      padding: 3px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      scroll-snap-type: x proximity;
+    }
+    .acct-tabs::-webkit-scrollbar {
+      display: none;
+    }
+    /* Edge fades only where there is more strip to scroll to. */
+    .acct-tabs[data-scroll='right'] {
+      mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+    }
+    .acct-tabs[data-scroll='left'] {
+      mask-image: linear-gradient(to right, transparent, #000 2.5rem);
+    }
+    .acct-tabs[data-scroll='both'] {
+      mask-image: linear-gradient(to right, transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent);
+    }
+    .acct-tab {
+      position: relative;
+      z-index: 1;
+      flex: none;
+      min-height: 2.5rem;
+      padding: 0.375rem 0.875rem;
+      border-radius: calc(var(--radius-lg) - 3px);
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--color-ink-muted);
+      scroll-snap-align: start;
+      transition: color 0.2s var(--fd-ease);
+    }
+    @media (min-width: 640px) {
+      .acct-tab {
+        min-height: 2.25rem;
+      }
+    }
+    .acct-tab:hover {
+      color: var(--color-ink);
+    }
+    .acct-tab[aria-current] {
+      color: var(--color-accent-ink);
+    }
+    /* The one accent pill, slid under whichever tab is current. It lives
+       inside the scroller so it scrolls with the tabs. */
+    .acct-ind {
+      position: absolute;
+      top: 3px;
+      bottom: 3px;
+      left: 0;
+      width: var(--w, 0px);
+      translate: var(--x, 0px) 0;
+      border-radius: calc(var(--radius-lg) - 3px);
+      background: var(--color-accent);
+      box-shadow: 0 1px 6px color-mix(in srgb, var(--color-accent) 45%, transparent);
+    }
+    .acct-tabs[data-ready] .acct-ind {
+      transition:
+        translate 0.32s var(--fd-ease),
+        width 0.32s var(--fd-ease);
+    }
+
+    /* ---------------------------------------------------------- panels */
+    /* Panels animate on every show because toggling [hidden] takes them
+       through display:none, which restarts a CSS animation. The direction
+       follows the tab order (--acct-dir, set by the tab script), and the
+       cards inside cascade in. Nothing left filling forwards over the layout. */
+    .acct-panel {
+      animation: fd-acct-in 0.3s var(--fd-ease) backwards;
+      /* A deep link (#background) jumps here before the script runs — keep
+         the section clear of the sticky header + tab strip. */
+      scroll-margin-top: calc(var(--acct-top, 3.5rem) + 4.25rem);
+    }
+    .acct-panel > .card {
+      animation: fd-acct-card 0.4s var(--fd-ease) backwards;
+      animation-delay: calc(var(--i, 0) * 50ms);
+    }
+    .acct-panel > .card:nth-child(2) { --i: 1; }
+    .acct-panel > .card:nth-child(3) { --i: 2; }
+    .acct-panel > .card:nth-child(4) { --i: 3; }
+    .acct-panel > .card:nth-child(n + 5) { --i: 4; }
+    @keyframes fd-acct-in {
+      from {
+        opacity: 0;
+        translate: calc(var(--acct-dir, 1) * 18px) 0;
+      }
+    }
+    @keyframes fd-acct-card {
+      from {
+        opacity: 0;
+        translate: 0 8px;
+      }
+    }
+    .acct-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    /* ---------------------------------------------------------- fields */
+    /* Every knob row is one grid: labels line up on the same baseline no
+       matter whether a slider, a select or a swatch sits under them. */
+    .acct-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+      gap: 1rem;
+      align-items: start;
+    }
+    .acct-panel .label {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 0.5rem;
+    }
+    .acct-panel [data-val] {
+      font-size: 0.75rem;
+      font-weight: 400;
+      font-variant-numeric: tabular-nums;
+      color: var(--color-ink-faint);
+    }
+    /* Sliders: a thin track filled to the thumb (--p, set with the readout). */
+    .acct-panel input[type='range'] {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 100%;
+      height: 1.5rem;
+      margin: 0;
+      background: transparent;
+      cursor: pointer;
+      --p: 0%;
+    }
+    .acct-panel input[type='range']::-webkit-slider-runnable-track {
+      height: 4px;
+      border-radius: 2px;
+      background: linear-gradient(to right, var(--color-accent) var(--p), var(--color-line-strong) var(--p));
+    }
+    .acct-panel input[type='range']::-moz-range-track {
+      height: 4px;
+      border-radius: 2px;
+      background: var(--color-line-strong);
+    }
+    .acct-panel input[type='range']::-moz-range-progress {
+      height: 4px;
+      border-radius: 2px;
+      background: var(--color-accent);
+    }
+    .acct-panel input[type='range']::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 1rem;
+      height: 1rem;
+      margin-top: -6px;
+      border-radius: 50%;
+      border: 2px solid var(--color-accent);
+      background: var(--color-surface);
+      box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+      transition: transform 0.15s var(--fd-ease);
+    }
+    .acct-panel input[type='range']::-moz-range-thumb {
+      width: 0.75rem;
+      height: 0.75rem;
+      border-radius: 50%;
+      border: 2px solid var(--color-accent);
+      background: var(--color-surface);
+      box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+    }
+    .acct-panel input[type='range']:hover::-webkit-slider-thumb,
+    .acct-panel input[type='range']:active::-webkit-slider-thumb {
+      transform: scale(1.2);
+    }
+    .acct-panel input[type='range']:focus-visible {
+      outline: none;
+    }
+    .acct-panel input[type='range']:focus-visible::-webkit-slider-thumb {
+      outline: 2px solid var(--color-accent);
+      outline-offset: 2px;
+    }
+    /* Autosave readout. Absent attribute = invisible, so it fades both ways. */
+    .acct-save {
+      font-size: 0.6875rem;
+      color: var(--color-ink-faint);
+      opacity: 0;
+      transition: opacity 0.2s var(--fd-ease);
+    }
+    .acct-save[data-state] {
+      opacity: 1;
+    }
+    .acct-save[data-state='ok'] {
+      color: var(--color-ok);
+    }
+    .acct-save[data-state='err'] {
+      color: var(--color-err);
+    }
+  </style>
+
+  {/* No JS: no tabs and no autosave, so show every section and let the
+      remaining <noscript> submit buttons do the work. */}
+  <noscript>
+    <style is:inline>
+      .acct-panel[hidden] { display: block !important; }
+      .acct-nav { display: none; }
+    </style>
+  </noscript>
+
+  {/* Inline and synchronous: the module below is deferred, and a deep link
+      (#agent, #background) must not paint the first panel before switching. */}
+  <script is:inline>
+    (() => {
+      const panels = [...document.querySelectorAll('.acct-panel')];
+      const tabs = [...document.querySelectorAll('.acct-tab')];
+      const strip = document.querySelector('.acct-tabs');
+      const ind = document.querySelector('.acct-ind');
+      const main = document.querySelector('main');
+      // The accent pill under the current tab, and the tab scrolled into view.
+      const place = (smooth) => {
+        const cur = tabs.find((t) => t.hasAttribute('aria-current'));
+        if (!cur || !ind) return;
+        ind.style.setProperty('--x', cur.offsetLeft + 'px');
+        ind.style.setProperty('--w', cur.offsetWidth + 'px');
+        cur.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: smooth ? 'smooth' : 'instant' });
+      };
+      const show = (name, push) => {
+        const target = panels.some((p) => p.id === name) ? name : panels[0].id;
+        const from = tabs.findIndex((t) => t.hasAttribute('aria-current'));
+        const to = tabs.findIndex((t) => t.dataset.tab === target);
+        // Direction of the slide follows the tab order.
+        if (main) main.style.setProperty('--acct-dir', to < from ? '-1' : '1');
+        for (const p of panels) p.hidden = p.id !== target;
+        for (const t of tabs) {
+          if (t.dataset.tab === target) t.setAttribute('aria-current', 'page');
+          else t.removeAttribute('aria-current');
+        }
+        place(push);
+        if (push && location.hash.slice(1) !== target) history.replaceState(null, '', '#' + target);
+      };
+      // Edge fades: only on the side that has more strip to scroll to.
+      const edges = () => {
+        if (!strip) return;
+        const l = strip.scrollLeft > 2;
+        const r = strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 2;
+        const v = l && r ? 'both' : l ? 'left' : r ? 'right' : '';
+        if (v) strip.dataset.scroll = v;
+        else delete strip.dataset.scroll;
+      };
+      strip?.addEventListener('scroll', edges, { passive: true });
+      // Sticky offset = the app header's height, which is a theme knob.
+      const header = document.querySelector('.app-header');
+      const ro = new ResizeObserver(() => {
+        if (header && main) main.style.setProperty('--acct-top', header.offsetHeight + 'px');
+        place(false);
+        edges();
+      });
+      if (header) ro.observe(header);
+      if (strip) ro.observe(strip);
+      // Web fonts land after first paint and change the tab widths.
+      document.fonts?.ready.then(() => place(false));
+      // Transitions only from the second placement on — the first is the SSR'd
+      // position and must not slide in from 0.
+      requestAnimationFrame(() => strip && (strip.dataset.ready = ''));
+      // A hash may name a card INSIDE a panel (#notion) — resolve to the panel.
+      const fromHash = () => {
+        const h = location.hash.slice(1);
+        if (!h) return '';
+        const el = document.getElementById(h);
+        return el ? (el.closest('.acct-panel') || {}).id || h : h;
+      };
+      show(fromHash(), false);
+      for (const t of tabs) t.addEventListener('click', () => show(t.dataset.tab, true));
+      addEventListener('hashchange', () => show(fromHash(), false));
+    })();
+  </script>
+
+  <script>
+    // Live theme preview: the SAME derivation the server uses (theme.ts),
+    // applied to <html> on every input. Autosave then makes it permanent.
+    // The background is part of it: data-bg + the knob vars are CSS, and the
+    // three.js scene goes through the same applyBackground() the SSR boot uses.
+    import { normalizeTheme, rollPreset, headerSceneConfig, sceneConfig, GFX_DEFAULTS, HDR_SCALE, PRESETS, PRESET_KNOBS, SCENES, type ThemePreset, type SceneId } from '../lib/theme.ts';
+    import { gfxImpact, gfxLoad, type GfxKey } from '../lib/gfx.ts';
+    import { applyThemeLive } from '../scripts/app/theme-live.ts';
+    import { paintScenePreviews } from '../scripts/app/scene-thumbs.ts';
+
+    // Renders each scene once into the pickers' <option data-preview>. Only
+    // this page has scene selects, and a WebGL failure leaves them plain.
+    paintScenePreviews();
+
+    // ------------------------------------------------------------ autosave
+
+    const readout = document.getElementById('acct-save')!;
+    let clearFlash: number | undefined;
+
+    function flash(msg: string, state: 'busy' | 'ok' | 'err'): void {
+      readout.textContent = msg;
+      readout.dataset.state = state;
+      clearTimeout(clearFlash);
+      if (state !== 'busy') clearFlash = window.setTimeout(() => delete readout.dataset.state, 1800);
+    }
+
+    /** POST a form without leaving the page. The routes answer 303 back to
+     *  /account; `redirect: 'manual'` stops fetch from re-rendering this whole
+     *  page (Notion calls included) for every slider nudge. Forms that have a
+     *  real error path opt into following it, and read ?err= off the final URL. */
+    async function post(form: HTMLFormElement): Promise<void> {
+      const follow = form.hasAttribute('data-autosave-check');
+      flash('Saving…', 'busy');
+      // The attribute, not the property: a hidden <input name="action"> shadows
+      // form.action with the element itself, and fetch(input) 404s.
+      const res = await fetch(form.getAttribute('action')!, {
+        method: 'POST',
+        body: new FormData(form),
+        redirect: follow ? 'follow' : 'manual',
+      }).catch(() => null);
+      if (!res || res.status >= 400) return flash('Not saved', 'err');
+      const err = follow ? new URL(res.url).searchParams.get('err') : null;
+      if (err) return flash(err.replace(/[-+]/g, ' '), 'err');
+      flash('Saved', 'ok');
+      onSaved?.(form);
+    }
+
+    /** Set by the theme block below — its undo stack records a step per save. */
+    let onSaved: ((f: HTMLFormElement) => void) | null = null;
+
+    const pending = new WeakMap<HTMLFormElement, number>();
+    function autosave(form: HTMLFormElement, delay = 0): void {
+      clearTimeout(pending.get(form));
+      pending.set(form, window.setTimeout(() => void post(form), delay));
+    }
+
+    // `change` (not `input`) everywhere but the theme form: it fires once a
+    // select settles or a text field blurs, so a half-typed API key is never
+    // stored, and an untouched field never fires at all.
+    for (const form of document.querySelectorAll<HTMLFormElement>(
+      '[action="/api/account/prefs"], [action="/api/account/agent"], [action="/api/notion/config"]'
+    )) {
+      // The codex sign-in forms are buttons, not settings — nothing to watch.
+      if (form.querySelector('[name="pasted"]') || !form.querySelector('select, input:not([type="hidden"])')) continue;
+      form.addEventListener('change', () => autosave(form));
+    }
+
+    // Clearing a key is a POST with an empty field; the route reads that as
+    // "delete". It cannot be a submit button — Enter in the key field would
+    // then wipe the key just typed.
+    for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-clear-key]')) {
+      btn.addEventListener('click', () => {
+        const form = btn.form!;
+        (form.elements.namedItem('key') as HTMLInputElement).value = '';
+        void post(form);
+      });
+    }
+
+    // The capture-page select fills the id field, which is what actually saves.
+    document.getElementById('capture-select')?.addEventListener('change', (e) => {
+      const field = document.getElementById('capturePageId') as HTMLInputElement;
+      field.value = (e.target as HTMLSelectElement).value;
+      field.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    // --------------------------------------------------------- theme + bg
+
+    const form = document.getElementById('theme-form') as HTMLFormElement | null;
+    if (form) {
+      const read = () => normalizeTheme(Object.fromEntries(new FormData(form)) as Record<string, unknown>);
+      const set = (id: string, v: string | number) => {
+        const el = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
+        if (el) el.value = String(v);
+      };
+      const setRadio = (name: string, v: string | number) => {
+        // document, not form: the radios live in another panel and reach the form via form=.
+        for (const r of document.querySelectorAll<HTMLInputElement>(`input[type=radio][name="${name}"]`)) r.checked = r.value === String(v);
+      };
+      /** The graphics knobs of one surface back to what its scene ships with. */
+      const resetGfx = (p: 'bg' | 'hdr', sc: (typeof SCENES)[SceneId]) => {
+        set(`th-${p}res`, sc.res);
+        set(`th-${p}detail`, GFX_DEFAULTS.detail);
+        setRadio(`${p}Fps`, GFX_DEFAULTS.fps);
+      };
+
+      // The impact meters and the load line (lib/gfx.ts) for both surfaces.
+      const score = (cfg: ReturnType<typeof read>) => {
+        const surfaces = { bg: sceneConfig(cfg), hdr: headerSceneConfig(cfg) };
+        for (const el of document.querySelectorAll<HTMLElement>('[data-impact]')) {
+          const [p, key] = el.dataset.impact!.split(':') as ['bg' | 'hdr', GfxKey];
+          const sc = surfaces[p];
+          if (!sc) continue;
+          const im = gfxImpact(key, sc);
+          for (const m of el.querySelectorAll<HTMLElement>('[data-meter]')) {
+            const lvl = m.dataset.meter === 'gpu' ? im.gpu : im.battery;
+            m.style.setProperty('--lvl', String(lvl));
+            m.dataset.lvl = String(lvl);
+          }
+          el.querySelector<HTMLElement>('[data-note]')!.textContent = im.note ?? '';
+        }
+        for (const out of document.querySelectorAll<HTMLElement>('[data-load]')) {
+          const sc = surfaces[out.dataset.load as 'bg' | 'hdr'];
+          if (!sc) {
+            out.textContent = '';
+            continue;
+          }
+          const load = gfxLoad(sc, devicePixelRatio || 1);
+          const band = load < 0.85 ? 'light' : load <= 1.5 ? 'default' : load <= 3 ? 'heavy' : 'hot';
+          out.dataset.band = band;
+          out.textContent = `≈ ${load < 1 ? load.toFixed(2) : load.toFixed(1)}× scene default · ${
+            { light: 'lighter', default: 'as shipped', heavy: 'heavier', hot: 'phone-hostile' }[band]
+          }`;
+        }
+      };
+
+      const apply = () => {
+        const cfg = read();
+        applyThemeLive(cfg);
+
+        // Panes follow the PICKED kind, not the effective one — "photo" with
+        // nothing uploaded yet still has to show the upload row.
+        for (const pane of document.querySelectorAll<HTMLElement>('[data-bgpane]')) {
+          pane.hidden = !pane.dataset.bgpane!.split(' ').includes(cfg.background);
+        }
+        const hdrPane = document.querySelector<HTMLElement>('[data-hdrpane]');
+        if (hdrPane) hdrPane.hidden = !cfg.hdrCustom;
+        for (const pane of document.querySelectorAll<HTMLElement>('[data-hdrscene]')) {
+          pane.hidden = cfg.hdrScene === 'none';
+        }
+        const surfPane = document.querySelector<HTMLElement>('[data-surfpane]');
+        if (surfPane) surfPane.hidden = !cfg.surfaceCustom;
+        const brandPane = document.querySelector<HTMLElement>('[data-brandpane]');
+        if (brandPane) brandPane.hidden = !cfg.brandCustom;
+        // Slider readouts…
+        for (const out of document.querySelectorAll<HTMLElement>('[data-val]')) {
+          const v = cfg[out.dataset.val as keyof typeof cfg];
+          out.textContent = out.dataset.fmt === 'pct' ? `${Math.round(Number(v) * 100)}%` : `${v ?? ''}${out.dataset.unit ?? ''}`;
+        }
+        // …and the filled part of every track.
+        for (const r of document.querySelectorAll<HTMLInputElement>('.acct-panel input[type=range]')) {
+          const lo = Number(r.min), hi = Number(r.max);
+          r.style.setProperty('--p', `${((Number(r.value) - lo) / (hi - lo || 1)) * 100}%`);
+        }
+        score(cfg);
+      };
+
+      // --------------------------------------------------------------- undo
+      // A stack of whole-form snapshots, one step per SAVE — a slider drag is
+      // one debounced save, so it undoes in one press. `base` is the last
+      // saved state; an undo writes it back and re-posts, and the dedupe below
+      // keeps that round trip from pushing a step of its own.
+      const undoBtn = document.getElementById('acct-undo') as HTMLButtonElement;
+      const stack: string[] = [];
+      const snap = () => new URLSearchParams([...new FormData(form)] as [string, string][]).toString();
+      let base = snap();
+      const syncUndo = () => undoBtn.classList.toggle('hidden', !stack.length);
+
+      onSaved = (f) => {
+        if (f !== form) return;
+        const now = snap();
+        if (now === base) return;
+        stack.push(base);
+        if (stack.length > 50) stack.shift();
+        base = now;
+        syncUndo();
+      };
+
+      const undo = () => {
+        const prev = stack.pop();
+        if (prev === undefined) return;
+        const p = new URLSearchParams(prev);
+        for (const el of [...form.elements] as HTMLInputElement[]) {
+          // Buttons carry a name+value the server reads (`reset=1`) but never
+          // appear in a snapshot — writing '' into one disarms it.
+          if (!el.name || el.type === 'submit' || el.type === 'button') continue;
+          if (el.type === 'checkbox') el.checked = p.has(el.name);
+          else if (el.type === 'radio') el.checked = p.get(el.name) === el.value;
+          else el.value = p.get(el.name) ?? '';
+        }
+        curPreset = (document.getElementById('th-preset') as HTMLSelectElement).value as ThemePreset;
+        base = prev;
+        syncUndo();
+        apply();
+        autosave(form, 0);
+      };
+
+      undoBtn.addEventListener('click', undo);
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'z' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+        // Text fields keep their own native undo.
+        if ((e.target as HTMLElement).closest('textarea, input:not([type=range]):not([type=color]):not([type=checkbox]):not([type=radio])')) return;
+        e.preventDefault();
+        undo();
+      });
+
+      // Preview on every keystroke of a drag, save once it settles.
+      const live = () => {
+        apply();
+        autosave(form, 500);
+      };
+      // The style list belongs to the picked set: swap it, then repaint.
+      const iconSetSel = document.getElementById('th-iconset') as HTMLSelectElement;
+      const iconStyleSel = document.getElementById('th-iconstyle') as HTMLSelectElement;
+      const ICON_STYLES = JSON.parse(iconStyleSel.dataset.styles!) as Record<string, string[]>;
+      iconSetSel.addEventListener('change', () => {
+        const styles = ICON_STYLES[iconSetSel.value] ?? [];
+        iconStyleSel.replaceChildren(...styles.map((st) => new Option(st.replace('-', ' '), st)));
+        iconStyleSel.value = styles[0] ?? '';
+        iconStyleSel.dispatchEvent(new Event('change', { bubbles: true }));
+        iconStyleSel.closest<HTMLElement>('[data-icon-style]')!.hidden = !styles.length;
+        live();
+      });
+      form.addEventListener('input', live);
+      // The background knobs are form="theme-form" but live in another panel,
+      // so their events never bubble through the <form> element itself.
+      document.getElementById('background')?.addEventListener('input', live);
+      document.getElementById('header')?.addEventListener('input', live);
+
+      // "Reset to default" is a real submit (it navigates and re-renders with
+      // stock values) — don't let the input listener race a save against it.
+      form.addEventListener('submit', () => clearTimeout(pending.get(form)));
+
+      // The form field each preset-owned knob lives in. rollPreset() decides
+      // WHICH ones move (only those still at the outgoing preset's value —
+      // a header, background or accent the user set is theirs and stays).
+      const KNOB_FIELDS: Record<string, (typeof PRESET_KNOBS)[number]> = {
+        'th-accent': 'accent', 'th-alpha': 'glassAlpha', 'th-blur': 'glassBlur',
+        'th-radius': 'radius', 'th-density': 'density', 'th-bg': 'background',
+        'th-border': 'border', 'th-rim': 'rim', 'th-shadow': 'shadow',
+        'th-surface': 'surface', 'th-surface2': 'surface2', 'th-line': 'line',
+        'th-surf': 'surfaceCustom',
+        'th-hpad': 'hdrPad', 'th-halpha': 'hdrAlpha', 'th-hblur': 'hdrBlur',
+        'th-hborder': 'hdrBorder', 'th-hhalo': 'hdrHalo', 'th-hsweep': 'hdrSweep',
+        'th-hbg': 'hdrBg', 'th-hcustom': 'hdrCustom',
+      };
+      let curPreset = (document.getElementById('th-preset') as HTMLSelectElement).value as ThemePreset;
+
+      document.getElementById('th-preset')?.addEventListener('change', (e) => {
+        const next = (e.target as HTMLSelectElement).value as ThemePreset;
+        if (!PRESETS[next]) return;
+        // read() already sees the NEW preset in the select — roll from the old.
+        const rolled = rollPreset({ ...read(), preset: curPreset }, next);
+        curPreset = next;
+        for (const [id, key] of Object.entries(KNOB_FIELDS)) {
+          const el = document.getElementById(id) as HTMLInputElement | null;
+          if (!el) continue;
+          if (el.type === 'checkbox') el.checked = rolled[key] as boolean;
+          else el.value = String(rolled[key]);
+        }
+        live();
+      });
+
+      // Same idea for scenes: each carries its own colours and knob defaults.
+      document.getElementById('th-scene')?.addEventListener('change', (e) => {
+        const sc = SCENES[(e.target as HTMLSelectElement).value as SceneId];
+        if (!sc) return;
+        set('th-c1', sc.colors[0]);
+        set('th-c2', sc.colors[1]);
+        set('th-c3', sc.colors[2]);
+        set('th-speed', sc.speed);
+        set('th-glow', sc.glow);
+        set('th-scale', sc.scale);
+        set('th-warp', sc.warp);
+        set('th-bgop', sc.opacity);
+        resetGfx('bg', sc); // each preset has its own render scale
+        live();
+      });
+
+      // The banner shares the scene catalogue, so it loads the same defaults —
+      // scaled coarser, because the bar is a far wider box than the page.
+      document.getElementById('th-hscene')?.addEventListener('change', (e) => {
+        const sc = SCENES[(e.target as HTMLSelectElement).value as SceneId];
+        if (!sc) return live(); // 'none' — nothing to preload, just save it
+        set('th-hc1', sc.colors[0]);
+        set('th-hc2', sc.colors[1]);
+        set('th-hc3', sc.colors[2]);
+        set('th-hspeed', sc.speed);
+        set('th-hglow', sc.glow);
+        set('th-hscale', Math.round(sc.scale * HDR_SCALE * 100) / 100);
+        set('th-hwarp', sc.warp);
+        set('th-hop', sc.opacity);
+        resetGfx('hdr', sc);
+        live();
+      });
+
+      apply(); // pane visibility + readouts on load, without saving
+    }
+  </script>
+</AppLayout>

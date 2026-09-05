@@ -1,0 +1,3296 @@
+@import "tailwindcss";
+
+/* Dark mode is class-based (html.dark). ThemeScript.astro applies it pre-paint
+   from localStorage['fd-theme'] — DARK-FIRST: the class is on unless the user
+   explicitly chose light. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Semantic tokens, frost palette. light-dark() resolves against color-scheme,
+   which follows html.dark below — utilities built from these (bg-surface,
+   text-ink-muted, border-line, …) are dark-correct with NO dark: variant.
+   Palette derives from the brand assets: pale ice #EAF6F9, steel slates
+   #C4D4DC/#8FA6B5, cyan #17C8F4, navy #123B66, near-black #06121F. */
+@theme {
+  --color-surface: light-dark(#ffffff, #0d1b2e);
+  --color-surface-2: light-dark(#f3f7fb, #060d18);
+  --color-ink: light-dark(#0c1a2b, #e8f2fa);
+  --color-ink-muted: light-dark(#5c7189, #8fa8c0);
+  --color-ink-faint: light-dark(#94a9bd, #5c7189);
+  --color-line: light-dark(#dbe6f0, #16283f);
+  --color-line-strong: light-dark(#c3d4e4, #24405f);
+  --color-accent: light-dark(#0284c7, #17c8f4); /* brand cyan, darkened for light-mode contrast */
+  --color-accent-hi: light-dark(#0369a1, #6fdcff);
+  --color-accent-soft: light-dark(#e6f7ff, #082f49);
+  --color-ok: light-dark(#047857, #34d399);
+  --color-warn: light-dark(#b45309, #fbbf24);
+  --color-err: light-dark(#dc2626, #f87171);
+  --color-ok-soft: light-dark(#ecfdf5, #022c22);
+  --color-warn-soft: light-dark(#fffbeb, #451a03);
+  --color-err-soft: light-dark(#fef2f2, #450a0a);
+  /* Text ON accent-filled surfaces (buttons, chips, monograms). */
+  --color-accent-ink: light-dark(#ffffff, #04121f);
+}
+
+:root {
+  color-scheme: light;
+  /* One easing for everything that moves, so the app feels like one thing. */
+  --fd-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* A spring, expressed as CSS linear() — no library needed for one-shot eases. */
+  --fd-spring: linear(
+    0, 0.3538 4.1%, 0.6624 8.4%, 0.8613 12.6%, 0.9823 17%, 1.0407 21.6%,
+    1.0618 26.5%, 1.0532 32.2%, 1.0157 44.4%, 0.998 55.6%, 0.9954 66.9%, 1
+  );
+  /* TanStack Charts reads these; wiring them to the tokens means charts
+     follow light/dark (and any future user theme) for free. */
+  --ts-chart-1: var(--color-accent);
+  --ts-chart-2: var(--color-ok);
+  --ts-chart-3: var(--color-warn);
+  --ts-chart-4: var(--color-err);
+  --ts-chart-5: var(--color-accent-hi);
+  --ts-chart-6: var(--color-ink-faint);
+  --ts-chart-tooltip-background: var(--color-surface);
+  --ts-chart-tooltip-color: var(--color-ink);
+  --ts-chart-tooltip-border: 1px solid var(--color-line-strong);
+  --ts-chart-tooltip-border-radius: var(--radius-lg);
+  --ts-chart-tooltip-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+
+  /* User-theme knobs. Stock values reproduce the site exactly; a saved theme
+     overrides these via the style attribute BaseLayout puts on <html>
+     (and pins --radius-* / --spacing, which we re-state here so they always
+     exist regardless of Tailwind's tree-shaking). */
+  --fd-accent: #17c8f4;
+  --fd-glass-alpha: 100%;
+  --fd-glass-blur: 0px;
+  /* Surface/line knobs mirror the @theme palette so an unthemed or
+     surfaceCustom-off theme resolves to exactly the stock colours. */
+  --fd-surface: light-dark(#ffffff, #0d1b2e);
+  --fd-surface-2: light-dark(#f3f7fb, #060d18);
+  --fd-line: light-dark(#dbe6f0, #16283f);
+  --fd-border: 1px;
+  --fd-rim: 0;
+  --fd-shadow: 0;
+  /* Header chrome. --fd-hdr-bg falls back to the page colour, so a header
+     that was never customised follows surface-2 exactly as it always did. */
+  --fd-hdr-bg: var(--color-surface-2);
+  --fd-hdr-alpha: 85%;
+  --fd-hdr-blur: 8px;
+  --fd-hdr-border: 1px;
+  --fd-hdr-halo: 0;
+  --fd-hdr-sweep: 0;
+  --fd-hdr-pad: 0.625rem;
+  /* Header brand. Stock values ARE the shipped wordmark (0.875rem/700 at
+     0.25em beside a 1.75rem mark), so an unthemed header is unchanged. */
+  /* The app's own text — every ward, menu and dialog inherits it from body.
+     A ward can override it on its own card (WardInstance.font). */
+  --fd-ui-font: ui-sans-serif, system-ui, sans-serif;
+  --fd-brand-font: ui-sans-serif, system-ui, sans-serif;
+  --fd-brand-size: 0.875rem;
+  --fd-brand-weight: 700;
+  --fd-brand-track: 0.25em;
+  --fd-brand-logo-size: 1.75rem;
+  --fd-brand-glow: 0;
+  --fd-brand-shadow: 0;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --spacing: 0.25rem;
+}
+.dark {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* No page may scroll sideways — wide content scrolls inside its own container. */
+html,
+body {
+  overflow-x: clip;
+}
+
+/* One declaration is the whole global font system: everything inherits from
+   here, so the knob (or a ward's own font-family) is all there is to override. */
+body {
+  font-family: var(--fd-ui-font);
+}
+
+::selection {
+  background: light-dark(#bae6fd, #0c4a6e);
+  color: light-dark(#0c1a2b, #e8f2fa);
+}
+
+/* One global switch instead of a per-animation media query in every component. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  width: 1.25rem;
+  height: 1.25rem;
+  accent-color: var(--color-accent);
+}
+
+@media (max-width: 639px) {
+  /* iOS Safari zooms the viewport whenever a focused control is under 16px. */
+  .input {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+}
+
+/* A checkbox drawn as a switch. The input keeps its semantics (name, value,
+   form=, the hidden '' twin) — only the paint changes. Unlayered on purpose:
+   it has to beat the unlayered checkbox sizing above, which no @layer rule can. */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  user-select: none;
+}
+.switch input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  margin: 0;
+  width: 2.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: var(--color-line-strong);
+  transition: background-color 0.2s var(--fd-ease);
+}
+.switch input[type='checkbox']::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+  transition: translate 0.2s var(--fd-ease);
+}
+.switch input[type='checkbox']:checked {
+  background: var(--color-accent);
+}
+.switch input[type='checkbox']:checked::before {
+  translate: 1rem 0;
+}
+
+/* A radio group drawn as a segmented control. */
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+}
+.seg label {
+  position: relative;
+}
+.seg input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.seg span {
+  display: block;
+  padding: 0.25rem 0.625rem;
+  border-radius: calc(var(--radius-md) - 2px);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-muted);
+  transition:
+    background-color 0.15s var(--fd-ease),
+    color 0.15s var(--fd-ease);
+}
+.seg input:checked + span {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+}
+.seg input:focus-visible + span {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Taps feel native: no grey iOS flash, no 350ms double-tap-zoom delay. */
+a,
+button,
+summary,
+label {
+  -webkit-tap-highlight-color: transparent;
+}
+a,
+button,
+input,
+select,
+summary {
+  touch-action: manipulation;
+}
+
+@layer components {
+  /* Ground rules: borders do the separating (shadows only on overlays), one
+     accent, dark canvas + raised cards, tight radii. */
+  /* No transform in the transition: the dashboard animation engine writes
+     style.transform per frame, and a CSS transition on it both fights the
+     springs and corrupts FLIP measurements (rects read mid-transition). */
+  .card {
+    @apply rounded-lg border border-line bg-surface transition-[border-color] duration-200;
+  }
+  a.card:hover,
+  button.card:hover {
+    @apply -translate-y-px border-line-strong;
+  }
+
+  .label {
+    @apply mb-1 block text-sm font-medium text-ink-muted;
+  }
+
+  .input {
+    @apply block min-h-11 w-full min-w-0 rounded-md border border-line-strong bg-surface px-3 py-2 text-base text-ink
+      transition-[border-color,box-shadow] duration-150 placeholder:text-ink-faint
+      focus:border-accent focus:ring-2 focus:ring-accent/20 focus:outline-none
+      sm:min-h-0 sm:text-sm;
+  }
+
+  .btn {
+    @apply inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-line-strong
+      bg-surface px-3 py-2 text-sm font-medium text-ink
+      transition-[background-color,border-color,transform] duration-150
+      hover:bg-surface-2 active:translate-y-px
+      disabled:cursor-not-allowed disabled:opacity-50 disabled:active:translate-y-0 sm:min-h-0;
+  }
+
+  .btn-primary {
+    @apply inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-transparent
+      bg-accent px-3 py-2 text-sm font-semibold text-accent-ink
+      transition-[background-color,transform] duration-150
+      hover:bg-accent-hi active:translate-y-px
+      disabled:cursor-not-allowed disabled:opacity-50 disabled:active:translate-y-0 sm:min-h-0;
+  }
+
+  .btn-danger {
+    @apply inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-err/40
+      bg-surface px-3 py-2 text-sm font-medium text-err
+      transition-[background-color,border-color,transform] duration-150
+      hover:border-err/70 hover:bg-err-soft active:translate-y-px
+      disabled:cursor-not-allowed disabled:opacity-50 disabled:active:translate-y-0 sm:min-h-0;
+  }
+
+  .btn[data-busy],
+  .btn-primary[data-busy],
+  .btn-danger[data-busy] {
+    @apply pointer-events-none opacity-70;
+  }
+
+  .spinner {
+    @apply inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent;
+  }
+
+  .banner {
+    @apply mb-6 flex items-start gap-2 rounded-md px-3 py-2 text-sm;
+    animation: fd-drop-in 0.22s var(--fd-ease);
+  }
+  .banner-ok {
+    @apply bg-ok-soft text-ok inset-ring inset-ring-ok/25;
+  }
+  .banner-err {
+    @apply bg-err-soft text-err inset-ring inset-ring-err/25;
+  }
+  .banner-warn {
+    @apply bg-warn-soft text-warn inset-ring inset-ring-warn/25;
+  }
+  .banner-info {
+    @apply bg-accent-soft text-accent-hi inset-ring inset-ring-accent/25;
+  }
+
+  .section-title {
+    @apply text-xs font-semibold tracking-wider text-ink-muted uppercase;
+  }
+
+  .empty {
+    @apply rounded-lg border border-dashed border-line-strong px-6 py-10 text-center text-sm text-ink-muted;
+  }
+
+  .link {
+    @apply font-medium text-accent-hi underline-offset-2 hover:underline;
+  }
+
+  .chip {
+    @apply inline-flex min-h-11 items-center rounded-md bg-surface px-3 py-1.5 text-sm font-medium
+      whitespace-nowrap text-ink-muted ring-1 ring-line transition-colors duration-150
+      hover:bg-surface-2 sm:min-h-9;
+  }
+  .chip[aria-current] {
+    @apply bg-accent text-accent-ink ring-accent hover:bg-accent;
+  }
+
+  .page-head {
+    @apply mb-5 flex min-h-9 flex-wrap items-center justify-between gap-3;
+  }
+  .page-title {
+    @apply text-xl font-semibold tracking-tight;
+  }
+
+  .table {
+    @apply w-full text-sm;
+  }
+  .table thead th {
+    @apply border-b border-line px-3 py-2 text-left text-xs font-semibold tracking-wide text-ink-muted uppercase;
+  }
+  .table td {
+    @apply px-3 py-2;
+  }
+  .table tbody tr {
+    @apply border-b border-line/60 last:border-0;
+  }
+  .table tbody tr:hover {
+    @apply bg-surface-2/60;
+  }
+  .table td,
+  .table th {
+    font-variant-numeric: tabular-nums;
+  }
+  .table-wrap {
+    @apply -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0;
+  }
+
+  .stat {
+    @apply rounded-lg border border-line bg-surface p-4;
+  }
+  .stat-value {
+    @apply mt-1 text-2xl font-semibold tracking-tight tabular-nums;
+  }
+
+  .toolbar {
+    @apply mb-4 flex flex-wrap items-center gap-2;
+  }
+
+  .field-err {
+    @apply mt-1 text-xs text-err;
+  }
+
+  .pill {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize inset-ring;
+  }
+  .pill[data-status='up'] {
+    @apply bg-ok-soft text-ok inset-ring-ok/25;
+  }
+  .pill[data-status='degraded'],
+  .pill[data-status='unknown'] {
+    @apply bg-warn-soft text-warn inset-ring-warn/25;
+  }
+  .pill[data-status='down'] {
+    @apply bg-err-soft text-err inset-ring-err/25;
+  }
+  .pill[data-status='admin'] {
+    @apply bg-accent-soft text-accent-hi inset-ring-accent/25;
+  }
+  .pill[data-status='member'] {
+    @apply bg-surface-2 text-ink-muted inset-ring-line-strong;
+  }
+}
+
+/* ------------------------------------------------------------- dashboard */
+
+/* Ward grid: 2 cols on phones, 4 from sm, 6 from xl. Size classes span it.
+   No `dense` — user-ordered layouts need DOM order = visual order.
+   ponytail: a wide ward that doesn't fit the rest of a row leaves a trailing
+   hole; the user reorders to fill it. Turning on dense would pack those holes
+   but breaks DOM order = visual order, which the drag hit-test depends on. */
+.wd-grid {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 6.25rem;
+}
+
+/* Hidden wards: off the dashboard and off the grid — in Edit mode they live
+   in the tray under the grid (edit.ts syncTray), so they cost no slot. Logic
+   mode still shows them in place (dimmed) so their wires stay editable. */
+.wd-grid > [data-wd-hidden] {
+  display: none;
+}
+/* Off stage: a top-level card on another page (scripts/app/pages.ts stamps it;
+   nested cards follow their group). Kept in the DOM with its last render, so
+   coming back to a page is instant. */
+.wd-grid > [data-wd-off] {
+  display: none;
+}
+
+/* The page tabs under the toolbar. One row, scrolls sideways on a phone;
+   the active chip is underlined in the accent. */
+.app-pages {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+/* The active underline: one element, slid by a transform transition. */
+.app-page-ink {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 0;
+  background: var(--color-accent);
+  border-radius: 1px;
+  transition: transform 0.5s var(--fd-spring), width 0.5s var(--fd-spring);
+  pointer-events: none;
+}
+/* The outgoing page during a swap (pages.ts): a clone over the real grid. */
+.wd-grid-ghost {
+  will-change: transform, opacity;
+}
+.app-pages::-webkit-scrollbar {
+  display: none;
+}
+.app-page {
+  flex: none;
+  min-height: 2.25rem;
+  padding: 0.25rem 0.75rem;
+  border-bottom: 2px solid transparent;
+  font-size: 0.8125rem;
+  color: var(--color-ink-muted);
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+.app-page:hover {
+  color: var(--color-ink);
+}
+.app-page[aria-current] {
+  color: var(--color-ink);
+}
+.app-page-add {
+  padding-inline: 0.6rem;
+  color: var(--color-ink-faint);
+}
+/* A card dragged over a tab (edit.ts): lit until the dwell switches page. */
+.app-page[data-drop-hot] {
+  color: var(--color-ink);
+  background: var(--color-accent-soft);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+.app-page-input {
+  width: 9rem;
+  min-height: 2.25rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8125rem;
+}
+
+/* Toolbar buttons are icon + label; under 640px the label goes and the icon
+   (with its aria-label) carries the button at a full 44px target. */
+#wd-toolbar .btn {
+  gap: 0.35rem;
+}
+@media (max-width: 639px) {
+  #wd-toolbar .tb-label {
+    display: none;
+  }
+  #wd-toolbar .btn {
+    min-width: 2.75rem;
+  }
+}
+
+/* Coarse pointers: a still hold opens a ward's menu (dom.ts holdToFire) and,
+   in edit/leylines mode, lifts a card or starts a wire; a move before the
+   hold fires is a scroll, so the cards let pan-y through instead of owning
+   every touch. No callout/selection on the hold. */
+@media (pointer: coarse) {
+  [data-wd] {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  [data-wd] :is(input, textarea, [contenteditable]) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .wd-grid.editing [data-wd],
+  .wd-grid.wiring [data-logic-src] {
+    touch-action: pan-y;
+  }
+}
+
+/* Phones: every dialog is a bottom sheet (the full-size ones already fill the
+   screen); toasts and the leylines dock clear the home bar. */
+@media (max-width: 639px) {
+  .fd-dialog:not(.fd-dialog-full) {
+    width: 100vw;
+    max-width: none;
+    max-height: 100dvh;
+    margin: auto 0 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    border-inline: 0;
+    border-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    overflow-y: auto;
+  }
+  .fd-toast {
+    bottom: calc(1.25rem + env(safe-area-inset-bottom));
+  }
+  #logic-dock {
+    bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  }
+}
+/* In Leylines mode the toast sits above the dock, not on it. */
+body:has(.wd-grid.wiring) .fd-toast {
+  bottom: calc(4.5rem + env(safe-area-inset-bottom));
+}
+.wd-grid.wiring [data-wd-hidden] {
+  display: flex;
+  opacity: 0.55;
+  outline: 1px dashed var(--color-line-strong);
+  outline-offset: 2px;
+}
+/* Leylines mode: every page in flow (pages.ts enterFlow orders the cards by
+   page with CSS order and adds a header row per page), other pages dimmed
+   until hovered so both ends of any leyline are on screen. */
+.wd-grid.wiring > [data-wd-off] {
+  display: flex;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+.wd-grid.wiring > [data-wd-off]:hover {
+  opacity: 1;
+}
+.wd-page-head {
+  grid-column: 1 / -1;
+  align-self: end;
+  padding: 0.75rem 0.25rem 0.25rem;
+  border-bottom: 1px solid var(--color-line);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+/* The cross-page chip (logic-edit.ts stampCross): a leyline reaches another
+   page from this card. Hidden while the whole graph is on screen. */
+.wd-xpage {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  border: 1px solid var(--color-line);
+  font-size: 0.68rem;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wd-xpage:hover {
+  color: var(--color-ink);
+  border-color: var(--color-accent);
+}
+.wd-grid.wiring .wd-xpage {
+  display: none;
+}
+.wd-tray {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: -1rem 0 2rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  font-size: 0.75rem;
+  color: var(--color-ink-muted);
+  animation: fd-drop-in 0.22s var(--fd-ease);
+}
+.wd-tray-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.25rem 0.25rem 0.5rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+.wd-tray-chip button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.125rem 0.5rem;
+  background: var(--color-surface-2);
+  color: var(--color-accent-hi);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wd-tray-chip button:hover {
+  background: var(--color-accent-soft);
+}
+
+/* ------------------------------------------------------------------ groups */
+/* A container is a card whose body is a second .wd-grid. It ALWAYS occupies
+   exactly its own size on the page grid — closed it shows a strip of its
+   children's icons, and opening it (tap, or the chevron in Edit mode) drops
+   the nest as a panel floating over the wards beneath, page-grid wide, so the
+   dashboard never reflows. --wd-pop-x/--wd-pop-w are set by edit.ts placePop.
+   The one exception is Logic mode, where every group sits open IN FLOW
+   (full row, --wd-open-h rows, measured by fitGroups) so wires can reach
+   every ward at once. */
+[data-wd-type='container'] {
+  position: relative;
+  cursor: pointer;
+}
+[data-wd-type='container'] .wd-nest {
+  display: none;
+}
+/* ---- icons (lib/icon-names.ts): text, currentColor mask, or colour <img> ----
+   The theme's tint/opacity/size knobs are the three vars; absent = inherit. */
+.fd-ic {
+  display: inline-block;
+  width: calc(1em * var(--fd-icon-size, 1));
+  height: calc(1em * var(--fd-icon-size, 1));
+  vertical-align: -0.125em;
+  flex-shrink: 0;
+  color: var(--fd-icon-color, currentColor);
+  background: currentColor;
+  opacity: var(--fd-icon-opacity, 1);
+  -webkit-mask: var(--ic) center / contain no-repeat;
+  mask: var(--ic) center / contain no-repeat;
+}
+.fd-ic-img {
+  display: inline-block;
+  /* Meteocons pad their 512 box; 1.3em reads the same size as a 1em glyph. */
+  width: calc(1.3em * var(--fd-icon-size, 1));
+  height: calc(1.3em * var(--fd-icon-size, 1));
+  vertical-align: -0.25em;
+  flex-shrink: 0;
+  opacity: var(--fd-icon-opacity, 1);
+}
+.fd-ic-e {
+  display: inline-block;
+  font-size: calc(1em * var(--fd-icon-size, 1));
+  opacity: var(--fd-icon-opacity, 1);
+}
+/* Tinted emoji: colour emoji ignore `color`, but a zero-offset text-shadow is
+   painted from the glyph's alpha in the shadow colour — a flat silhouette.
+   ponytail: Firefox paints the shadow as the colour glyph itself (no tint). */
+[data-icon-tint] .fd-ic-e {
+  color: transparent;
+  text-shadow: 0 0 0 var(--fd-icon-color);
+}
+.fd-icon-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 1.5rem;
+  line-height: 1;
+  padding: 0.5rem 0;
+}
+
+.wd-peek {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0.25rem 0.5rem;
+  padding-top: 0.125rem;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+.wd-chevron {
+  flex-shrink: 0;
+  border: 0;
+  background: none;
+  padding: 0 0.25rem;
+  color: var(--color-ink-faint);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.25s var(--fd-ease), color 0.12s;
+}
+.wd-chevron:hover {
+  color: var(--color-ink);
+}
+[data-wd-type='container'][data-open] {
+  overflow: visible;
+  z-index: 25;
+  cursor: default;
+}
+[data-wd-type='container'][data-open] .wd-chevron {
+  transform: rotate(90deg);
+}
+[data-wd-type='container'][data-open] .wd-nest {
+  display: grid;
+  position: absolute;
+  top: 100%;
+  left: var(--wd-pop-x, 0px);
+  width: var(--wd-pop-w, 100%);
+  margin-top: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 3);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.4);
+  animation: fd-menu-in 0.16s var(--fd-ease);
+}
+.wd-grid.editing [data-wd-type='container'] {
+  cursor: grab;
+}
+/* Logic mode: in flow, so no popover and no z-index dance. */
+.wd-grid.wiring [data-wd-type='container'] {
+  grid-column: 1 / -1;
+  grid-row: span var(--wd-open-h, 3);
+  overflow: hidden;
+  z-index: auto;
+  cursor: default;
+}
+.wd-grid.wiring [data-wd-type='container'] .wd-nest {
+  display: grid;
+  position: static;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  animation: none;
+}
+.wd-grid.wiring [data-wd-type='container'] .wd-peek {
+  display: none;
+}
+/* An empty open group is still a drop zone. */
+.wd-nest {
+  align-content: start;
+  min-height: 6.25rem;
+}
+.wd-grid.editing .wd-nest:empty::after {
+  content: 'Drop wards here';
+  grid-column: 1 / -1;
+  align-self: center;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--color-ink-faint);
+}
+
+/* ------------------------------------------------------------------ spacers */
+/* A look with no data. Its header (title + edit controls) exists only in Edit
+   mode; the effect rides data-fx, stamped by Ward.astro and by the renderer.
+   #wd-grid in the selector so these outrank the themed-card chrome rules
+   (:root[data-themed] .card…). */
+[data-wd-type='spacer'] {
+  position: relative;
+}
+[data-wd-type='spacer'] > header {
+  display: none;
+}
+.wd-grid.editing [data-wd-type='spacer'] > header {
+  display: flex;
+}
+#wd-grid [data-fx='none'] {
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+#wd-grid [data-fx='glass'] {
+  background: color-mix(in srgb, var(--color-surface) 55%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+/* A lens: a specular highlight, a rim, and a slight sharpen-and-saturate of
+   whatever is behind it. Over an uploaded photo it magnifies for real — the
+   pseudo-element shows the fixed-attachment slice of the same photo, scaled
+   up inside the clipped card. */
+#wd-grid [data-fx='magnify'] {
+  background:
+    radial-gradient(120% 90% at 28% 18%, rgb(255 255 255 / 0.14), transparent 60%),
+    color-mix(in srgb, var(--color-surface) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-ink) 22%, transparent);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.16),
+    inset 0 -14px 28px rgb(0 0 0 / 0.16),
+    0 12px 32px -12px rgb(0 0 0 / 0.5);
+  backdrop-filter: blur(1px) saturate(1.5) contrast(1.06) brightness(1.06);
+  -webkit-backdrop-filter: blur(1px) saturate(1.5) contrast(1.06) brightness(1.06);
+}
+[data-bg='image'] #wd-grid [data-fx='magnify']::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background-image: var(--fd-bg-image);
+  background-attachment: fixed;
+  background-size: cover;
+  background-position: center;
+  transform: scale(1.3);
+}
+#wd-grid [data-fx='aurora'] {
+  border-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  background:
+    radial-gradient(60% 80% at 20% 20%, color-mix(in srgb, var(--color-accent) 32%, transparent), transparent 70%),
+    radial-gradient(70% 70% at 85% 85%, color-mix(in srgb, var(--color-accent-hi) 26%, transparent), transparent 70%),
+    color-mix(in srgb, var(--color-surface) 40%, transparent);
+  background-size: 200% 200%, 200% 200%, 100% 100%;
+  animation: fd-fx-drift 14s ease-in-out infinite alternate;
+}
+@keyframes fd-fx-drift {
+  from {
+    background-position: 0% 0%, 100% 100%, 0 0;
+  }
+  to {
+    background-position: 100% 100%, 0% 0%, 0 0;
+  }
+}
+#wd-grid [data-fx='scene'] {
+  background: color-mix(in srgb, var(--color-surface) 30%, transparent);
+}
+.wd-fx-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.wd-fx-canvas.live {
+  opacity: 1;
+}
+.wd-sep {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  height: 100%;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+.wd-sep::before,
+.wd-sep::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-line-strong);
+}
+/* THE reduced-transparency rule: every glass surface on the page goes solid
+   here — spacer effects, per-ward glass, the page-wide glass preset, the header. */
+@media (prefers-reduced-transparency: reduce) {
+  #wd-grid [data-fx='glass'],
+  #wd-grid [data-fx='magnify'],
+  .card[data-ward-glass],
+  [data-glass] .card,
+  [data-glass] .ward,
+  [data-glass] .fd-dialog,
+  [data-glass] .ctx-menu,
+  [data-glass] .fd-toast,
+  [data-glass] .wire-pop,
+  [data-glass] #logic-dock {
+    background: var(--color-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .app-header {
+    background: var(--fd-hdr-bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* Entrance cascade — pure CSS on purpose: a WAAPI entrance lingering in its
+   fill phase overrides inline transforms and kills drag/FLIP rendering. */
+.wd-enter {
+  animation: fd-wd-in 0.45s var(--fd-ease) backwards;
+}
+@keyframes fd-wd-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+/* A server push (the agent, or another of this user's tabs) touched this card.
+   Same expanding-ring shape as the ward up/down flash, in the accent colour, so
+   the eye lands on what actually changed. The global reduced-motion switch
+   above already neutralises it. */
+[data-wd][data-agent-touch] {
+  --flash-color: var(--color-accent);
+  animation: fd-pulse 1.2s var(--fd-ease);
+}
+/* THE expanding-ring pulse: the agent touch, a service flip, a dot flip — one
+   keyframe, the colour on --flash-color. */
+@keyframes fd-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--flash-color) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 14px transparent;
+  }
+}
+
+/* Nothing inside a ward shows a scrollbar: the body and every scroll
+   container a renderer nests in it (the weather hour strip, the agent log,
+   a Notion table). A visible bar also steals height and cascades into a
+   second one on the other axis. */
+.wd-body,
+.wd-body * {
+  scrollbar-width: none;
+}
+.wd-body::-webkit-scrollbar,
+.wd-body *::-webkit-scrollbar {
+  display: none;
+}
+/* Empty/placeholder states (Connect chips, "unavailable" notes) center
+   themselves instead of huddling top-left; vanishes once real content
+   replaces the .wd-note elements. */
+.wd-body:has(.wd-note) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-align: center;
+}
+
+/* Edit mode: controls fade in, whole card is draggable (pointer engine in
+   edit.ts), touch drags instead of scrolling while editing. */
+.wd-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  flex-shrink: 0;
+  /* No width while hidden: seven buttons' worth of reserved space is what
+     starved a small card's title down to nothing. */
+  width: 0;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition:
+    opacity 0.18s var(--fd-ease),
+    transform 0.18s var(--fd-ease),
+    visibility 0s 0.18s;
+}
+.wd-grid.editing .wd-edit {
+  width: auto;
+  overflow: visible;
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    opacity 0.18s var(--fd-ease),
+    transform 0.18s var(--fd-ease);
+}
+.wd-edit button {
+  border: 0;
+  background: none;
+  color: var(--color-ink-faint);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.3rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+/* Touch: bigger glyph, near-44px target. */
+@media (pointer: coarse) {
+  .wd-edit button {
+    font-size: 1.2rem;
+    padding: 0.45rem;
+  }
+}
+/* A one-column card cannot fit seven of them; the size button's menu has every action. */
+.wd-w1 .wd-edit :is([data-act='left'], [data-act='right'], [data-act='theme']) {
+  display: none;
+}
+.wd-edit button:hover {
+  color: var(--color-ink);
+  background: var(--color-surface-2);
+}
+.wd-grid.editing [data-wd] {
+  /* Containing block for .wd-grip (cards are static outside edit/wiring mode). */
+  position: relative;
+  outline: 1px dashed transparent;
+  outline-offset: 2px;
+  outline-color: var(--color-line-strong);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+/* While editing, embeds must not swallow pointer events mid-drag — pointer
+   events over an iframe go to ITS document, not ours. */
+.wd-grid.editing iframe {
+  pointer-events: none;
+}
+/* Resize grip: bottom-right corner, edit mode only. The pointer engine lives in
+   edit.ts and claims the gesture before the reorder drag sees it. */
+.wd-grip {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 14px;
+  height: 14px;
+  border-right: 2px solid var(--color-line-strong);
+  border-bottom: 2px solid var(--color-line-strong);
+  border-bottom-right-radius: var(--radius-md);
+  opacity: 0;
+  visibility: hidden;
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 6;
+  transition:
+    opacity 0.18s var(--fd-ease),
+    border-color 0.12s,
+    visibility 0s 0.18s;
+}
+.wd-grip::before {
+  /* Fat touch target around the 14px corner. */
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+.wd-grid.editing .wd-grip {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 0.18s var(--fd-ease),
+    border-color 0.12s;
+}
+.wd-grip:hover,
+[data-wd][data-resizing] .wd-grip {
+  border-color: var(--color-accent);
+}
+[data-wd][data-resizing] {
+  outline: 1px solid var(--color-accent) !important;
+  outline-offset: 2px;
+  z-index: 20;
+}
+
+[data-wd][data-dragging] {
+  /* The card's own transform transition MUST be off while the drag engine
+     drives transform per-frame, or every move rubber-bands. */
+  transition: none;
+  z-index: 30;
+  position: relative;
+  cursor: grabbing;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.4);
+  opacity: 0.94;
+}
+
+/* ------------------------------------------------------ searchable select
+   The clothes for components/SearchSelect.astro, which builds every node below
+   at runtime. Here rather than in the component because @apply only resolves in
+   this entry stylesheet — same reason .card and .input live here.
+
+   Everything is drawn from the semantic tokens, so these follow light/dark and
+   any user theme with no dark: variants; the panel also joins the [data-glass]
+   list further down, so a glass theme frosts it like every other overlay. */
+
+/* The native control stays in the form and out of sight. Not display:none — a
+   select that is display:none is not always submitted the same way by
+   assistive tooling, and its value is still the source of truth. */
+.fd-ss-native {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.fd-ss-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  text-align: left;
+  cursor: pointer;
+}
+.fd-ss-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fd-ss-value.fd-ss-empty {
+  color: var(--color-ink-faint);
+}
+.fd-ss-chev {
+  flex: none;
+  opacity: 0.5;
+  transition: transform 0.2s var(--fd-ease);
+}
+.fd-ss-trigger[aria-expanded='true'] .fd-ss-chev {
+  transform: rotate(180deg);
+}
+
+html.fd-ss-open {
+  overflow: hidden;
+}
+
+.fd-ss-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgb(2 8 16 / 0.5);
+  opacity: 0;
+  transition: opacity 0.2s var(--fd-ease);
+}
+.fd-ss-backdrop.fd-ss-in {
+  opacity: 1;
+}
+@media (min-width: 640px) {
+  /* A popover does not need to dim the page — it needs to catch the click that
+     dismisses it. */
+  .fd-ss-backdrop {
+    background: transparent;
+  }
+}
+
+/* Above .fd-dialog's own content, and above the 70/60 chrome layers. */
+.fd-ss-panel {
+  position: fixed;
+  z-index: 91;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.45);
+}
+
+.fd-ss-pop {
+  border-radius: var(--radius-xl);
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  transform-origin: top center;
+  transition:
+    opacity 0.16s var(--fd-ease),
+    transform 0.16s var(--fd-ease);
+}
+.fd-ss-pop.fd-ss-in {
+  opacity: 1;
+  transform: none;
+}
+
+.fd-ss-sheet {
+  border-width: 0;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  transform: translateY(100%);
+  transition: transform 0.3s var(--fd-spring);
+}
+.fd-ss-sheet.fd-ss-in {
+  transform: none;
+}
+
+.fd-ss-grip {
+  flex: none;
+  width: 2.25rem;
+  height: 0.25rem;
+  margin: 0.5rem auto 0.25rem;
+  border-radius: 999px;
+  background: var(--color-line-strong);
+}
+
+.fd-ss-search {
+  flex: none;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.fd-ss-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.25rem;
+}
+
+.fd-ss-group {
+  padding: 0.5rem 0.75rem 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+
+.fd-ss-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 2.75rem; /* thumbs, per WCAG 2.2 */
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--color-ink);
+}
+.fd-ss-opt:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.fd-ss-opt-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fd-ss-opt.fd-ss-active:not(:disabled),
+.fd-ss-opt:hover:not(:disabled) {
+  background: var(--color-surface-2);
+}
+.fd-ss-opt[aria-selected='true'] {
+  font-weight: 600;
+  color: var(--color-accent-hi);
+}
+.fd-ss-tick {
+  flex: none;
+  color: var(--color-accent);
+}
+
+/* An option can carry a rendered preview of what picking it does — the account
+   page's scene pickers stamp a data: URI onto each <option data-preview>, and
+   SearchSelect hands it over as --fd-ss-prev. The image is decoration UNDER a
+   scrim that keeps the label at full contrast: opaque at the text end, thinning
+   to the right so the picture still reads. Everything else about the row (touch
+   target, hover, active, selected) is unchanged. */
+.fd-ss-opt[data-preview] {
+  /* Stops are measured, not eyeballed: the label band composited over the
+     darkest previews (bokeh in light, hex in dark) holds >=5.7:1 against
+     --color-ink at these values. The old 0.28/0.26 tail read at 4.4/3.8. */
+  --fd-ss-scrim: linear-gradient(
+    to right,
+    light-dark(rgb(255 255 255 / 0.97), rgb(6 13 24 / 0.95)) 0%,
+    light-dark(rgb(255 255 255 / 0.88), rgb(6 13 24 / 0.88)) 42%,
+    light-dark(rgb(255 255 255 / 0.48), rgb(6 13 24 / 0.48)) 100%
+  );
+  min-height: 2.75rem;
+  background-color: var(--color-surface);
+  background-image: var(--fd-ss-scrim), var(--fd-ss-prev);
+  background-position: center;
+  background-size: auto, cover;
+  background-repeat: no-repeat;
+}
+.fd-ss-opt[data-preview] .fd-ss-opt-label {
+  text-shadow: 0 1px 2px light-dark(rgb(255 255 255 / 0.85), rgb(2 8 16 / 0.85));
+}
+/* The tick sits at the thin end of the scrim, so it needs its own separation. */
+.fd-ss-opt[data-preview] .fd-ss-tick {
+  filter: drop-shadow(0 1px 2px light-dark(rgb(255 255 255 / 0.9), rgb(2 8 16 / 0.9)));
+}
+/* The hover/active tint is a background-color the image would hide, so those
+   states get a ring and a thinner scrim instead — visible over any picture. */
+.fd-ss-opt[data-preview].fd-ss-active:not(:disabled),
+.fd-ss-opt[data-preview]:hover:not(:disabled) {
+  /* Thinner than the base scrim, but only as far as the same measurement
+     allows: the old 0.12/0.10 tail dropped the hovered label to 2.6:1. */
+  --fd-ss-scrim: linear-gradient(
+    to right,
+    light-dark(rgb(255 255 255 / 0.94), rgb(6 13 24 / 0.94)) 0%,
+    light-dark(rgb(255 255 255 / 0.82), rgb(6 13 24 / 0.82)) 42%,
+    light-dark(rgb(255 255 255 / 0.40), rgb(6 13 24 / 0.40)) 100%
+  );
+  /* Restated because the state above it sets the `background` SHORTHAND, which
+     resets background-image to none at a higher specificity than the base rule. */
+  background-color: var(--color-surface-2);
+  background-image: var(--fd-ss-scrim), var(--fd-ss-prev);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+.fd-ss-opt[data-preview][aria-selected='true'] {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.fd-ss-mark {
+  background: none;
+  font-weight: 600;
+  color: var(--color-accent-hi);
+}
+
+/* "Use <what you typed>" — a value the suggestion list does not have. Set
+   apart from the real options, and last, so it reads as the escape hatch. */
+.fd-ss-custom {
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--color-line);
+  border-radius: 0;
+  color: var(--color-ink-muted);
+  font-style: italic;
+}
+
+.fd-ss-none {
+  padding: 1.25rem 0.75rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--color-ink-muted);
+}
+
+@media (min-width: 640px) {
+  .fd-ss-opt {
+    min-height: 2.25rem;
+  }
+}
+
+/* ------------------------------------------------- slash-command completion
+   The popup scripts/app/agent.ts opens over the agent composer. Absolutely
+   positioned against the composer row (the script sets position:relative on it)
+   and opening UPWARD, because the composer sits at the bottom of its ward. */
+
+.fd-cmd {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.375rem);
+  left: 0;
+  z-index: 40;
+  max-height: 13rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.25rem;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: 0 14px 44px rgb(0 0 0 / 0.4);
+  animation: fd-menu-in 0.13s var(--fd-ease);
+  transform-origin: bottom center;
+}
+
+.fd-cmd-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.fd-cmd-row.fd-cmd-active,
+.fd-cmd-row:hover {
+  background: var(--color-surface-2);
+}
+.fd-cmd-name {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-accent-hi);
+}
+.fd-cmd-args {
+  flex: none;
+  font-size: 0.6875rem;
+  color: var(--color-ink-faint);
+}
+/* The description is the first thing to go when the ward is narrow. */
+.fd-cmd-desc {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.6875rem;
+  color: var(--color-ink-muted);
+}
+@media (max-width: 380px) {
+  .fd-cmd-desc {
+    display: none;
+  }
+}
+
+/* Right-click context menu. */
+.ctx-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 12rem;
+  padding: 0.3rem;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: 0 14px 44px rgb(0 0 0 / 0.4);
+  animation: fd-menu-in 0.13s var(--fd-ease);
+  transform-origin: top left;
+}
+@keyframes fd-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-3px);
+  }
+}
+.ctx-menu [role='menuitem'] {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  font-size: 0.8125rem;
+  color: var(--color-ink);
+  cursor: pointer;
+  text-align: left;
+}
+.ctx-menu [role='menuitem']:hover,
+.ctx-menu [role='menuitem']:focus-visible {
+  background: var(--color-surface-2);
+  outline: none;
+}
+.ctx-menu [role='menuitem'][data-danger] {
+  color: var(--color-err);
+}
+.ctx-menu [role='menuitem'][data-danger]:hover {
+  background: var(--color-err-soft);
+}
+.ctx-menu [role='menuitem']:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: none;
+}
+.ctx-label {
+  padding: 0.3rem 0.6rem 0.15rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ctx-sep {
+  border: 0;
+  border-top: 1px solid var(--color-line);
+  margin: 0.3rem 0.35rem;
+}
+/* Size picker: MAX_W columns x MAX_H rows of cells, hover to preview. Cells are
+   <i>, not buttons — 72 tab stops would bury the menu items below them. */
+.ctx-matrix {
+  display: grid;
+  grid-template-columns: repeat(6, 12px);
+  gap: 2px;
+  padding: 0.3rem 0.35rem 0.1rem;
+}
+.ctx-matrix i {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background-color 0.08s, border-color 0.08s;
+}
+.ctx-matrix i[data-on] {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+/* Columns past this breakpoint's cap: pickable, but they render clamped. */
+.ctx-matrix i[data-over] {
+  opacity: 0.4;
+}
+.ctx-matrix-label {
+  font-size: 0.68rem;
+  color: var(--color-ink-muted);
+  padding: 0.2rem 0.35rem 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bottom-center toast (layout saved / removed + undo). */
+.fd-toast {
+  position: fixed;
+  bottom: 1.25rem;
+  left: 50%;
+  translate: -50% 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.95rem;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 0.4);
+  font-size: 0.8125rem;
+  animation: fd-toast-in 0.25s var(--fd-spring);
+}
+.fd-toast[data-leaving] {
+  transition: opacity 0.2s, translate 0.2s;
+  opacity: 0;
+  translate: -50% 8px;
+}
+@keyframes fd-toast-in {
+  from {
+    opacity: 0;
+    translate: -50% 12px;
+  }
+}
+
+/* /perf bench rows (dev-only page): label, ms, ×cheapest, bar. */
+.perf-row {
+  display: grid;
+  grid-template-columns: minmax(11rem, max-content) 5.5rem 3.5rem 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.2rem 0;
+  font-size: 0.8rem;
+}
+.perf-bar {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--color-surface-2);
+  overflow: hidden;
+}
+.perf-bar i {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+}
+
+/* Add-ward catalog cards. */
+.fd-dialog-wide {
+  width: min(94vw, 42rem);
+}
+/* The browser and notepad wards' expand: as big as the screen allows — the
+   remote viewport follows this surface, so every pixel here is a pixel of page. */
+dialog.fd-dialog-full {
+  width: min(96vw, 110rem);
+  max-width: none;
+  height: min(92vh, 70rem);
+}
+.fd-dialog-full > form {
+  height: 100%;
+}
+
+/* ---- browser ward: the live view fills the body; the canvas keeps the remote
+   viewport's aspect (object-fit) while a resize is in flight ---- */
+.bw-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: #000;
+}
+.bw-view canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  outline: none;
+  touch-action: none;
+  cursor: default;
+}
+.bw-view canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+.bw-toast {
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-md);
+  background: rgb(0 0 0 / 0.75);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 1.3;
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.bw-tabs {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.bw-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 12rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-ink-muted);
+}
+.bw-tab[aria-pressed='true'] {
+  color: var(--color-ink);
+  border-color: var(--color-accent);
+}
+.bw-tab-x {
+  opacity: 0.6;
+}
+.bw-tab-x:hover {
+  opacity: 1;
+}
+.aw-catalog {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding: 2px; /* room for focus rings */
+}
+@media (min-width: 640px) {
+  .aw-catalog {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.aw-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  padding: 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background-color 0.15s, transform 0.15s;
+}
+.aw-card:hover {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-2);
+  transform: translateY(-1px);
+}
+.aw-card[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+.aw-card:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  transform: none;
+}
+.aw-card .aw-ic {
+  font-size: 1.15rem;
+}
+.aw-card .aw-t {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.aw-card .aw-b {
+  font-size: 0.66rem;
+  line-height: 1.35;
+  color: var(--color-ink-muted);
+}
+/* The picker's chips and group eyebrows. Cards hide with the `hidden`
+   attribute (preflight paints it), so a search is hide + reorder, never a rebuild. */
+.aw-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.aw-cat {
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+  font-size: 0.7rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.aw-cat:hover {
+  border-color: var(--color-line-strong);
+}
+.aw-cat[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
+}
+.aw-group {
+  grid-column: 1 / -1;
+  margin-top: 0.4rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+.aw-group:first-child {
+  margin-top: 0;
+}
+.aw-card[hidden],
+.aw-group[hidden] {
+  display: none;
+}
+@media (min-width: 640px) {
+  .wd-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1280px) {
+  .wd-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+/* Ward spans. Width is a class because it must clamp per breakpoint — a
+   grid-column span wider than the grid GROWS the implicit grid instead of
+   clamping. Height is an inline --wd-h: rows are a fixed track, never clamped. */
+[data-wd] {
+  grid-row: span var(--wd-h, 1);
+}
+.wd-w1 { grid-column: span 1; }
+.wd-w2 { grid-column: span 2; }
+.wd-w3 { grid-column: span 3; }
+.wd-w4 { grid-column: span 4; }
+.wd-w5 { grid-column: span 5; }
+.wd-w6 { grid-column: span 6; }
+@media (max-width: 639px) {
+  .wd-w2, .wd-w3, .wd-w4, .wd-w5, .wd-w6 { grid-column: span 2; }
+}
+@media (min-width: 640px) and (max-width: 1279px) {
+  .wd-w5, .wd-w6 { grid-column: span 4; }
+}
+
+/* Service wards flow in their own auto-fill grid. */
+.ward-grid {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+}
+
+.ward {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  padding: calc(var(--spacing) * 3);
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  transition: border-color 0.2s;
+}
+/* Inside a single-service ward the card supplies border/padding/title. */
+.ward-bare {
+  border: 0;
+  background: none;
+  padding: 0;
+  height: 100%;
+  justify-content: center;
+}
+.ward-bare [data-role='lat'] {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.ward-bare[data-ok='down'] [data-role='lat'] {
+  color: var(--color-err);
+}
+/* One-row Services wards: value-first cells, the spark behind the value. */
+.ward-grid-compact {
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  gap: calc(var(--spacing) * 2);
+}
+.ward-grid-compact .ward {
+  position: relative;
+  gap: 0.15rem;
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2);
+}
+.ward-grid-compact .ward-mono,
+.ward-grid-compact [data-role='detail'] {
+  display: none;
+}
+.ward-grid-compact .ward .spark {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 0.75rem;
+  opacity: 0.5;
+}
+/* The dots wall: a column per group, a dot per service. Down is a border, not
+   a box-shadow, so the pulse keyframes do not fight it. */
+.dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+  align-content: flex-start;
+}
+.dots-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.dots-cap {
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+.dots-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  box-sizing: border-box;
+  border: 2px solid transparent;
+  background: var(--color-ink-faint);
+}
+.dot[data-ok='up'] {
+  background: var(--color-ok);
+}
+.dot[data-ok='down'] {
+  background: transparent;
+  border-color: var(--color-err);
+}
+.ward[data-stale] {
+  opacity: 0.6;
+}
+.ward[data-flash='down'],
+.dot[data-flash='down'] {
+  --flash-color: var(--color-err);
+  animation: fd-pulse 0.9s var(--fd-ease);
+}
+.ward[data-flash='up'],
+.dot[data-flash='up'] {
+  --flash-color: var(--color-ok);
+  animation: fd-pulse 0.9s var(--fd-ease);
+}
+
+.ward .spark {
+  width: 100%;
+  height: 1rem;
+  overflow: visible;
+}
+.ward .spark polyline {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.7;
+}
+
+/* Octagon monogram for services without a favicon — the brand's badge shape. */
+.ward-mono {
+  width: 1.25rem;
+  height: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--color-accent-ink);
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-hi));
+  clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
+}
+
+/* Skeleton shimmer for ward bodies before data lands. */
+.skel {
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    100deg,
+    var(--color-line) 40%,
+    color-mix(in srgb, var(--color-line) 55%, var(--color-surface)) 50%,
+    var(--color-line) 60%
+  );
+  background-size: 200% 100%;
+  animation: fd-skel 1.4s ease-in-out infinite;
+}
+@keyframes fd-skel {
+  from { background-position: 120% 0; }
+  to { background-position: -80% 0; }
+}
+
+/* Compose / confirm dialog. */
+.fd-dialog {
+  margin: auto;
+  width: min(94vw, 34rem);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  padding: 0;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.45);
+}
+.fd-dialog::backdrop {
+  background: rgb(2 8 16 / 0.6);
+  backdrop-filter: blur(2px);
+}
+.fd-dialog[open] {
+  animation: fd-dialog-in 0.18s var(--fd-spring);
+}
+@keyframes fd-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+/* --------------------------------------------------------------- splash */
+
+/* Server-rendered ground layer: brand gradient + aurora blobs + emblem. It is
+   the loading state, the no-WebGL fallback, and what reduced-motion keeps. */
+.splash-ground {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  /* Extra stops: a sparse dark gradient mach-bands into a visible hard line
+     at the 55% stop without them. */
+  background: radial-gradient(120% 90% at 50% 10%, #0b2440 0%, #081a30 30%, #060d18 62%, #02060d 100%);
+}
+.splash-ground::before,
+.splash-ground::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.35;
+  animation: fd-blob-drift 40s ease-in-out infinite alternate;
+}
+.splash-ground::before {
+  width: 55vw;
+  height: 40vh;
+  left: 5vw;
+  top: 8vh;
+  background: radial-gradient(closest-side, #17c8f4, transparent 70%);
+}
+.splash-ground::after {
+  width: 45vw;
+  height: 45vh;
+  right: 2vw;
+  bottom: 5vh;
+  background: radial-gradient(closest-side, #3b2e94, transparent 70%);
+  animation-delay: -20s;
+}
+@keyframes fd-blob-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(6vw, -4vh, 0) scale(1.15); }
+}
+/* Once the terrain is live the blobs sit behind it. A transform animation on a
+   filtered layer makes the compositor re-run the 70px blur every frame whether
+   or not it can be seen; frozen, the filtered layer is rasterized once and
+   cached. Paused rather than removed so nothing jumps during the fade-in. */
+body:has(#splash-canvas.live) .splash-ground::before,
+body:has(#splash-canvas.live) .splash-ground::after {
+  animation-play-state: paused;
+}
+.splash-ground .emblem {
+  position: absolute;
+  right: -8vw;
+  top: 50%;
+  width: 55vw;
+  max-width: 44rem;
+  transform: translateY(-50%);
+  opacity: 0.1;
+  user-select: none;
+  pointer-events: none;
+}
+
+#splash-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+#splash-canvas.live {
+  opacity: var(--splash-opacity, 1);
+}
+
+/* The gate flash pair: / dives into the shard and covers the screen; /login
+   starts covered and fades out. */
+#gate-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(closest-side at 50% 50%, #eaf6f9 0%, #9be7ff 45%, rgb(6 13 24 / 0) 100%);
+  background-color: #eaf6f9;
+}
+#gate-flash.flash-in {
+  transition: opacity 0.3s ease-in;
+  opacity: 1;
+}
+#gate-flash.flash-out {
+  opacity: 1;
+  animation: fd-flash-out 0.4s ease-out forwards;
+}
+@keyframes fd-flash-out {
+  to { opacity: 0; }
+}
+
+/* Splash DOM overlay. */
+.splash-overlay {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  padding: 1.5rem;
+  text-align: center;
+}
+.splash-wordmark {
+  width: min(82vw, 40rem);
+  height: auto;
+  filter: drop-shadow(0 0 28px rgb(23 200 244 / 0.35)) drop-shadow(0 1px 2px rgb(0 0 0 / 0.6));
+  user-select: none;
+}
+.splash-tagline {
+  color: #8fa8c0;
+  font-size: 1rem;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+}
+.splash-enter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 2.75rem;
+  border: 1px solid rgb(23 200 244 / 0.4);
+  border-radius: 9999px;
+  color: #9be7ff;
+  background: rgb(23 200 244 / 0.08);
+  backdrop-filter: blur(6px);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  transition: border-color 0.25s, background-color 0.25s, box-shadow 0.25s;
+}
+.splash-enter:hover,
+.splash-enter:focus-visible {
+  border-color: rgb(23 200 244 / 0.9);
+  background: rgb(23 200 244 / 0.16);
+  box-shadow: 0 0 32px rgb(23 200 244 / 0.25);
+}
+
+/* ---------------------------------------------------------------- motion */
+
+@keyframes fd-drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* One-shot pop for cards/dialogs entering (login card). */
+.fd-pop-in {
+  animation: fd-pop-in 0.3s var(--fd-spring) both;
+}
+@keyframes fd-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+/* ---------------------------------------------------------- user theming */
+
+/* All theme derivation lives HERE, off the raw knob vars on <html>. The
+   server only stamps knob values (src/lib/theme.ts themeHtmlAttrs); the
+   account editor sets the same props for live preview. Scoped to
+   [data-themed] so the stock site is untouched when no theme is saved. */
+/* A ward carrying its own theme re-derives these tokens FROM ITS OWN knobs and
+   everything inside it inherits the result — the same block, one level down.
+   Nothing else is needed for the card's own utilities (bg-surface, border-line,
+   rounded-lg): custom properties resolve per element, so they already read
+   whatever the card set. */
+:root[data-themed],
+[data-ward-theme] {
+  /* Light mode darkens the user accent for contrast on pale surfaces;
+     dark mode uses it as picked. */
+  --color-accent: light-dark(oklch(from var(--fd-accent) min(l, 0.55) c h), var(--fd-accent));
+  --color-accent-hi: light-dark(
+    oklch(from var(--fd-accent) calc(min(l, 0.55) - 0.08) c h),
+    oklch(from var(--fd-accent) calc(l + 0.1) c h)
+  );
+  --color-accent-soft: light-dark(
+    oklch(from var(--fd-accent) 0.96 0.04 h),
+    oklch(from var(--fd-accent) 0.25 0.06 h)
+  );
+  /* Black-or-white text on accent, picked by accent lightness — pure CSS. */
+  --color-accent-ink: oklch(from var(--color-accent) clamp(0, (0.62 - l) * infinity, 1) 0 h);
+
+  /* Surfaces and borders read the knobs. Stock values are identical, so this
+     is a no-op until the user picks colours (or the OLED preset overrides the
+     knobs from the style attribute). */
+  --color-surface: var(--fd-surface);
+  --color-surface-2: var(--fd-surface-2);
+  --color-line: var(--fd-line);
+}
+
+/* A custom surface REPLACES the palette in both modes, so ink and the strong
+   line have to follow it — otherwise picking a dark surface in light mode
+   leaves dark text on dark. Black-or-white by surface lightness, same trick
+   as --color-accent-ink above. */
+:root[data-surfaced],
+[data-ward-surfaced] {
+  --color-ink: oklch(from var(--color-surface) clamp(0, (0.62 - l) * infinity, 1) 0 h);
+  --color-ink-muted: color-mix(in oklab, var(--color-ink) 66%, var(--color-surface));
+  --color-ink-faint: color-mix(in oklab, var(--color-ink) 44%, var(--color-surface));
+  --color-line-strong: color-mix(in oklab, var(--color-line), var(--color-ink) 28%);
+}
+
+/* Border weight + trim. The rim is an inner top highlight (what reads as a
+   glass edge) and the shadow lifts the card off the background; both scale
+   from their knob, so 0 paints nothing. Excluded: bare wards (their card
+   already owns the chrome) and a wire-drag drop target (its ring is a
+   box-shadow this rule would otherwise outrank). */
+:root[data-themed] .card:not([data-drop-hot]),
+:root[data-themed] .ward:not(.ward-bare, [data-drop-hot]),
+.card[data-ward-theme]:not([data-drop-hot]) {
+  border-width: var(--fd-border);
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / var(--fd-rim)),
+    0 calc(var(--fd-shadow) * 14px) calc(var(--fd-shadow) * 36px) calc(var(--fd-shadow) * -8px)
+      rgb(0 0 0 / calc(var(--fd-shadow) * 0.5));
+}
+
+/* ------------------------------------------------------------------ header */
+
+/* The header is a themed component: every visual is a knob, and every knob's
+   stock value reproduces the bar as it was (surface-2 at 85%, 8px blur, 1px
+   line, 0.625rem rows). Layout stays here rather than in utility classes so
+   the knobs have something to override. */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: var(--fd-hdr-border) solid var(--color-line);
+  background: color-mix(in srgb, var(--fd-hdr-bg) var(--fd-hdr-alpha), transparent);
+  /* saturate(1.3) matches what the glass rule used to give this bar, so a
+     glass theme's header is unchanged; on a solid one it is imperceptible. */
+  backdrop-filter: blur(var(--fd-hdr-blur)) saturate(1.3);
+  -webkit-backdrop-filter: blur(var(--fd-hdr-blur)) saturate(1.3);
+}
+/* The content row rides above the banner canvas. */
+.app-header > div {
+  position: relative;
+  z-index: 1;
+  padding-block: var(--fd-hdr-pad);
+}
+/* The brand block: the logo and the wordmark, both entirely knob-driven. The
+   text is a normal DOM node (AppLayout renders whatever the user typed) —
+   everything else about it is a var. */
+.app-brand {
+  display: flex;
+  align-items: center;
+}
+.app-brand-logo {
+  width: var(--fd-brand-logo-size);
+  height: var(--fd-brand-logo-size);
+  object-fit: contain;
+}
+/* The old gap-2, expressed so it scales with the mark and vanishes with
+   either half of the pair (:empty is the wordmark the user cleared). */
+.app-brand-text:not(:empty) {
+  margin-inline-start: calc(var(--fd-brand-logo-size) * 0.29);
+}
+.app-brand-text {
+  font-family: var(--fd-brand-font);
+  font-size: var(--fd-brand-size);
+  font-weight: var(--fd-brand-weight);
+  letter-spacing: var(--fd-brand-track);
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--fd-brand-color, inherit);
+}
+/* Glow and shadow ride ONE filter on the block, so they light the logo and
+   the letters identically. Only exists when a knob asked for it. */
+[data-brand-fx] .app-brand {
+  filter: drop-shadow(
+      0 0 calc(var(--fd-brand-glow) * 14px)
+        color-mix(in srgb, var(--color-accent) calc(var(--fd-brand-glow) * 100%), transparent)
+    )
+    drop-shadow(
+      0 calc(var(--fd-brand-shadow) * 3px) calc(var(--fd-brand-shadow) * 5px)
+        rgb(0 0 0 / calc(var(--fd-brand-shadow) * 0.7))
+    );
+}
+/* Where it sits. Left is the stock row order; right just moves it past the
+   auto-margin gap the middle slot creates. Centre is absolute so it lands on
+   the PAGE centre and not the centre of whatever space is left over — the
+   middle slot gives up its auto margins and stays out of the way. */
+[data-brand-pos='right'] .app-brand {
+  order: 9;
+}
+[data-brand-pos='center'] .app-brand {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+/* Start margin only: the middle slot still has to absorb the free space, or
+   the clock and the buttons stop being right-aligned. */
+[data-brand-pos='center'] .app-hdr-mid {
+  margin-inline: 0 auto;
+  max-width: 38%;
+}
+
+/* Accent glow bleeding below the bar. Outside the header box, so it lights the
+   page rather than tinting the header itself. */
+.app-header::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+  height: 1.5rem;
+  pointer-events: none;
+  opacity: var(--fd-hdr-halo);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-accent) 45%, transparent),
+    transparent
+  );
+}
+/* The sweep is a permanently running animation, so it only EXISTS when the
+   theme asked for one (themeHtmlAttrs stamps data-hdr-sweep above 0). */
+[data-hdr-sweep] .app-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--fd-hdr-sweep);
+  background: linear-gradient(
+    100deg,
+    transparent 42%,
+    color-mix(in srgb, var(--color-accent) 40%, transparent) 50%,
+    transparent 58%
+  );
+  background-size: 300% 100%;
+  animation: fd-hdr-sweep 7s linear infinite;
+}
+@keyframes fd-hdr-sweep {
+  from { background-position: 200% 0; }
+  to { background-position: -100% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-hdr-sweep] .app-header::before { animation: none; }
+}
+
+/* ---------------------------------------------------------- ward overrides */
+/* The three things a card cannot get from re-derived tokens alone. */
+
+/* Body text takes its family AND its colour from <body>, as computed values —
+   re-deriving the tokens on the card is not enough, it has to restate both
+   declarations against its own. Without the colour, a light card on a dark
+   dashboard inherits pale-on-white text and is unreadable. */
+[data-ward-theme] {
+  font-family: var(--fd-ui-font);
+  color: var(--color-ink);
+}
+/* A light card on a dark dashboard, or the reverse: color-scheme is what
+   light-dark() resolves against, and it inherits. */
+[data-ward-mode='light'] {
+  color-scheme: light;
+}
+[data-ward-mode='dark'] {
+  color-scheme: dark;
+}
+/* Opting INTO glass on a solid page. (Opting out needs no rule: the page's
+   own [data-glass] rule reads the card's alpha/blur, and 100%/0 is solid.) */
+.card[data-ward-glass] {
+  background: color-mix(in srgb, var(--color-surface) var(--fd-glass-alpha), transparent);
+}
+.card[data-ward-glass-blur] {
+  backdrop-filter: blur(var(--fd-glass-blur)) saturate(1.3);
+  -webkit-backdrop-filter: blur(var(--fd-glass-blur)) saturate(1.3);
+}
+
+/* The header banner canvas — same renderer and shaders as the page background,
+   sized to the header box by its ResizeObserver. */
+#fd-hdr-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+#fd-hdr-canvas.live {
+  opacity: 1;
+}
+
+/* Liquid glass: translucent token surfaces + backdrop blur. Only active when
+   the theme actually sets alpha/blur (data-glass), so solid themes never pay
+   the compositing cost. */
+[data-glass] .card,
+[data-glass] .ward,
+[data-glass] .fd-dialog,
+[data-glass] .ctx-menu,
+[data-glass] .fd-cmd,
+[data-glass] .fd-ss-panel,
+[data-glass] .fd-toast,
+[data-glass] .wire-pop,
+[data-glass] #logic-dock {
+  background: color-mix(in srgb, var(--color-surface) var(--fd-glass-alpha), transparent);
+}
+/* The blur is a separate attribute because it is the expensive half: a
+   backdrop-filter is a full filter pass over everything behind the element,
+   re-run whenever that backdrop changes. A translucent theme with blur 0 was
+   still paying one pass per surface for saturate(1.3) alone. */
+[data-glass-blur] .card,
+[data-glass-blur] .fd-dialog,
+[data-glass-blur] .ctx-menu,
+[data-glass-blur] .fd-cmd,
+[data-glass-blur] .fd-ss-panel,
+[data-glass-blur] .fd-toast,
+[data-glass-blur] .wire-pop,
+[data-glass-blur] #logic-dock {
+  backdrop-filter: blur(var(--fd-glass-blur)) saturate(1.3);
+  -webkit-backdrop-filter: blur(var(--fd-glass-blur)) saturate(1.3);
+}
+/* Wards are NOT in that list. Every .ward lives inside a .card that already
+   blurred the page behind it, so a ward's own pass blurs an already-blurred
+   surface — invisible, and it multiplies the per-frame filter cost by the
+   number of services on the dashboard. The translucent fill above is what
+   actually reads as glass. */
+/* Bare wards stay chromeless — their parent card already supplies the glass. */
+[data-glass] .ward-bare {
+  background: none;
+}
+
+/* Aurora backdrop: two accent-tinted blobs behind everything — this is what
+   makes glass visibly glass. Fixed so it never repaints on scroll.
+   These USED to be two-stop cones under filter: blur(60px). A filter on a
+   full-viewport layer is a filter pass on every frame that damages it, which
+   on a dashboard means every scroll frame. The stops below are that blur,
+   computed once: the profile of a 22%→0-at-70% cone through a σ=60px
+   gaussian, sampled every 10% of the ellipse (peak 0.81, 0.67, 0.41, 0.15,
+   0.05, 0.01, 0). Side by side the two are indistinguishable. */
+[data-bg='aurora'] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      42rem 30rem at 18% 12%,
+      color-mix(in srgb, var(--color-accent) 17.8%, transparent) 0%,
+      color-mix(in srgb, var(--color-accent) 14.7%, transparent) 20%,
+      color-mix(in srgb, var(--color-accent) 9%, transparent) 40%,
+      color-mix(in srgb, var(--color-accent) 3.2%, transparent) 60%,
+      color-mix(in srgb, var(--color-accent) 1.2%, transparent) 70%,
+      color-mix(in srgb, var(--color-accent) 0.3%, transparent) 80%,
+      transparent 90%
+    ),
+    radial-gradient(
+      50rem 34rem at 85% 80%,
+      color-mix(in srgb, var(--color-accent-hi) 11.3%, transparent) 0%,
+      color-mix(in srgb, var(--color-accent-hi) 9.4%, transparent) 20%,
+      color-mix(in srgb, var(--color-accent-hi) 5.7%, transparent) 40%,
+      color-mix(in srgb, var(--color-accent-hi) 2%, transparent) 60%,
+      color-mix(in srgb, var(--color-accent-hi) 0.8%, transparent) 70%,
+      color-mix(in srgb, var(--color-accent-hi) 0.2%, transparent) 80%,
+      transparent 90%
+    );
+  transform: translateZ(0);
+}
+
+/* ------------------------------------------------- custom backgrounds */
+/* Two more kinds ride data-bg alongside 'aurora': 'image' (an uploaded photo,
+   pure CSS off the knob vars themeStyle stamps) and 'scene' (the three.js
+   canvas from scripts/app/background.ts). Both sit BEHIND the page — body's
+   own background propagates to the viewport canvas, so a negative z-index
+   pseudo-element paints over it and under every card. */
+
+[data-bg='image'] body::before {
+  content: '';
+  /* fixed = wallpaper that never moves; absolute = it scrolls away with the
+     page (the "fixed" knob picks which). */
+  position: var(--fd-bg-pos, fixed);
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image: var(--fd-bg-image);
+  background-size: cover;
+  background-position: center;
+  opacity: var(--fd-bg-opacity, 1);
+  /* The zoom hides the soft, transparent edge a big blur leaves behind. */
+  transform: scale(var(--fd-bg-zoom, 1.06));
+  filter: blur(var(--fd-bg-blur, 0px)) saturate(var(--fd-bg-sat, 1)) brightness(var(--fd-bg-bright, 1));
+}
+
+/* The veil between photo and content — the whole reason text stays readable
+   over someone's holiday snap. */
+[data-bg='image'] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--color-surface-2) var(--fd-bg-dim, 35%), transparent);
+}
+
+#fd-bg-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+#fd-bg-canvas.live {
+  opacity: 1;
+}
+
+/* The account page's uploaded-photo picker. */
+.bg-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  gap: 0.5rem;
+}
+.bg-thumb {
+  position: relative;
+}
+.bg-thumb input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.bg-thumb img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--radius-lg);
+  border: 2px solid transparent;
+  outline: 1px solid var(--color-line);
+  outline-offset: -1px;
+  cursor: pointer;
+  display: block;
+}
+.bg-thumb input:checked + img {
+  border-color: var(--color-accent);
+  outline-color: var(--color-accent);
+}
+.bg-thumb input:focus-visible + img {
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+.bg-thumb-del {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  line-height: 1;
+  border-radius: 9999px;
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.bg-thumb-del:hover {
+  color: var(--color-err);
+  border-color: var(--color-err);
+}
+/* A row previewing a font (option[data-font], see SearchSelect) is set in that
+   font — so give it room to be judged: a condensed face at label size is not
+   something anyone can pick from. */
+.fd-ss-opt-label[data-font] {
+  font-size: 1.0625rem;
+  line-height: 1.4;
+}
+
+/* Same picker, showing logos: square and uncropped, since a logo is artwork
+   with edges rather than a photo to fill a box. */
+.bg-gallery-logo {
+  grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr));
+}
+.bg-gallery-logo img {
+  aspect-ratio: 1;
+  object-fit: contain;
+  padding: 0.35rem;
+  background: var(--color-surface-2);
+}
+
+/* ------------------------------------------------------------------ logic */
+/* Wiring mode: ports on wards that can trigger, a page-coordinate SVG wire
+   layer that chases the wards (scripts/app/wires.ts), pills that carry each
+   edge's meaning, the edge popover, and a dock of ward-less actions. All
+   color rides the accent tokens, so themes and the accent knob flow through.
+   The global prefers-reduced-motion rule kills the flow/entrance animations;
+   the JS springs and pulses gate themselves. */
+
+.wd-grid.wiring [data-wd] {
+  position: relative;
+  border-color: var(--color-line-strong);
+}
+.wd-grid.wiring [data-body] {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+/* A group's body is its wards, not a paint — they stay live so the wires
+   can start from (and land on) them. */
+.wd-grid.wiring [data-wd-type='container'] > [data-body] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.wd-port {
+  display: none;
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  border-radius: 9999px;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+  cursor: crosshair;
+  touch-action: none;
+  z-index: 5;
+}
+.wd-port::before {
+  /* ~40px touch/click halo around the 12px dot */
+  content: '';
+  position: absolute;
+  inset: -14px;
+}
+.wd-port:hover {
+  box-shadow:
+    0 0 0 5px var(--color-accent-soft),
+    0 0 10px var(--color-accent);
+}
+.wd-grid.wiring [data-logic-src] .wd-port {
+  display: block;
+}
+/* The whole trigger-capable ward is a wire handle, not just the dot — so it
+   must also own its touch gestures, or mobile drags become scrolls that
+   pointercancel the draft. Scrolling still works from gaps and other wards. */
+.wd-grid.wiring [data-logic-src] {
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.wd-grid.wiring.wire-dragging [data-wd]:not([data-drop-ok]) {
+  opacity: 0.35;
+}
+[data-drop-ok] {
+  outline: 2px dashed color-mix(in srgb, var(--color-accent) 60%, transparent);
+  outline-offset: 2px;
+}
+[data-drop-hot] {
+  outline-style: solid;
+  box-shadow: 0 0 0 4px var(--color-accent-soft);
+}
+
+#wire-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  pointer-events: none;
+  overflow: visible;
+}
+#wire-layer .wire-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+}
+#wire-layer.live .wire-hit {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.wire {
+  transition: opacity 0.15s;
+}
+.wire-base {
+  fill: none;
+  stroke: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  stroke-width: 2;
+  transition: stroke-width 0.15s;
+}
+/* Resting wires are static beads: twenty cables all flowing at once is the
+   noise. The flow animation is the reward for hovering a ward or a wire. */
+.wire-flow {
+  fill: none;
+  stroke: var(--color-accent-hi);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 6 14;
+  opacity: 0.35;
+}
+.wire-lit .wire-flow,
+.wire-draft .wire-flow,
+.wire-ghost .wire-flow {
+  animation: fd-wire-flow 1.1s linear infinite;
+  opacity: 0.9;
+}
+/* Nothing dims: the wire nearest the cursor is drawn to it and the rest swim
+   aside (scripts/app/wires.ts moves them), so the lit state only has to say
+   which one a click would take. */
+.wire.wire-lit .wire-base {
+  stroke: var(--color-accent);
+  stroke-width: 3;
+}
+.wire-pill.wire-lit {
+  border-color: var(--color-accent);
+}
+@keyframes fd-wire-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+#wire-layer .wire:hover .wire-base {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--color-accent) 60%, transparent));
+}
+.wire.wire-off .wire-flow {
+  animation: none;
+  opacity: 0.25;
+}
+.wire.wire-off .wire-base {
+  stroke: color-mix(in srgb, var(--color-ink-faint) 45%, transparent);
+}
+.wire-draft .wire-base {
+  stroke-dasharray: 4 4;
+}
+.wire-pulse {
+  fill: var(--color-accent-hi);
+  filter: drop-shadow(0 0 6px var(--color-accent));
+}
+
+#wire-labels {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 11;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.wire-pill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line-strong);
+  border-radius: 9999px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
+  pointer-events: none;
+  transition:
+    border-color 0.15s,
+    opacity 0.15s;
+}
+#wire-labels.live .wire-pill {
+  pointer-events: auto;
+  cursor: pointer;
+}
+#wire-labels.live .wire-pill:hover {
+  border-color: var(--color-accent);
+}
+.wire-pill.wire-off {
+  opacity: 0.5;
+}
+.wire-pill [data-err] {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--color-warn);
+}
+
+.wire-pop {
+  position: fixed;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: min(22rem, calc(100vw - 1rem));
+  max-height: min(80vh, 34rem);
+  overflow-y: auto;
+  padding: 0.75rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
+  animation: fd-menu-in 0.14s ease-out;
+}
+@media (max-width: 639px) {
+  .wire-pop {
+    inset: auto 0 0 0;
+    width: auto;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+}
+/* The leylines list (logic-edit.ts openList): the same panel, pinned to the
+   right on a desktop, the bottom sheet on a phone. */
+.wire-pop.wire-list {
+  right: 1rem;
+  top: 4.5rem;
+  width: min(30rem, calc(100vw - 1rem));
+  max-height: min(80vh, 40rem);
+}
+.wire-list-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.wire-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.wire-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-md);
+  text-align: left;
+  font-size: 0.8125rem;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+.wire-row-main:hover {
+  background: var(--color-surface-2);
+}
+.wire-row-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wire-row-run {
+  flex: none;
+  font-size: 0.68rem;
+}
+
+/* Drag handle: the popover moves by its header (desktop/tablet only). */
+.wire-pop-grab {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.wire-pop-grab:active {
+  cursor: grabbing;
+}
+
+#logic-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 0.75rem;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  gap: 0.4rem;
+  max-width: calc(100vw - 1rem);
+  overflow-x: auto;
+  padding: 0.45rem 0.6rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.25);
+  animation: fd-toast-in 0.25s var(--fd-spring);
+}
+#logic-dock .chip {
+  white-space: nowrap;
+}
+
+/* Notion property chips on a task ward (scripts/app/logic.ts). data-nc carries
+   Notion's own option colour name; default/gray fall through to the neutral
+   surface, the rest tint from one hue each so both themes stay readable. */
+.nchip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 12rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 0 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 10px;
+  line-height: 1.35;
+  font-weight: 500;
+  background: var(--color-surface-2);
+  color: var(--color-ink-muted);
+}
+/* One hue per Notion colour name, on ANY element (scripts/app/notion-view.ts
+   stamps data-nc on chips, rich-text runs and blocks alike). */
+[data-nc='gray'] { --nc: oklch(0.62 0.01 260); }
+[data-nc='red'] { --nc: oklch(0.62 0.19 25); }
+[data-nc='orange'] { --nc: oklch(0.68 0.16 55); }
+[data-nc='yellow'] { --nc: oklch(0.74 0.14 90); }
+[data-nc='green'] { --nc: oklch(0.65 0.15 150); }
+[data-nc='blue'] { --nc: oklch(0.63 0.15 245); }
+[data-nc='purple'] { --nc: oklch(0.6 0.17 300); }
+[data-nc='pink'] { --nc: oklch(0.66 0.17 350); }
+[data-nc='brown'] { --nc: oklch(0.55 0.08 60); }
+/* Chips wear Notion's own tag palette, light and dark, so a Course tag here is
+   the Course tag in Notion. Fixed on purpose — it does not follow the theme. */
+.nchip[data-nc='gray'] { background: light-dark(#e3e2e0, #5a5a5a); color: light-dark(#32302c, #fffffff0); }
+.nchip[data-nc='brown'] { background: light-dark(#eee0da, #603b2c); color: light-dark(#442a1e, #fffffff0); }
+.nchip[data-nc='orange'] { background: light-dark(#fadec9, #854c1d); color: light-dark(#49290e, #fffffff0); }
+.nchip[data-nc='yellow'] { background: light-dark(#fdecc8, #89632a); color: light-dark(#402c1b, #fffffff0); }
+.nchip[data-nc='green'] { background: light-dark(#dbeddb, #2b593f); color: light-dark(#1c3829, #fffffff0); }
+.nchip[data-nc='blue'] { background: light-dark(#d3e5ef, #28456c); color: light-dark(#183347, #fffffff0); }
+.nchip[data-nc='purple'] { background: light-dark(#e8deee, #492f64); color: light-dark(#412454, #fffffff0); }
+.nchip[data-nc='pink'] { background: light-dark(#f5e0e9, #69314c); color: light-dark(#4c2337, #fffffff0); }
+.nchip[data-nc='red'] { background: light-dark(#ffe2dd, #6e3630); color: light-dark(#5d1715, #fffffff0); }
+/* Rich text runs and blocks: a plain colour tints the text, a `_background`
+   colour (data-bg) tints the ground the way Notion highlights do. */
+.nrt[data-nc]:not([data-bg]),
+.nrt [data-nc]:not([data-bg]),
+.nblk[data-nc]:not([data-bg]) {
+  color: var(--nc);
+}
+.nrt [data-bg],
+.nrt[data-bg],
+.nblk[data-bg] {
+  background: color-mix(in oklab, var(--nc) 14%, transparent);
+  border-radius: 0.2rem;
+}
+.nrt [data-bg] {
+  padding: 0 0.15rem;
+}
+/* An empty property still needs a click target in a table cell. */
+.nv-empty {
+  display: block;
+  min-height: 1rem;
+}
+
+/* ---- Database ward, calendar view (scripts/app/notion-cal.ts): Notion's own
+   month calendar — a Sunday-first grid, week rows that grow with their cards
+   (or to the height the user dragged, --ncal-wk), each card a soft panel with
+   the title and one tag row per column, today a red disc. Each week is a
+   7-column grid — day numbers on row 1, cards in the lanes below spanning the
+   columns their dates cover. ---- */
+.ncal {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+.ncal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-bottom: 0.35rem;
+}
+.ncal-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.ncal-nav {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+.ncal-dow,
+.ncal-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.ncal-dow > span {
+  padding: 0 0.3rem 0.3rem;
+  text-align: center;
+  font-size: 10px;
+  color: var(--color-ink-faint);
+}
+.ncal-weeks {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  border-top: 1px solid var(--color-line);
+  border-left: 1px solid var(--color-line);
+}
+.ncal-week {
+  position: relative;
+  grid-auto-rows: min-content;
+  align-content: start;
+  min-height: var(--ncal-wk, 6rem);
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--color-line);
+  /* the column rules, without a cell per day */
+  background-image: linear-gradient(to left, var(--color-line) 1px, transparent 1px);
+  background-size: calc(100% / 7) 100%;
+}
+.ncal-day {
+  grid-row: 1;
+  padding: 0.3rem 0.4rem 0.2rem;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-muted);
+}
+.ncal-day[data-other] {
+  color: var(--color-ink-faint);
+}
+.ncal-day[data-today] > span {
+  display: inline-block;
+  min-width: 1.35rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: oklch(0.66 0.19 25);
+  color: #fff;
+  font-weight: 600;
+  text-align: center;
+}
+.ncal-ev {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: start; /* a short card beside a tall one keeps its own height */
+  gap: 0.25rem;
+  margin: 2px 3px;
+  padding: 0.3rem 0.45rem 0.35rem;
+  border-radius: 0.4rem;
+  background: color-mix(in oklab, var(--color-ink) 7%, var(--color-surface));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-ink) 6%, transparent);
+  font-size: 11px;
+  overflow: hidden;
+  transition: background-color 120ms ease;
+}
+.ncal-ev:hover {
+  background: color-mix(in oklab, var(--color-ink) 11%, var(--color-surface));
+}
+.ncal-ev[data-cont-l] {
+  margin-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.ncal-ev[data-cont-r] {
+  margin-right: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.ncal-ev-title {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.ncal-ev-title:hover {
+  text-decoration: underline;
+}
+/* Tag rows: one column per line, its chips wrapping; Notion-sized. */
+.ncal-ev .nchip {
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 0 0.4rem;
+}
+.ncal-grip {
+  position: absolute;
+  right: 0;
+  bottom: -3px;
+  left: 0;
+  z-index: 1;
+  height: 6px;
+  cursor: row-resize;
+  touch-action: none;
+}
+.ncal-grip:hover {
+  background: color-mix(in oklab, var(--color-accent) 35%, transparent);
+}
+
+/* ---- notepad ward (scripts/app/note.ts): toolbar, the scrolling page with the
+   ink canvas over it, the footer. [data-full] = moved into #note-dialog — the
+   advanced buttons and the wide page only show there. ---- */
+.np {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto; /* the card body is a flex row */
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+.np-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1px;
+  padding-bottom: 3px;
+}
+.np-tools button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: none;
+  color: var(--color-ink-faint);
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 0.3rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+.np-tools button:hover {
+  color: var(--color-ink);
+  background: var(--color-surface-2);
+}
+.np-tools button[aria-pressed='true'] {
+  color: var(--color-accent);
+  background: var(--color-surface-2);
+}
+.np-tools button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.np-tools .np-sep {
+  width: 1px;
+  height: 1rem;
+  margin: 0 3px;
+  background: var(--color-line);
+}
+.np-tools .np-grow {
+  flex: 1;
+}
+.np-tools input[type='color'] {
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.np-tools input[type='range'] {
+  width: 4rem;
+}
+.np:not([data-full]) .np-adv,
+.np-tools [hidden] {
+  display: none;
+}
+.np-page {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  --np-line: 1.4rem;
+}
+.np[data-full] .np-page {
+  --np-line: 1.7rem;
+}
+.np[data-paper='lines'] .np-page {
+  background-image: repeating-linear-gradient(transparent 0 calc(var(--np-line) - 1px), var(--color-line) 0 var(--np-line));
+}
+.np[data-paper='grid'] .np-page {
+  background-image:
+    repeating-linear-gradient(transparent 0 calc(var(--np-line) - 1px), var(--color-line) 0 var(--np-line)),
+    repeating-linear-gradient(90deg, transparent 0 calc(var(--np-line) - 1px), var(--color-line) 0 var(--np-line));
+}
+.np[data-paper='dots'] .np-page {
+  background-image: radial-gradient(var(--color-line-strong) 1px, transparent 1.5px);
+  background-size: var(--np-line) var(--np-line);
+}
+.np-doc {
+  min-height: 100%;
+  padding: 0.35rem 0.5rem;
+  outline: none;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  word-break: break-word;
+}
+.np[data-full] .np-doc {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 2rem clamp(1rem, 6vw, 5rem) 6rem;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+.np-doc:empty::before {
+  content: attr(data-placeholder);
+  color: var(--color-ink-faint);
+  pointer-events: none;
+}
+.np-doc h1,
+.np-doc h2,
+.np-doc h3,
+.np-doc h4 {
+  margin: 0.7em 0 0.3em;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.np-doc h1 { font-size: 1.6em; }
+.np-doc h2 { font-size: 1.3em; }
+.np-doc h3 { font-size: 1.1em; }
+.np-doc h4 { font-size: 1em; }
+.np-doc p,
+.np-doc div {
+  margin: 0 0 0.45em;
+}
+.np-doc ul,
+.np-doc ol {
+  margin: 0 0 0.45em;
+  padding-left: 1.4em;
+}
+.np-doc ul { list-style: disc; }
+.np-doc ol { list-style: decimal; }
+.np-doc blockquote {
+  margin: 0.4em 0;
+  padding-left: 0.75em;
+  border-left: 3px solid var(--color-line-strong);
+  color: var(--color-ink-muted);
+}
+.np-doc pre {
+  margin: 0.4em 0;
+  padding: 0.5em 0.65em;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+}
+.np-doc code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.9em;
+}
+.np-doc a {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+.np-doc hr {
+  margin: 0.8em 0;
+  border: 0;
+  border-top: 1px solid var(--color-line-strong);
+}
+.np-doc mark {
+  background: color-mix(in oklab, var(--color-accent) 30%, transparent);
+  color: inherit;
+}
+.np-ink {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  touch-action: none;
+}
+.np[data-tool='pen'] .np-ink,
+.np[data-tool='eraser'] .np-ink {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+.np[data-tool='eraser'] .np-ink {
+  cursor: cell;
+}
+.np-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 3px;
+  font-size: 10px;
+  color: var(--color-ink-faint);
+  white-space: nowrap;
+}
+.np-foot .np-err {
+  color: var(--color-warn);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The ✨ Rime bar: a popover under the toolbar. */
+.np-ai {
+  position: absolute;
+  z-index: 5;
+  top: 2rem;
+  right: 0.25rem;
+  width: min(26rem, calc(100% - 0.5rem));
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: 0 14px 44px rgb(0 0 0 / 0.35);
+  animation: fd-menu-in 0.13s var(--fd-ease);
+}
+.np-ai .input {
+  min-height: 0;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+}
+.np-ai .np-ai-prompt {
+  flex: 1 1 10rem;
+}
+/* Its pen hint while in edit mode: cards are draggable there, the editor is not. */
+.wd-grid.editing .np-doc {
+  pointer-events: none;
+}

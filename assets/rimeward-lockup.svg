@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1490 300" role="img" aria-label="Rimeward by frostdev">
+<g transform="translate(150 150) scale(0.9)">
+  <polygon points="0.0,-150.0 129.9,-75.0 129.9,75.0 0.0,150.0 -129.9,75.0 -129.9,-75.0" fill="none" stroke="#164a74" stroke-width="8" stroke-linejoin="bevel"/>
+  <circle r="10" fill="#0b2a4a"/>
+  <g transform="rotate(0)"><path d="M0,0 L0,-118" stroke="#17c8f4" stroke-width="14"/>
+    <path d="M0,-44 L-30,-72 M0,-44 L30,-72 M0,-82 L-20,-102 M0,-82 L20,-102 M0,-20 L-14,-33 M0,-20 L14,-33" stroke="#17c8f4" stroke-width="8" stroke-linejoin="bevel"/>
+    <path d="M0,-110 L-6,-118 L0,-126 L6,-118 Z" fill="#6fdcff"/></g>
+<g transform="rotate(60)"><path d="M0,0 L0,-118" stroke="#17c8f4" stroke-width="14"/>
+    <path d="M0,-44 L-30,-72 M0,-44 L30,-72 M0,-82 L-20,-102 M0,-82 L20,-102 M0,-20 L-14,-33 M0,-20 L14,-33" stroke="#17c8f4" stroke-width="8" stroke-linejoin="bevel"/>
+    <path d="M0,-110 L-6,-118 L0,-126 L6,-118 Z" fill="#6fdcff"/></g>
+<g transform="rotate(120)"><path d="M0,0 L0,-118" stroke="#17c8f4" stroke-width="14"/>
+    <path d="M0,-44 L-30,-72 M0,-44 L30,-72 M0,-82 L-20,-102 M0,-82 L20,-102 M0,-20 L-14,-33 M0,-20 L14,-33" stroke="#17c8f4" stroke-width="8" stroke-linejoin="bevel"/>
+    <path d="M0,-110 L-6,-118 L0,-126 L6,-118 Z" fill="#6fdcff"/></g>
+<g transform="rotate(180)"><path d="M0,0 L0,-118" stroke="#17c8f4" stroke-width="14"/>
+    <path d="M0,-44 L-30,-72 M0,-44 L30,-72 M0,-82 L-20,-102 M0,-82 L20,-102 M0,-20 L-14,-33 M0,-20 L14,-33" stroke="#17c8f4" stroke-width="8" stroke-linejoin="bevel"/>
+    <path d="M0,-110 L-6,-118 L0,-126 L6,-118 Z" fill="#6fdcff"/></g>
+<g transform="rotate(240)"><path d="M0,0 L0,-118" stroke="#17c8f4" stroke-width="14"/>
+    <path d="M0,-44 L-30,-72 M0,-44 L30,-72 M0,-82 L-20,-102 M0,-82 L20,-102 M0,-20 L-14,-33 M0,-20 L14,-33" stroke="#17c8f4" stroke-width="8" stroke-linejoin="bevel"/>
+    <path d="M0,-110 L-6,-118 L0,-126 L6,-118 Z" fill="#6fdcff"/></g>
+<g transform="rotate(300)"><path d="M0,0 L0,-118" stroke="#17c8f4" stroke-width="14"/>
+    <path d="M0,-44 L-30,-72 M0,-44 L30,-72 M0,-82 L-20,-102 M0,-82 L20,-102 M0,-20 L-14,-33 M0,-20 L14,-33" stroke="#17c8f4" stroke-width="8" stroke-linejoin="bevel"/>
+    <path d="M0,-110 L-6,-118 L0,-126 L6,-118 Z" fill="#6fdcff"/></g>
+  <circle r="7" fill="#6fdcff"/>
+</g>
+<g transform="translate(300 60) scale(1.5)">
+<mask id="wm-m" maskUnits="userSpaceOnUse" x="-20" y="-20" width="812" height="140"><polyline points="8,0 8,100" transform="translate(8 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,8 56,8 72,24 72,40 56,56 8,56" transform="translate(8 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="42,56 72,100" transform="translate(8 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="12,0 12,100" transform="translate(108 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,100 8,0 44,52 80,0 80,100" transform="translate(152 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="70,8 8,8 8,92 70,92" transform="translate(260 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,50 54,50" transform="translate(260 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,0 22,100 48,36 74,100 88,0" transform="translate(352 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,100 42,0 76,100" transform="translate(468 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="22,66 62,66" transform="translate(468 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,0 8,100" transform="translate(572 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,8 56,8 72,24 72,40 56,56 8,56" transform="translate(572 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="42,56 72,100" transform="translate(572 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,0 8,100" transform="translate(672 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,8 48,8 72,32 72,68 48,92 8,92" transform="translate(672 0)" fill="none" stroke="#fff" stroke-width="16" stroke-linejoin="bevel"/>
+</mask>
+<polyline points="8,0 8,100" transform="translate(8 0)" fill="none" stroke="#17c8f4" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,8 56,8 72,24 72,40 56,56 8,56" transform="translate(8 0)" fill="none" stroke="#17c8f4" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="42,56 72,100" transform="translate(8 0)" fill="none" stroke="#17c8f4" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="12,0 12,100" transform="translate(108 0)" fill="none" stroke="#164a74" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,100 8,0 44,52 80,0 80,100" transform="translate(152 0)" fill="none" stroke="#164a74" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="70,8 8,8 8,92 70,92" transform="translate(260 0)" fill="none" stroke="#164a74" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,50 54,50" transform="translate(260 0)" fill="none" stroke="#164a74" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,0 22,100 48,36 74,100 88,0" transform="translate(352 0)" fill="none" stroke="#17c8f4" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,100 42,0 76,100" transform="translate(468 0)" fill="none" stroke="#164a74" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="22,66 62,66" transform="translate(468 0)" fill="none" stroke="#164a74" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,0 8,100" transform="translate(572 0)" fill="none" stroke="#17c8f4" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,8 56,8 72,24 72,40 56,56 8,56" transform="translate(572 0)" fill="none" stroke="#17c8f4" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="42,56 72,100" transform="translate(572 0)" fill="none" stroke="#17c8f4" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,0 8,100" transform="translate(672 0)" fill="none" stroke="#164a74" stroke-width="16" stroke-linejoin="bevel"/>
+<polyline points="8,8 48,8 72,32 72,68 48,92 8,92" transform="translate(672 0)" fill="none" stroke="#164a74" stroke-width="16" stroke-linejoin="bevel"/>
+<g mask="url(#wm-m)"><polyline points="8,0 8,100" transform="translate(5 -3)" fill="none" stroke="#6fdcff" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="8,8 56,8 72,24 72,40 56,56 8,56" transform="translate(5 -3)" fill="none" stroke="#6fdcff" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="42,56 72,100" transform="translate(5 -3)" fill="none" stroke="#6fdcff" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="12,0 12,100" transform="translate(105 -3)" fill="none" stroke="#0b2a4a" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="8,100 8,0 44,52 80,0 80,100" transform="translate(149 -3)" fill="none" stroke="#0b2a4a" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="70,8 8,8 8,92 70,92" transform="translate(257 -3)" fill="none" stroke="#0b2a4a" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="8,50 54,50" transform="translate(257 -3)" fill="none" stroke="#0b2a4a" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="8,0 22,100 48,36 74,100 88,0" transform="translate(349 -3)" fill="none" stroke="#6fdcff" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="8,100 42,0 76,100" transform="translate(465 -3)" fill="none" stroke="#0b2a4a" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="22,66 62,66" transform="translate(465 -3)" fill="none" stroke="#0b2a4a" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="8,0 8,100" transform="translate(569 -3)" fill="none" stroke="#6fdcff" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="8,8 56,8 72,24 72,40 56,56 8,56" transform="translate(569 -3)" fill="none" stroke="#6fdcff" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="42,56 72,100" transform="translate(569 -3)" fill="none" stroke="#6fdcff" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="8,0 8,100" transform="translate(669 -3)" fill="none" stroke="#0b2a4a" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+<polyline points="8,8 48,8 72,32 72,68 48,92 8,92" transform="translate(669 -3)" fill="none" stroke="#0b2a4a" stroke-width="4" stroke-linejoin="bevel" opacity="0.9"/>
+</g>
+</g>
+<text x="312" y="268" fill="#5c7189" font-family="ui-sans-serif, system-ui, sans-serif" font-size="30" font-weight="600" letter-spacing="10">BY FROSTDEV</text>
+</svg>

@@ -1,0 +1,33 @@
+[package]
+name = "rimeward"
+version = "0.1.2"
+edition = "2021"
+rust-version = "1.84"
+description = "Rimeward — the frostdev.io dashboard on your desk, with the home route"
+
+# The lib/bin split is what the mobile targets (later) build against.
+[lib]
+name = "rimeward_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6", features = [] }
+
+[dependencies]
+tauri = { version = "2.11", features = ["tray-icon"] }
+tauri-plugin-autostart = "2.5"
+# tauri enables rt, rt-multi-thread, sync, fs, io-util; the rest is ours.
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util", "net", "time", "macros", "process"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+url = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Already in the graph through tauri; the Chromium download streams through it.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

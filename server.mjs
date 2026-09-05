@@ -1,0 +1,13 @@
+// Production entry (pm2, ecosystem.config.cjs): Astro's own standalone server,
+// plus the one thing no Astro route can do — the raw `upgrade` event the
+// desktop app's tunnel needs (src/lib/tunnel.ts). The autostart switch must
+// be set BEFORE the entry evaluates, hence the dynamic import.
+process.env.ASTRO_NODE_AUTOSTART = 'disabled';
+const { startServer } = await import('./dist/server/entry.mjs');
+const { server } = startServer();
+server.server.on('upgrade', async (req, sock, head) => {
+  // The middleware (which publishes __fdUpgrade) loads on the first request;
+  // one self-request boots it if the app connects before anyone browses.
+  if (!globalThis.__fdUpgrade) await fetch(`http://127.0.0.1:${server.server.address().port}/login`).catch(() => {});
+  (globalThis.__fdUpgrade ?? ((_, s) => s.destroy()))(req, sock, head);
+});

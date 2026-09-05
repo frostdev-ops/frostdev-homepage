@@ -1,0 +1,55 @@
+---
+// One dialog serves both accounts, and every way in: Compose, Reply, Reply
+// all and Forward from the reader (MailDialog). Two-phase: POST
+// /api/mail/draft returns a server-resolved preview; the confirm step then
+// POSTs /api/mail/send with the draftId. The server consumes it exactly once.
+// scripts/app/mail.ts owns all behavior — this is inert markup.
+---
+
+<dialog id="compose" class="fd-dialog">
+  <form id="compose-form" method="dialog" class="flex flex-col gap-3 p-4">
+    <div class="flex items-center justify-between">
+      <h2 class="section-title" id="compose-title">New message</h2>
+      <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-compose-close>✕</button>
+    </div>
+
+    <input type="hidden" name="account" value="google" />
+    <input type="hidden" name="inReplyTo" value="" />
+
+    <div data-compose-fields class="flex flex-col gap-3">
+      <div>
+        <label class="label" for="compose-to">To</label>
+        <input id="compose-to" name="to" type="text" class="input" placeholder="a@b.com, c@d.com" required />
+      </div>
+      <details data-compose-cc>
+        <summary class="label cursor-pointer list-none [&::-webkit-details-marker]:hidden">Cc</summary>
+        <input id="compose-cc" name="cc" type="text" class="input mt-1" placeholder="e@f.com" />
+      </details>
+      <div>
+        <label class="label" for="compose-subject">Subject</label>
+        <input id="compose-subject" name="subject" type="text" class="input" />
+      </div>
+      <div>
+        <label class="label" for="compose-body">Message</label>
+        <textarea id="compose-body" name="body" rows="8" class="input max-h-[40vh] font-mono text-sm" required></textarea>
+      </div>
+      <div class="flex items-center justify-between">
+        <p class="text-xs text-ink-faint" data-compose-from></p>
+        <button type="button" class="btn-primary" data-compose-review>Review &amp; send</button>
+      </div>
+    </div>
+
+    <div data-compose-confirm class="hidden flex-col gap-3">
+      <div class="banner banner-info mb-0 flex-col items-stretch gap-1">
+        <p class="text-xs">This is exactly what will be sent:</p>
+        <p class="text-sm font-medium" data-preview-line></p>
+      </div>
+      <div class="flex items-center justify-end gap-2">
+        <button type="button" class="btn" data-compose-back>Back</button>
+        <button type="button" class="btn-primary" data-compose-send>Send</button>
+      </div>
+    </div>
+
+    <p class="hidden text-xs text-err" data-compose-err></p>
+  </form>
+</dialog>

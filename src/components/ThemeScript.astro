@@ -1,0 +1,17 @@
+{/* Pre-paint theme. When the server stamped a user theme (data-mode), it is
+    authoritative: 'system' additionally resolves against the OS preference
+    here (the server SSRs dark and this strips it for light-preferring
+    systems). Without a server theme: DARK-FIRST from localStorage, as ever.
+    Must run before first render or the page flashes the wrong scheme. */}
+<script is:inline>
+  try {
+    var mode = document.documentElement.dataset.mode;
+    if (!mode) {
+      if (localStorage.getItem('fd-theme') !== 'light') document.documentElement.classList.add('dark');
+    } else if (mode === 'system' && matchMedia('(prefers-color-scheme: light)').matches) {
+      document.documentElement.classList.remove('dark');
+    }
+  } catch {
+    document.documentElement.classList.add('dark');
+  }
+</script>

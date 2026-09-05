@@ -1,0 +1,57 @@
+---
+// The email reader — the PMA Office viewer, as a dashboard dialog. Clicking a
+// message opens THIS; replying is a deliberate second step. The body renders
+// in a sandboxed iframe with no allow-scripts, so nothing in a message can
+// run, and remote images stay blocked until the reader asks for them.
+// mail.ts owns every behavior here; this file is inert markup.
+---
+
+<dialog id="mail-view" class="fd-dialog fd-dialog-wide">
+  <form method="dialog" class="flex max-h-[86vh] flex-col">
+    <header class="flex items-start gap-2 border-b border-line px-4 py-3">
+      <div class="min-w-0 flex-1">
+        <h2 class="truncate text-base leading-tight font-bold" data-mv-subject>Loading…</h2>
+        <div class="mt-2 flex items-center gap-2.5">
+          <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent/15 text-xs font-bold text-accent" aria-hidden="true" data-mv-avatar></span>
+          <div class="min-w-0 flex-1 text-xs leading-snug">
+            <p class="truncate" data-mv-from></p>
+            <p class="truncate text-ink-faint" data-mv-meta></p>
+          </div>
+        </div>
+      </div>
+      <div class="flex shrink-0 items-center gap-1">
+        <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-mv-prev title="Newer" aria-label="Newer message">↑</button>
+        <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-mv-next title="Older" aria-label="Older message">↓</button>
+        <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-mv-close aria-label="Close">✕</button>
+      </div>
+    </header>
+
+    <p class="mx-4 mt-3 mb-0 hidden text-xs text-err" data-mv-err></p>
+
+    <div class="hidden flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-surface-2 px-4 py-2 text-xs text-ink-muted" data-mv-images>
+      <span class="min-w-0 flex-1">Remote images blocked — loading them tells the sender you opened this.</span>
+      <button type="button" class="btn min-h-0 px-2 py-0.5 text-xs" data-mv-load-images>Load images</button>
+    </div>
+
+    <!-- No allow-scripts, ever: that is what makes a stranger's HTML safe here. -->
+    <iframe
+      data-mv-body
+      class="min-h-[14rem] w-full flex-1 bg-white"
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      title="Email body"></iframe>
+
+    <div class="hidden flex-wrap gap-2 border-t border-line bg-surface-2 px-4 py-2.5" data-mv-attachments></div>
+
+    <footer class="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
+      <button type="button" class="btn-primary min-h-0 px-3 py-1.5 text-xs" data-mv-reply>Reply</button>
+      <button type="button" class="btn min-h-0 px-2 py-1.5 text-xs" data-mv-replyall>Reply all</button>
+      <button type="button" class="btn min-h-0 px-2 py-1.5 text-xs" data-mv-forward>Forward</button>
+      <span class="ml-auto flex flex-wrap items-center gap-1.5" data-mv-actions>
+        <button type="button" class="btn min-h-0 px-2 py-1.5 text-xs" data-mv-op="star" title="Star">☆</button>
+        <button type="button" class="btn min-h-0 px-2 py-1.5 text-xs" data-mv-op="unread" title="Mark unread">Unread</button>
+        <button type="button" class="btn min-h-0 px-2 py-1.5 text-xs" data-mv-op="archive" title="Archive, then open the next message">Archive</button>
+        <button type="button" class="btn min-h-0 px-2 py-1.5 text-xs text-err" data-mv-op="trash" title="Move to trash">Trash</button>
+      </span>
+    </footer>
+  </form>
+</dialog>

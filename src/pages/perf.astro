@@ -1,0 +1,82 @@
+---
+// The GPU bench. Dev-only: the numbers come from the browser running it, so
+// `npm run dev:env` on the machine you care about is the whole setup. See
+// scripts/perf.ts for what each section measures.
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { bgKind, headerSceneConfig, parseTheme, sceneConfig } from '../lib/theme.ts';
+
+if (!import.meta.env.DEV) return new Response(null, { status: 404 });
+
+// What THIS user's dashboard renders — the saved background scene and header
+// banner with their real knobs — so the bench can put them beside the catalog.
+const theme = parseTheme(Astro.locals.user?.theme ?? null);
+const mine = theme
+  ? {
+      bg: bgKind(theme) === 'scene' ? sceneConfig(theme) : null,
+      hdr: headerSceneConfig(theme),
+      // The bar's height in CSS px: two padding rows around a ~1.5rem content row.
+      hdrHeight: Math.round(16 * (theme.hdrPad * 2 + 1.5)),
+    }
+  : { bg: null, hdr: null, hdrHeight: 56 };
+---
+
+<BaseLayout title="Perf — Frostdev">
+  <main class="mx-auto max-w-4xl px-4 py-10">
+    <div class="page-head">
+      <h1 class="page-title">Perf</h1>
+      <a href="/dash" class="back-link link">← Dashboard</a>
+    </div>
+    <p id="perf-err" class="text-sm text-err"></p>
+
+    <div class="mb-4 flex flex-wrap items-center gap-3">
+      <label class="label mb-0" for="perf-res">Buffer</label>
+      <select id="perf-res" class="input w-auto">
+        <option value="view">viewport × dpr</option>
+        <option value="view1" selected>viewport × 1 (what the wallpaper renders)</option>
+        <option value="1920x1080">1920×1080</option>
+        <option value="2560x1440">2560×1440</option>
+        <option value="3840x2160">3840×2160</option>
+      </select>
+    </div>
+
+    <section class="card mb-6 p-5">
+      <div class="mb-3 flex flex-wrap items-center gap-3">
+        <h2 class="section-title">Scene shaders</h2>
+        <label class="ml-auto flex items-center gap-2 text-sm"><input type="checkbox" id="perf-per-preset" /> one program per preset</label>
+        <button id="perf-run-scenes" class="btn">Run</button>
+      </div>
+      <p class="mb-3 text-sm text-ink-muted">
+        ms per frame for each preset on one full-screen quad, the way bg-scene.ts draws it, plus your own saved
+        background and header banner at their knobs and buffer sizes (“yours ·” rows). The wallpaper runs at 30fps, so
+        the budget is ~33 ms with everything else the page does inside it.
+      </p>
+      <div id="perf-scenes" data-mine={JSON.stringify(mine)}></div>
+    </section>
+
+    <section class="card mb-6 p-5">
+      <div class="mb-3 flex items-center gap-3">
+        <h2 class="section-title">Splash terrain</h2>
+        <button id="perf-run-terrain" class="btn ml-auto">Run</button>
+      </div>
+      <p class="mb-3 text-sm text-ink-muted">The topography mesh per tier. The splash runs at 60fps, so the budget is ~16 ms.</p>
+      <div id="perf-terrain"></div>
+    </section>
+
+    <section class="card p-5">
+      <div class="mb-3 flex flex-wrap items-center gap-3">
+        <h2 class="section-title">Page audit</h2>
+        <input id="perf-url" class="input ml-auto w-40" value="/dash" />
+        <button id="perf-audit" class="btn">Audit</button>
+      </div>
+      <p class="mb-3 text-sm text-ink-muted">
+        Loads the route below and counts what the compositor pays for: every backdrop-filter and filter surface, every
+        animation that never ends, every canvas and its buffer, and the frame rate the page holds by itself.
+      </p>
+      <pre id="perf-audit-out" class="mb-3 overflow-x-auto text-xs leading-relaxed"></pre>
+      <iframe id="perf-frame" class="h-[70vh] w-full rounded-md border border-line" hidden title="audited page"></iframe>
+    </section>
+  </main>
+  <script>
+    import '../scripts/perf.ts';
+  </script>
+</BaseLayout>

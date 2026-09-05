@@ -1,0 +1,49 @@
+---
+import '../styles/frost.css';
+import ThemeScript from '../components/ThemeScript.astro';
+import SearchSelect from '../components/SearchSelect.astro';
+import { parseTheme, themeColor, themeHtmlAttrs } from '../lib/theme.ts';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Splash sets this: index is the only page meant for crawlers. */
+  index?: boolean;
+}
+
+const { title, description = 'Frostdev', index = false } = Astro.props;
+
+// Per-user theme rides locals.user (populated by middleware from the session
+// join). Knob values land as attributes on <html> — SSR'd, so no flash.
+const theme = parseTheme(Astro.locals.user?.theme ?? null);
+---
+
+<!doctype html>
+<html lang="en" {...themeHtmlAttrs(theme)}>
+  <head>
+    <ThemeScript />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content={description} />
+    {!index && <meta name="robots" content="noindex, nofollow" />}
+    <meta name="theme-color" content={themeColor(theme)} />
+    <title>{title}</title>
+    <link rel="icon" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <slot name="head" />
+  </head>
+  <body class="min-h-screen bg-surface-2 text-ink">
+    <slot />
+    {/* Upgrades every <select> on the page, whenever it arrives. */}
+    <SearchSelect />
+    <script>
+      // The three.js background, when the saved theme asks for one. Reads what
+      // themeHtmlAttrs stamped on <html>; three arrives lazily inside, so
+      // flat/aurora/image users download none of it. (Splash and login never
+      // get here: both are public routes, so locals.user — and the theme — is
+      // undefined and nothing is stamped.)
+      import { bootBackground } from '../scripts/app/background.ts';
+      bootBackground();
+    </script>
+  </body>
+</html>

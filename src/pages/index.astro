@@ -1,0 +1,80 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { Image } from 'astro:assets';
+import { wordmark, emblem } from '../lib/brand.ts';
+---
+
+<BaseLayout title="Frostdev" description="Frostdev — projects, services, and experiments." index>
+  <div class="splash-ground">
+    <Image src={emblem} alt="" width={1024} class="emblem" loading="eager" />
+  </div>
+  <canvas id="splash-canvas" aria-hidden="true"></canvas>
+  <div id="gate-flash"></div>
+
+  <section class="splash-overlay">
+    <Image src={wordmark} alt="Frostdev" width={1280} class="splash-wordmark" loading="eager" />
+    <p class="splash-tagline">Power · Maintenance · Automation</p>
+    <a id="enter" href="/login" class="splash-enter">Enter</a>
+  </section>
+
+  <section class="splash-band">
+    <div class="mx-auto w-full max-w-4xl">
+      <h2 class="section-title mb-4 text-center">What runs here</h2>
+      <div class="grid gap-4 sm:grid-cols-3">
+        <article class="card p-5">
+          <h3 class="text-base font-semibold">Loothing</h3>
+          <p class="mt-1 text-sm text-ink-muted">Guild tooling — loot tracking, history, and standings for raid nights.</p>
+        </article>
+        <article class="card p-5">
+          <h3 class="text-base font-semibold">PMA</h3>
+          <p class="mt-1 text-sm text-ink-muted">Database administration for everything stateful behind the gate.</p>
+        </article>
+        <article class="card p-5">
+          <h3 class="text-base font-semibold">Frostdev services</h3>
+          <p class="mt-1 text-sm text-ink-muted">Dashboards, monitors, and the internal APIs that keep the frost running.</p>
+        </article>
+      </div>
+    </div>
+    <footer class="splash-foot">© Frostdev · admin@frostdev.io</footer>
+  </section>
+</BaseLayout>
+
+<style>
+  /* The terrain fills the frame with mid-tones; a soft dark pool behind the
+     brand block keeps the wordmark legible over any part of the landscape. */
+  .splash-overlay::before {
+    content: '';
+    position: absolute;
+    inset: 50% auto auto 50%;
+    width: min(92vw, 56rem);
+    height: 24rem;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(closest-side, rgb(2 8 16 / 0.55), transparent 72%);
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  /* Hero is 100vh (.splash-overlay); this band adds ~120vh so the page totals
+     ~220vh and scroll drives the scene. */
+  .splash-band {
+    position: relative;
+    z-index: 1;
+    min-height: 120vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 4rem;
+    padding: 24vh 1.5rem 2rem;
+    background: linear-gradient(to bottom, transparent, rgb(6 13 24 / 0.9) 35%);
+  }
+  .splash-foot {
+    text-align: center;
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    color: #5c7189;
+  }
+</style>
+
+<script>
+  import '../scripts/splash/index.ts';
+</script>

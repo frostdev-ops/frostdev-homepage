@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/remote-schema.json",
+  "identifier": "dashboard",
+  "description": "The dashboard page (served by the site) may ask this app for a ward's local browser.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["https://frostdev.io/*", "http://localhost:4321/*"]
+  },
+  "local": false,
+  "permissions": ["core:default", "allow-ward-browser", "allow-ward-touch"]
+}

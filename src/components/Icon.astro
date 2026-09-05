@@ -1,0 +1,26 @@
+---
+// Server twin of scripts/app/icon.ts — same markup, same data-icon hook, so
+// the client can repaint a server-rendered icon when the theme changes.
+import { iconRef } from '../lib/icon-names.ts';
+import { iconConfig, parseTheme } from '../lib/theme.ts';
+
+interface Props {
+  id: string;
+  class?: string;
+  title?: string;
+}
+
+const { id, class: cls = '', title } = Astro.props;
+const theme = parseTheme(Astro.locals.user?.theme);
+const r = iconRef(theme ? iconConfig(theme) : null, id);
+---
+
+{
+  r.kind === 'text' ? (
+    <span class={`fd-ic-e ${cls}`.trim()} data-icon={id} title={title}>{r.text}</span>
+  ) : r.kind === 'img' ? (
+    <img class={`fd-ic-img ${cls}`.trim()} data-icon={id} src={r.url} alt="" title={title} />
+  ) : (
+    <span class={`fd-ic ${cls}`.trim()} data-icon={id} style={`--ic:url("${r.url}")`} title={title} />
+  )
+}

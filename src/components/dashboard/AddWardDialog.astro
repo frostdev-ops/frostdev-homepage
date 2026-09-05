@@ -1,0 +1,572 @@
+---
+// Add/configure ward dialog. Server renders every option list (catalog,
+// targets, groups, chart sources); edit.ts shows the config section for the
+// selected type, builds the WardInstance, and clones #wd-template for the
+// new shell. The same dialog re-opens pre-filled for the gear button.
+import Ward from './Ward.astro';
+import Icon from '../Icon.astro';
+import { CATALOG, CATEGORIES, CHART_SOURCES, GROUP_TITLES, HOST_LABELS, HOST_SERVICE_IDS, MAIL_ACCOUNTS, type Category, MCP_PRESETS } from '../../lib/wards.ts';
+import { TARGETS, GROUPS } from '../../lib/targets.ts';
+import { SCENES, SCENE_IDS } from '../../lib/theme.ts';
+
+// Legacy types (superseded, kept for stored layouts) get no catalog card.
+const typeEntries = Object.entries(CATALOG).filter(([, c]) => !c.legacy);
+// The picker is grouped by category; edit.ts only ever hides/reorders these cards.
+const groups = (Object.keys(CATEGORIES) as Category[])
+  .map((cat) => [cat, typeEntries.filter(([, c]) => c.category === cat)] as const)
+  .filter(([, es]) => es.length > 0);
+---
+
+<dialog id="add-ward" class="fd-dialog fd-dialog-wide">
+  <form method="dialog" class="flex flex-col gap-3 p-4">
+    <div class="flex items-center justify-between">
+      <h2 class="section-title" data-aw-heading>Add ward</h2>
+      <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-aw-close aria-label="Close"><Icon id="close" /></button>
+    </div>
+
+    <input type="hidden" id="aw-type" name="type" value="applink" />
+    <div data-aw-picker class="flex flex-col gap-2">
+      <input type="search" class="input" data-aw-q placeholder="Search — what do you want to see or do?" aria-label="Search wards" autocomplete="off" spellcheck="false" autofocus />
+      <div class="aw-cats" data-aw-cats role="group" aria-label="Category">
+        <button type="button" class="aw-cat" data-cat="" aria-pressed="true">All</button>
+        {groups.map(([cat]) => <button type="button" class="aw-cat" data-cat={cat} aria-pressed="false">{CATEGORIES[cat]}</button>)}
+      </div>
+      <div class="aw-catalog" data-aw-catalog>
+        {groups.map(([cat, es]) => (
+          <>
+            <p class="aw-group" data-cat={cat}>{CATEGORIES[cat]}</p>
+            {es.map(([id, c]) => (
+              <button type="button" class="aw-card" data-type={id} data-cat={cat} aria-pressed="false">
+                <span class="aw-ic"><Icon id={c.icon} /></span>
+                <span class="aw-t">{c.title}</span>
+                <span class="aw-b">{c.blurb}</span>
+              </button>
+            ))}
+          </>
+        ))}
+      </div>
+    </div>
+
+    <div>
+      <label class="label" for="aw-title">Title <span class="text-ink-faint">(optional)</span></label>
+      <input id="aw-title" name="title" type="text" class="input" maxlength="60" />
+    </div>
+
+    <div data-cfg="applink" class="hidden flex-col gap-2">
+      <p class="label">Links <span class="text-ink-faint">(url · emoji or icon name · status dot; up to 12)</span></p>
+      <div class="flex flex-col gap-2" data-al-rows></div>
+      <button type="button" class="btn min-h-0 self-start px-2 py-1 text-xs" data-al-add>Add link</button>
+    </div>
+    <template id="aw-al-row">
+      <div class="flex gap-2" data-al-row>
+        <input type="url" class="input flex-[2]" data-al-url placeholder="https://…" aria-label="URL" />
+        <input type="text" class="input flex-1" data-al-icon maxlength="64" placeholder="🚀 or rocket" aria-label="Icon" />
+        <select class="input flex-1" data-al-svc aria-label="Status dot">
+          <option value="">no dot</option>
+          {TARGETS.map((t) => <option value={t.id} data-url={t.kind === 'http' && t.url.startsWith('https://') ? t.url : undefined}>{t.label}</option>)}
+        </select>
+        <button type="button" class="btn min-h-0 px-2 text-xs" data-al-del aria-label="Remove link"><Icon id="close" /></button>
+      </div>
+    </template>
+
+    <div data-cfg="browser" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-bw-url">Home page <span class="text-ink-faint">(optional)</span></label>
+        <input id="aw-bw-url" name="bw-url" type="text" class="input" placeholder="https://…" autocomplete="off" spellcheck="false" />
+      </div>
+      <div>
+        <label class="label" for="aw-bw-backend">Runs on</label>
+        <select id="aw-bw-backend" name="bw-backend" class="input">
+          <option value="local" selected>This server (headless Chromium)</option>
+          <option value="app">My computer (through the Rimeward app)</option>
+          <option value="browserbase">Browserbase (key under Account → Agent)</option>
+        </select>
+      </div>
+      <div>
+        <label class="label" for="aw-bw-route">Egress <span class="text-ink-faint">(this server only)</span></label>
+        <select id="aw-bw-route" name="bw-route" class="input">
+          <option value="" selected>This server's address</option>
+          <option value="home">My computer, through the Rimeward app</option>
+        </select>
+      </div>
+      <p class="mt-1 text-[10px] text-ink-faint">A real browser, not a frame: sites that refuse embedding work, logins persist per ward, and Rime can read and act on the same page you are on.</p>
+    </div>
+    <div data-cfg="mcp" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-mc-preset">Preset <span class="text-ink-faint">(fills the fields)</span></label>
+        <select id="aw-mc-preset" class="input">
+          <option value="">Custom server…</option>
+          {MCP_PRESETS.map((p) => <option value={p.name} data-url={p.url} data-header={p.header ?? 'Authorization'}>{p.title} — {p.note}</option>)}
+        </select>
+      </div>
+      <div>
+        <label class="label" for="aw-mc-name">Name <span class="text-ink-faint">(prefixes its tools: mcp__name__tool)</span></label>
+        <input id="aw-mc-name" name="mc-name" type="text" class="input" placeholder="github" autocomplete="off" spellcheck="false" />
+      </div>
+      <div>
+        <label class="label" for="aw-mc-url">Server URL</label>
+        <input id="aw-mc-url" name="mc-url" type="url" class="input" placeholder="https://…/mcp" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="flex gap-2">
+        <label class="flex-1 text-[10px] text-ink-faint">Token header<input id="aw-mc-header" name="mc-header" type="text" class="input" value="Authorization" autocomplete="off" spellcheck="false" /></label>
+        <label class="flex-1 text-[10px] text-ink-faint">Treat its tools as<select id="aw-mc-trust" name="mc-trust" class="input"><option value="write" selected>writes — pause under approvals: all</option><option value="read">read-only — never pause</option><option value="confirm">confirm every call</option></select></label>
+      </div>
+      <p class="mt-1 text-[10px] text-ink-faint">Remote servers over HTTP only. The token goes in on the ward itself, sealed — never in this form. A server can claim its tools are read-only; only you decide that here.</p>
+    </div>
+    <div data-cfg="discord" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-dc-guild">Server id</label>
+        <input id="aw-dc-guild" name="dc-guild" type="text" class="input" inputmode="numeric" placeholder="123456789012345678" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="flex gap-2">
+        <label class="flex-1 text-[10px] text-ink-faint">Default channel id<input id="aw-dc-channel" name="dc-channel" type="text" class="input" inputmode="numeric" placeholder="where logic and Rime post" autocomplete="off" spellcheck="false" /></label>
+        <label class="flex-1 text-[10px] text-ink-faint">Watch<input id="aw-dc-watch" name="dc-watch" type="text" class="input" value="all" placeholder="all, or channel ids" autocomplete="off" spellcheck="false" /></label>
+      </div>
+      <div>
+        <label class="label" for="aw-dc-token">Bot token</label>
+        <input id="aw-dc-token" name="dc-token" type="password" class="input" placeholder="paste to set or replace — blank keeps the stored one" autocomplete="off" spellcheck="false" />
+      </div>
+      <p class="mt-1 text-[10px] text-ink-faint">One bot per ward. Make it at discord.com/developers, switch on the Message Content and Server Members intents under Bot, paste its token here (sealed server-side, never stored with the layout) and use the invite link the ward shows. Ids: Discord → Settings → Advanced → Developer Mode, then right-click → Copy ID. DMs to the bot always count.</p>
+    </div>
+    <div data-cfg="telegram" class="hidden flex-col gap-3">
+      <div class="flex gap-2">
+        <label class="flex-1 text-[10px] text-ink-faint">Default chat id<input id="aw-tg-chat" name="tg-chat" type="text" class="input" placeholder="-1001234567890 or @channel" autocomplete="off" spellcheck="false" /></label>
+        <label class="flex-1 text-[10px] text-ink-faint">Watch<input id="aw-tg-watch" name="tg-watch" type="text" class="input" value="all" placeholder="all, or chat ids" autocomplete="off" spellcheck="false" /></label>
+      </div>
+      <div>
+        <label class="label" for="aw-tg-token">Bot token</label>
+        <input id="aw-tg-token" name="tg-token" type="password" class="input" placeholder="paste to set or replace — blank keeps the stored one" autocomplete="off" spellcheck="false" />
+      </div>
+      <p class="mt-1 text-[10px] text-ink-faint">One bot per ward. Ask @BotFather for it (/newbot) and paste its token here — sealed server-side, never stored with the layout. Turn off privacy mode (/setprivacy) if it should read every group message, not only mentions. Chat ids appear in the ward's picker once a chat has said something; DMs to the bot always count.</p>
+    </div>
+    <div data-cfg="slack" class="hidden flex-col gap-3">
+      <div class="flex gap-2">
+        <label class="flex-1 text-[10px] text-ink-faint">Default channel id<input id="aw-sl-channel" name="sl-channel" type="text" class="input" placeholder="C0123ABCDEF" autocomplete="off" spellcheck="false" /></label>
+        <label class="flex-1 text-[10px] text-ink-faint">Watch<input id="aw-sl-watch" name="sl-watch" type="text" class="input" value="all" placeholder="all, or channel ids" autocomplete="off" spellcheck="false" /></label>
+      </div>
+      <div>
+        <label class="label" for="aw-sl-token">Bot token (xoxb-…)</label>
+        <input id="aw-sl-token" name="sl-token" type="password" class="input" placeholder="paste to set or replace — blank keeps the stored one" autocomplete="off" spellcheck="false" />
+      </div>
+      <div>
+        <label class="label" for="aw-sl-app">App-level token (xapp-…, optional: live events)</label>
+        <input id="aw-sl-app" name="sl-app" type="password" class="input" placeholder="paste to set or replace — blank keeps the stored one" autocomplete="off" spellcheck="false" />
+      </div>
+      <p class="mt-1 text-[10px] text-ink-faint">One app per ward. Make it at api.slack.com/apps and install it to the workspace; both tokens are sealed server-side, never stored with the layout. For live messages, mentions and reactions: turn on Socket Mode, make the app-level token with connections:write, and subscribe the bot to message.channels, message.groups, message.im, reaction_added and member_joined_channel. Channel ids: channel details → About → bottom.</p>
+    </div>
+    <div data-cfg="twilio" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-tw-sid">Account SID</label>
+        <input id="aw-tw-sid" name="tw-sid" type="text" class="input" placeholder="AC…" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="flex gap-2">
+        <label class="flex-1 text-[10px] text-ink-faint">Twilio number<input id="aw-tw-from" name="tw-from" type="text" class="input" placeholder="+15550001111 or whatsapp:+1…" autocomplete="off" spellcheck="false" /></label>
+        <label class="flex-1 text-[10px] text-ink-faint">Default recipient<input id="aw-tw-to" name="tw-to" type="text" class="input" placeholder="+1… (where logic texts)" autocomplete="off" spellcheck="false" /></label>
+      </div>
+      <div>
+        <label class="label" for="aw-tw-allow">Allow list <span class="text-ink-faint">(numbers that may reach the bot — nobody else is stored or answered)</span></label>
+        <input id="aw-tw-allow" name="tw-allow" type="text" class="input" placeholder="+15559990000, +15558880000" autocomplete="off" spellcheck="false" />
+      </div>
+      <div>
+        <label class="label" for="aw-tw-token">Auth token</label>
+        <input id="aw-tw-token" name="tw-token" type="password" class="input" placeholder="paste to set or replace — blank keeps the stored one" autocomplete="off" spellcheck="false" />
+      </div>
+      <p class="mt-1 text-[10px] text-ink-faint">The auth token is sealed server-side, never stored with the layout. Inbound texts are polled every 30 seconds (no webhook); sends are capped at 20 an hour. A whatsapp: number sends WhatsApp.</p>
+    </div>
+    <div data-cfg="push" class="hidden flex-col gap-3">
+      <div class="flex gap-2">
+        <label class="flex-1 text-[10px] text-ink-faint">Service<select id="aw-pu-service" name="pu-service" class="input"><option value="ntfy" selected>ntfy</option><option value="pushover">Pushover</option></select></label>
+        <label class="flex-1 text-[10px] text-ink-faint">Topic (ntfy) / user key (Pushover)<input id="aw-pu-target" name="pu-target" type="text" class="input" placeholder="my-alerts" autocomplete="off" spellcheck="false" /></label>
+      </div>
+      <div>
+        <label class="label" for="aw-pu-server">ntfy server <span class="text-ink-faint">(blank = ntfy.sh)</span></label>
+        <input id="aw-pu-server" name="pu-server" type="text" class="input" placeholder="https://ntfy.sh" autocomplete="off" spellcheck="false" />
+      </div>
+      <div>
+        <label class="label" for="aw-pu-token">Token (ntfy access token — optional; Pushover application token)</label>
+        <input id="aw-pu-token" name="pu-token" type="password" class="input" placeholder="paste to set or replace — blank keeps the stored one" autocomplete="off" spellcheck="false" />
+      </div>
+      <p class="mt-1 text-[10px] text-ink-faint">ntfy: subscribe to the topic in the ntfy app; the access token is only needed for protected topics. Pushover: the user key above and an application token. Tokens are sealed server-side, never stored with the layout. The first line of what is sent becomes the title.</p>
+    </div>
+    <div data-cfg="matrix" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-mx-hs">Homeserver</label>
+        <input id="aw-mx-hs" name="mx-hs" type="text" class="input" placeholder="https://matrix.example.org" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="flex gap-2">
+        <label class="flex-1 text-[10px] text-ink-faint">Default room<input id="aw-mx-room" name="mx-room" type="text" class="input" placeholder="!room:example.org or #alias:example.org" autocomplete="off" spellcheck="false" /></label>
+        <label class="flex-1 text-[10px] text-ink-faint">Watch<input id="aw-mx-watch" name="mx-watch" type="text" class="input" value="all" placeholder="all, or room ids" autocomplete="off" spellcheck="false" /></label>
+      </div>
+      <div>
+        <label class="label" for="aw-mx-token">Access token</label>
+        <input id="aw-mx-token" name="mx-token" type="password" class="input" placeholder="paste to set or replace — blank keeps the stored one" autocomplete="off" spellcheck="false" />
+      </div>
+      <p class="mt-1 text-[10px] text-ink-faint">One account per ward. Make a Matrix account for the bot and paste its access token here — sealed server-side, never stored with the layout (Element: Settings → Help &amp; About → Access token). Invites are accepted. End-to-end encrypted rooms cannot be read here.</p>
+    </div>
+    <div data-cfg="teams" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-tm-team">Team id <span class="text-ink-faint">(blank = your chats)</span></label>
+        <input id="aw-tm-team" name="tm-team" type="text" class="input" placeholder="a team's id, for its channels" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="flex gap-2">
+        <label class="flex-1 text-[10px] text-ink-faint">Default chat / channel id<input id="aw-tm-channel" name="tm-channel" type="text" class="input" placeholder="19:…@thread.v2" autocomplete="off" spellcheck="false" /></label>
+        <label class="flex-1 text-[10px] text-ink-faint">Watch<input id="aw-tm-watch" name="tm-watch" type="text" class="input" value="all" placeholder="all, or ids" autocomplete="off" spellcheck="false" /></label>
+      </div>
+      <p class="mt-1 text-[10px] text-ink-faint">Speaks as you through the linked Microsoft account — no bot, no token. The link must carry Teams access (the ward offers the reconnect). Team channels need ChannelMessage.Read.All, which a tenant admin consents to; chats work as-is. Ids appear in the ward's picker.</p>
+    </div>
+    <div data-cfg="embed" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-em-url">URL</label>
+        <input id="aw-em-url" name="em-url" type="url" class="input" placeholder="https://…" />
+        <p class="mt-1 text-[10px] text-ink-faint">Some sites refuse to be embedded (their X-Frame-Options/CSP call).</p>
+      </div>
+    </div>
+
+    <div data-cfg="service-group" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-sg-group">Group</label>
+        <select id="aw-sg-group" name="sg-group" class="input">
+          {GROUPS.map((g) => <option value={g}>{GROUP_TITLES[g] ?? g}</option>)}
+        </select>
+      </div>
+      <div>
+        <label class="label" for="aw-sg-services">…or pick specific services <span class="text-ink-faint">(overrides group)</span></label>
+        <select id="aw-sg-services" name="sg-services" class="input" multiple size="6">
+          <optgroup label="Host">
+            {HOST_SERVICE_IDS.map((id) => <option value={id}>{HOST_LABELS[id]}</option>)}
+          </optgroup>
+          {TARGETS.map((t) => <option value={t.id}>{t.label}</option>)}
+        </select>
+      </div>
+      <div>
+        <label class="label" for="aw-sg-view">View</label>
+        <select id="aw-sg-view" name="sg-view" class="input">
+          <option value="wards" selected>Wards — status, value, sparkline each</option>
+          <option value="dots">Dots — a wall, one dot per service</option>
+        </select>
+      </div>
+    </div>
+
+    <div data-cfg="chart" class="hidden flex-col gap-3">
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="label" for="aw-ch-source">Data</label>
+          <select id="aw-ch-source" name="ch-source" class="input">
+            {Object.entries(CHART_SOURCES).map(([id, s]) => <option value={id}>{s.label}</option>)}
+          </select>
+        </div>
+        <div class="flex-1">
+          <label class="label" for="aw-ch-metric">Metric</label>
+          <select id="aw-ch-metric" name="ch-metric" class="input"></select>
+        </div>
+      </div>
+      <div data-ch-service>
+        <label class="label" for="aw-ch-service">Service</label>
+        <select id="aw-ch-service" name="ch-service" class="input">
+          {TARGETS.map((t) => <option value={t.id}>{t.label}</option>)}
+        </select>
+      </div>
+      <div data-ch-host class="hidden">
+        <label class="label" for="aw-ch-host">Resource</label>
+        <select id="aw-ch-host" name="ch-host" class="input">
+          <option value="cpu">CPU load</option>
+          <option value="mem">Memory</option>
+          <option value="disk">Disk</option>
+        </select>
+      </div>
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="label" for="aw-ch-type">Style</label>
+          <select id="aw-ch-type" name="ch-type" class="input">
+            <option value="line">Line</option>
+            <option value="area">Area</option>
+            <option value="bars">Bars</option>
+          </select>
+        </div>
+        <div class="flex-1" data-ch-hours>
+          <label class="label" for="aw-ch-hours">Window</label>
+          <select id="aw-ch-hours" name="ch-hours" class="input">
+            <option value="1">1 hour</option>
+            <option value="6">6 hours</option>
+            <option value="24" selected>24 hours</option>
+            <option value="72">3 days</option>
+            <option value="168">7 days</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div data-cfg="timer" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-tm-duration">Duration (seconds)</label>
+        <input id="aw-tm-duration" name="tm-duration" type="number" class="input" min="1" max="86400" value="300" />
+        <p class="mt-1 text-[10px] text-ink-faint">Runs on the server — it still goes off with the tab closed. Draw a leyline from it in Leylines mode.</p>
+      </div>
+      <div>
+        <p class="label">Routine <span class="text-ink-faint">(0 rounds = a plain timer)</span></p>
+        <div class="flex gap-2">
+          <label class="flex-1 text-[10px] text-ink-faint">Rounds<input id="aw-tm-rounds" name="tm-rounds" type="number" class="input" min="0" max="12" value="0" /></label>
+          <label class="flex-1 text-[10px] text-ink-faint">Focus min<input id="aw-tm-work" name="tm-work" type="number" class="input" min="1" max="1440" value="25" /></label>
+          <label class="flex-1 text-[10px] text-ink-faint">Break min<input id="aw-tm-rest" name="tm-rest" type="number" class="input" min="0" max="1440" value="5" /></label>
+          <label class="flex-1 text-[10px] text-ink-faint">Long break<input id="aw-tm-long" name="tm-long" type="number" class="input" min="0" max="1440" value="15" /></label>
+        </div>
+        <label class="mt-2 flex items-center gap-2 text-xs"><input id="aw-tm-loop" name="tm-loop" type="checkbox" /> Loop when the last break ends</label>
+        <p class="mt-1 text-[10px] text-ink-faint">Each step's end fires Timer finished (filter by step); the last fires Routine finished.</p>
+      </div>
+    </div>
+
+    <div data-cfg="mail" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-ml-account">Account</label>
+        <select id="aw-ml-account" name="ml-account" class="input">
+          <option value="all" selected>All linked mailboxes</option>
+          {MAIL_ACCOUNTS.map((a) => <option value={a}>{a}</option>)}
+        </select>
+      </div>
+      <label class="flex items-center gap-2 text-xs"><input id="aw-ml-unread" name="ml-unread" type="checkbox" /> Unread only</label>
+      <p class="mt-1 text-[10px] text-ink-faint">1x1 is the unread count per account; taller is the inbox with the reader and compose.</p>
+    </div>
+
+    <div data-cfg="button" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-bt-icon">Icon (emoji or icon name)</label>
+        <input id="aw-bt-icon" name="bt-icon" type="text" class="input" maxlength="64" placeholder="☕ or coffee" />
+        <p class="mt-1 text-[10px] text-ink-faint">The title is the label. A press fires Button pressed — draw a leyline from it in Leylines mode. Press and hold on touch screens.</p>
+      </div>
+    </div>
+
+    <div data-cfg="note" class="hidden flex-col gap-3">
+      <input type="hidden" id="aw-nt-text" name="nt-text" />
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="label" for="aw-nt-paper">Paper</label>
+          <select id="aw-nt-paper" name="nt-paper" class="input">
+            <option value="plain" selected>Plain</option>
+            <option value="lines">Lines</option>
+            <option value="grid">Grid</option>
+            <option value="dots">Dots</option>
+          </select>
+        </div>
+        <div class="flex-1">
+          <label class="label" for="aw-nt-transcribe">Handwriting → text</label>
+          <select id="aw-nt-transcribe" name="nt-transcribe" class="input">
+            <option value="manual" selected>On demand — the Transcribe button</option>
+            <option value="live">Live — every pause in writing</option>
+            <option value="off">Off — ink stays ink</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex gap-4 text-xs">
+        <label class="flex items-center gap-1.5"><input id="aw-nt-ink" name="nt-ink" type="checkbox" checked /> Pen and eraser</label>
+        <label class="flex items-center gap-1.5"><input id="aw-nt-keep" name="nt-keep" type="checkbox" /> Keep the ink after it is transcribed</label>
+      </div>
+    </div>
+
+    <div data-cfg="agent note" class="hidden flex-col gap-3">
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="label" for="aw-ag-provider">Provider</label>
+          <select id="aw-ag-provider" name="ag-provider" class="input">
+            <option value="openrouter" selected>OpenRouter</option>
+            <option value="codex">Codex</option>
+          </select>
+        </div>
+        <div class="flex-1">
+          <label class="label" for="aw-ag-model">Model</label>
+          <input id="aw-ag-model" name="ag-model" type="text" class="input" maxlength="100" list="aw-ag-models" placeholder="provider default" />
+          <datalist id="aw-ag-models"></datalist>
+        </div>
+      </div>
+      <p class="mt-1 text-[10px] text-ink-faint" data-cfg-note-hint>Credentials live in Account → Agent. Reading handwriting needs a model that accepts images; ✨ commands work with any.</p>
+    </div>
+
+    <div data-cfg="notion-db notion-tasks checklist" class="hidden flex-col gap-3">
+      <div class="hidden" data-cl-view>
+        <label class="label" for="aw-cl-view">View</label>
+        <select id="aw-cl-view" name="cl-view" class="input">
+          <option value="table" selected>Table — rows × columns, cells editable</option>
+          <option value="list">Task list — checkboxes and due dates</option>
+          <option value="calendar">Calendar — a month grid; cards carry the chosen columns</option>
+        </select>
+      </div>
+      <div class="hidden" data-cl-calonly>
+        <label class="label" for="aw-cl-date">Date column</label>
+        <select id="aw-cl-date" name="cl-date" class="input"></select>
+        <p class="mt-1 text-[10px] text-ink-faint">Which date puts a row on the grid. A range spans its days.</p>
+      </div>
+      <div>
+        <label class="label" for="aw-cl-pick">Notion database</label>
+        <select id="aw-cl-pick" name="cl-pick" class="input">
+          <option value="">Loading your databases…</option>
+        </select>
+        <input id="aw-cl-db" name="cl-db" type="text" class="input mt-1" placeholder="…or paste a database link or id" />
+        <div class="mt-1 hidden" data-cl-lists>
+          <label class="label" for="aw-cl-ds">List</label>
+          <select id="aw-cl-ds" name="cl-ds" class="input"></select>
+          <p class="mt-1 text-[10px] text-ink-faint">This database holds more than one list — each has its own columns.</p>
+        </div>
+        <p class="mt-1 text-[10px] text-ink-faint" data-cl-schema>
+          Title, due date and the done column (checkbox, status or select) are detected automatically.
+        </p>
+      </div>
+      <div class="flex gap-3">
+        <div class="flex-1" data-cl-listonly>
+          <label class="label" for="aw-cl-show">Show</label>
+          <select id="aw-cl-show" name="cl-show" class="input">
+            <option value="open" selected>Open only</option>
+            <option value="all">Everything</option>
+            <option value="done">Done only</option>
+          </select>
+        </div>
+        <div class="flex-1" data-cl-listonly>
+          <label class="label" for="aw-cl-sort">Sort by</label>
+          <select id="aw-cl-sort" name="cl-sort" class="input">
+            <option value="due" selected>Due date</option>
+            <option value="created">Newest first</option>
+            <option value="edited">Recently edited</option>
+            <option value="title">Title</option>
+          </select>
+        </div>
+        <div class="w-24">
+          <label class="label" for="aw-cl-limit">Max rows</label>
+          <input id="aw-cl-limit" name="cl-limit" type="number" class="input" min="1" max="49" placeholder="all" />
+        </div>
+      </div>
+      <div>
+        <label class="label" for="aw-cl-props">Columns to show <span class="text-ink-faint">(ctrl-click; none picked = the first few)</span></label>
+        <select id="aw-cl-props" name="cl-props" class="input" multiple size="4">
+          <option value="" disabled>Pick a database first</option>
+        </select>
+      </div>
+    </div>
+
+    <div data-cfg="notion-page" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-np-q">Notion page</label>
+        <input id="aw-np-q" name="np-q" type="search" class="input" placeholder="Search your pages…" autocomplete="off" />
+        <select id="aw-np-pick" name="np-pick" class="input mt-1" size="4">
+          <option value="">Type above to search, or paste a link below</option>
+        </select>
+        <input id="aw-np-page" name="np-page" type="text" class="input mt-1" placeholder="…or paste a page link or id" />
+      </div>
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="label" for="aw-np-show">Show <span class="text-ink-faint">(ctrl-click)</span></label>
+          <select id="aw-np-show" name="np-show" class="input" multiple size="3">
+            <option value="props" selected>Properties</option>
+            <option value="blocks" selected>Content blocks</option>
+            <option value="comments" selected>Comments</option>
+            <option value="add">Capture line</option>
+          </select>
+        </div>
+        <div class="w-28">
+          <label class="label" for="aw-np-depth">Nesting</label>
+          <select id="aw-np-depth" name="np-depth" class="input">
+            <option value="0">Top level</option>
+            <option value="1">1 deep</option>
+            <option value="2" selected>2 deep</option>
+            <option value="3">3 deep</option>
+            <option value="4">4 deep</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="label" for="aw-np-props">Properties <span class="text-ink-faint">(none picked = all of them)</span></label>
+        <select id="aw-np-props" name="np-props" class="input" multiple size="4">
+          <option value="" disabled>Pick a page first</option>
+        </select>
+        <p class="mt-1 text-[10px] text-ink-faint" data-np-note>
+          Everything writable is editable in the ward — text, numbers, dates, selects, people, relations and files.
+        </p>
+      </div>
+      <label class="flex items-center gap-2 text-xs"><input id="aw-np-head" name="np-head" type="checkbox" checked /> Show the page title and icon</label>
+      <p class="text-[10px] text-ink-faint">No page + the capture line = a bare capture ward that saves to your capture page (Account → Notion).</p>
+    </div>
+
+    <div data-cfg="spacer" class="hidden flex-col gap-3">
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="label" for="aw-fx">Effect</label>
+          <select id="aw-fx" name="fx" class="input">
+            <option value="none" selected>None — invisible</option>
+            <option value="glass">Glass — frosted surface</option>
+            <option value="magnify">Lens — magnifies the background</option>
+            <option value="aurora">Aurora — accent-tinted glow</option>
+            <option value="scene">Scene — its own animated preset</option>
+          </select>
+        </div>
+        <div class="flex-1 hidden" data-fx-scene>
+          <label class="label" for="aw-fx-scene">Scene</label>
+          <select id="aw-fx-scene" name="fx-scene" class="input">
+            {SCENE_IDS.map((id) => <option value={id}>{SCENES[id].label}</option>)}
+          </select>
+        </div>
+      </div>
+      <label class="flex items-center gap-2 text-xs"><input id="aw-fx-rule" name="fx-rule" type="checkbox" /> Draw a rule across it, with the title as the label</label>
+      <p class="mt-1 text-[10px] text-ink-faint">Invisible until you pick an effect or the rule — Edit mode outlines it. A 6x1 with the rule on is a section divider.</p>
+    </div>
+
+    <div data-cfg="container" class="hidden flex-col gap-3">
+      <p class="text-[10px] text-ink-faint">A folder for wards. Tap it to unfold in place; in Edit mode drag wards in and out, or right-click a ward → Move into. Leylines reach the wards inside.</p>
+    </div>
+
+    <div data-cfg="flow" class="hidden flex-col gap-3">
+      <p class="text-[10px] text-ink-faint">Flow wards hold traveling packets. No setup — channels exist by being used; draw leylines between wards in Leylines mode.</p>
+    </div>
+
+    <div data-cfg="agent" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-ag-persona">Persona <span class="text-ink-faint">(optional)</span></label>
+        <textarea id="aw-ag-persona" name="ag-persona" class="input" rows="3" maxlength="2000" placeholder="Extra system-prompt: who this agent is, what it should focus on…"></textarea>
+      </div>
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="label" for="aw-ag-tools">Tools</label>
+          <select id="aw-ag-tools" name="ag-tools" class="input">
+            <option value="all" selected>All</option>
+            <option value="read-only">Read-only</option>
+          </select>
+        </div>
+        <div class="flex-1">
+          <label class="label" for="aw-ag-approvals">Approvals</label>
+          <select id="aw-ag-approvals" name="ag-approvals" class="input">
+            <option value="outbound" selected>Confirm outbound + deletions</option>
+            <option value="all">Confirm every write</option>
+            <option value="off">Never ask</option>
+          </select>
+        </div>
+        <div class="flex-1">
+          <label class="label" for="aw-ag-effort">Reasoning</label>
+          <select id="aw-ag-effort" name="ag-effort" class="input">
+            <option value="low">Low</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+            <option value="xhigh">Extra high</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="label" for="aw-ag-cap">Unattended runs per hour <span class="text-ink-faint">(leylines, other agents, chat bots; 0 = no cap)</span></label>
+          <input id="aw-ag-cap" name="ag-cap" type="number" class="input" min="0" max="1000" value="6" />
+        </div>
+        <div class="flex-1">
+          <label class="label" for="aw-ag-rounds">Tool rounds per turn <span class="text-ink-faint">(blank = account setting, 0 = no cap)</span></label>
+          <input id="aw-ag-rounds" name="ag-rounds" type="number" class="input" min="0" max="500" placeholder="account" />
+        </div>
+      </div>
+      <p class="mt-1 text-[10px] text-ink-faint">Credentials live in Account → Agent. Changing the provider starts a fresh conversation.</p>
+    </div>
+
+    <p class="hidden text-xs text-err" data-aw-err></p>
+
+    <div class="flex items-center justify-end gap-2">
+      <button type="button" class="btn" data-aw-close>Cancel</button>
+      <button type="button" class="btn-primary" data-aw-submit>Add</button>
+    </div>
+  </form>
+</dialog>
+
+<template id="wd-template">
+  <Ward w={{ i: 'tpl', type: 'applink', size: '1x1' }} />
+</template>

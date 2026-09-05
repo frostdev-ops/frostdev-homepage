@@ -1,0 +1,28 @@
+---
+// On-demand @font-face CSS. Pages declare only the faces they actually paint
+// (AppLayout), so anything chosen at runtime — or a picker previewing the whole
+// catalogue — pulls its CSS from here. The response is the same <Font> tags a
+// layout emits; scripts/app/fonts.ts lifts the <style> out of it.
+//
+//   /fonts?ids=lora,inter   the real faces, for text about to be painted
+//   /fonts?preview=1        every label-glyph subset, for a picker
+import { Font } from 'astro:assets';
+import { FONT_IDS, fontVar, previewVar, type FontId } from '../lib/theme.ts';
+
+export const prerender = false;
+
+const params = Astro.url.searchParams;
+const isPreview = params.get('preview') === '1';
+// Whitelisted against the catalogue: nothing reaches <Font> that was not
+// registered in astro.config.mjs.
+const wanted: FontId[] = isPreview
+  ? FONT_IDS
+  : (params.get('ids') ?? '').split(',').filter((id): id is FontId => (FONT_IDS as string[]).includes(id));
+const vars = wanted.map((id) => (isPreview ? previewVar(id) : fontVar(id))).filter((v): v is string => v !== null);
+
+// The file URLs behind these are content-hashed and immutable; the mapping
+// only changes on a deploy, so a short private cache is safe.
+Astro.response.headers.set('cache-control', 'private, max-age=600');
+---
+
+{vars.map((v) => <Font cssVariable={v as any} />)}

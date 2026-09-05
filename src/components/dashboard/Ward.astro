@@ -1,0 +1,72 @@
+---
+import { CATALOG, fxOf, sizeParts, wardTitle, type WardInstance } from '../../lib/wards.ts';
+import { wardThemeAttrs } from '../../lib/theme.ts';
+import Icon from '../Icon.astro';
+
+interface Props {
+  w: WardInstance;
+  /** The whole layout — a container renders the wards whose `in` names it. */
+  layout?: WardInstance[];
+  /** Entrance stagger in ms; omit (template clones) for no entrance. */
+  enterDelay?: number;
+  /** The page a top-level card sits on (scripts/app/pages.ts stages by it); nested cards follow their group. */
+  page?: string;
+}
+
+const { w, layout = [], enterDelay, page } = Astro.props;
+const [cols, rows] = sizeParts(w.size);
+// The card's own theme, if it has one: the same attrs edit.ts stamps live.
+const { style: themeStyle, ...themeAttrs } = wardThemeAttrs(w.theme);
+const isContainer = w.type === 'container';
+const kids = isContainer ? layout.filter((c) => c.in === w.i) : [];
+const fx = fxOf(w);
+---
+
+<section
+  class={`card wd-w${cols} flex flex-col overflow-hidden p-3${enterDelay !== undefined ? ' wd-enter' : ''}`}
+  style={`--wd-h:${rows}${enterDelay !== undefined ? `;animation-delay:${enterDelay}ms` : ''}${themeStyle ? `;${themeStyle}` : ''}`}
+  data-wd={w.i}
+  data-wd-type={w.type}
+  data-wd-hidden={w.hidden ? '' : undefined}
+  data-page={page}
+  data-fx={fx}
+  {...themeAttrs}
+>
+  <header class="mb-2 flex items-center justify-between gap-2">
+    <h2 class="section-title truncate" data-wd-title>{wardTitle(w)}</h2>
+    <span class="wd-status text-xs text-ink-faint"></span>
+    <span class="wd-edit" data-edit-controls>
+      <button type="button" data-act="left" title="Move earlier" aria-label="Move earlier"><Icon id="left" /></button>
+      <button type="button" data-act="right" title="Move later" aria-label="Move later"><Icon id="right" /></button>
+      <button type="button" data-act="size" title="Size" aria-label="Size"><Icon id="resize" /></button>
+      <button type="button" data-act="hide" title="Show only in Edit/Logic" aria-label="Hide from dashboard"><Icon id="eye" /></button>
+      <button type="button" data-act="theme" title="Theme" aria-label="Theme"><Icon id="palette" /></button>
+      {CATALOG[w.type]?.configurable && <button type="button" data-act="cfg" title="Configure" aria-label="Configure"><Icon id="settings" /></button>}
+      <button type="button" data-act="remove" title="Remove" aria-label="Remove"><Icon id="close" /></button>
+    </span>
+    {isContainer && <button type="button" class="wd-chevron" data-act="open" title="Open group" aria-label="Open group" aria-expanded="false"><Icon id="right" /></button>}
+  </header>
+  {isContainer ? (
+    <div class="wd-body min-h-0 flex-1 text-sm" data-body>
+      <div class="wd-peek" data-peek>
+        {kids.map((c) => (
+          <Icon id={CATALOG[c.type]?.icon ?? 'dot'} title={wardTitle(c)} />
+        ))}
+        {kids.length === 0 && <span class="text-xs text-ink-faint">Empty group</span>}
+      </div>
+      <div class="wd-grid wd-nest" data-nest>
+        {kids.map((c, i) => (
+          <Astro.self w={c} layout={layout} enterDelay={enterDelay !== undefined ? enterDelay + i * 30 : undefined} />
+        ))}
+      </div>
+    </div>
+  ) : (
+    <div class="wd-body min-h-0 flex-1 overflow-y-auto text-sm" data-body>
+      <div class="skel mb-2 h-3 w-3/4"></div>
+      <div class="skel mb-2 h-3 w-1/2"></div>
+      <div class="skel h-3 w-2/3"></div>
+    </div>
+  )}
+  <span class="wd-port" data-wd-port aria-hidden="true"></span>
+  <span class="wd-grip" data-resize aria-hidden="true"></span>
+</section>

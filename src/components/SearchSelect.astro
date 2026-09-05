@@ -1,0 +1,638 @@
+---
+// A searchable, touch-friendly replacement for the native <select> dropdown.
+// Ported from the PMA office app and retied to this app's tokens.
+//
+// Mounted ONCE (BaseLayout) and it upgrades every <select> on the page —
+// including the ones client renderers build later (wards.ts, notion.ts,
+// edit.ts config dialogs), which is why it watches the DOM instead of being
+// called. There is nothing to import at a call site:
+//
+//   <select class="input" name="preset">…</select>       ← enhanced
+//   <select … data-ss-placeholder="Search services…">    ← custom search hint
+//   <select … multiple>                                  ← left alone
+//   <select … data-no-enhance>                           ← opt out
+//
+// It is progressive enhancement on purpose. The native select stays in the DOM
+// as the form field and the source of truth — with JavaScript off, or before
+// this runs, every form is a plain working select, and nothing server-side
+// knows this exists.
+//
+// Anything that sets a value programmatically must dispatch a bubbling
+// `change` so the trigger's label follows (setting .value fires no event):
+//
+//   sel.value = ''; sel.dispatchEvent(new Event('change', { bubbles: true }));
+//
+// Its styles live in src/styles/frost.css under "searchable select" — same
+// reason .card and .input do: @apply only resolves in that entry stylesheet.
+---
+
+<script>
+  // How many options before the search box earns its place. Below this the
+  // panel is just a nicer, thumb-sized list.
+  const SEARCH_MIN = 8;
+
+  interface Row {
+    value: string;
+    label: string;
+    group: string | null;
+    disabled: boolean;
+    index: number;
+    /** Optional image URL from `data-preview` on the option — drawn behind the
+     *  row (see .fd-ss-opt[data-preview] in frost.css). Decorative only. */
+    preview: string | null;
+    /** Optional font stack from `data-font` — the row (and the closed
+     *  trigger) renders its label in it, so a font picker shows the fonts. */
+    font: string | null;
+  }
+
+  /** Both kinds of dropdown this replaces: a <select>, and an <input list=…>
+   *  whose datalist is a suggestion list rather than a closed set. */
+  type Field = HTMLSelectElement | HTMLInputElement;
+  const isFree = (f: Field): f is HTMLInputElement => f instanceof HTMLInputElement;
+
+  let openState: {
+    field: Field;
+    trigger: HTMLButtonElement;
+    backdrop: HTMLElement;
+    panel: HTMLElement;
+    list: HTMLElement;
+    input: HTMLInputElement | null;
+    rows: Row[];
+    active: number;
+    sheet: boolean;
+    /** Free-text field: the search box is also the value, so an unmatched
+     *  query offers itself as a row instead of "No matches". */
+    free: boolean;
+    /** The coordinate space fixed children of the host land in (see frame()). */
+    frame: { x: number; y: number; scale: number };
+  } | null = null;
+
+  let seq = 0;
+  const isPhone = () => window.matchMedia('(max-width: 639px)').matches;
+
+  function labelOf(f: Field): string {
+    if (isFree(f)) {
+      // Prefer the datalist's display name for the id that is actually set.
+      const opt = [...datalistOf(f)].find((o) => o.value === f.value);
+      return (opt?.label && opt.label !== f.value ? opt.label : f.value) || f.placeholder || 'Choose…';
+    }
+    return f.selectedOptions[0]?.textContent?.trim() || f.dataset.ssPlaceholder || 'Choose…';
+  }
+
+  /** The picked option's `data-font`, so the closed control shows it too. */
+  const fontOf = (f: Field): string =>
+    (isFree(f) ? datalistOf(f).find((o) => o.value === f.value) : f.selectedOptions[0])?.dataset.font ?? '';
+
+  const datalistOf = (input: HTMLInputElement): HTMLOptionElement[] =>
+    Array.from((input.list as HTMLDataListElement | null)?.options ?? []);
+
+  function svgIcon(d: string, cls: string, width: string): SVGElement {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', width);
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.classList.add(cls);
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+    return svg;
+  }
+
+  const chevron = () => svgIcon('M6 9l6 6 6-6', 'fd-ss-chev', '2');
+  const tick = () => svgIcon('M20 6L9 17l-5-5', 'fd-ss-tick', '2.5');
+
+  function syncTrigger(field: Field) {
+    const trigger = (field as any)._fdTrigger as HTMLButtonElement | undefined;
+    if (!trigger) return;
+    const text = trigger.querySelector('.fd-ss-value') as HTMLElement;
+    const next = labelOf(field);
+    // Guarded: the observer resyncs every enhanced field each frame, and an
+    // unconditional write would thrash a dashboard that repaints on every tick.
+    if (text.textContent !== next) text.textContent = next;
+    // Compared through the dataset, not style.fontFamily: the CSSOM normalises
+    // what it stores, and this runs on every observer frame.
+    const font = fontOf(field);
+    if (text.dataset.font !== font) {
+      text.dataset.font = font;
+      text.style.fontFamily = font;
+    }
+    text.classList.toggle('fd-ss-empty', !field.value);
+    if (trigger.disabled !== field.disabled) trigger.disabled = field.disabled;
+  }
+
+  function enhance(field: Field) {
+    // `multiple` is a genuinely different control, and a caller can opt out.
+    if (field.dataset.fdSs || field.hasAttribute('data-no-enhance')) return;
+    if (!isFree(field) && field.multiple) return;
+    if (isFree(field) && !field.list) return; // a plain text box is not a dropdown
+    field.dataset.fdSs = '1';
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    // Inheriting the field's own classes keeps it looking exactly like the
+    // control it replaced, including per-instance width and text-size overrides.
+    trigger.className = `${field.className} fd-ss-trigger`;
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    if (field.disabled) trigger.disabled = true;
+
+    const value = document.createElement('span');
+    value.className = 'fd-ss-value';
+    trigger.append(value, chevron());
+
+    // The <label for=…> points at the field; give the trigger the same name.
+    const label = field.id ? document.querySelector(`label[for="${CSS.escape(field.id)}"]`) : null;
+    if (label) {
+      if (!label.id) label.id = `fd-ss-l-${++seq}`;
+      trigger.setAttribute('aria-labelledby', label.id);
+    } else if (field.getAttribute('aria-label')) {
+      trigger.setAttribute('aria-label', field.getAttribute('aria-label')!);
+    }
+
+    field.classList.add('fd-ss-native');
+    field.setAttribute('tabindex', '-1');
+    field.setAttribute('aria-hidden', 'true');
+    field.after(trigger);
+    (field as any)._fdTrigger = trigger;
+    syncTrigger(field);
+
+    trigger.addEventListener('click', () => open(field, trigger));
+  }
+
+  function rowsOf(field: Field): Row[] {
+    if (isFree(field)) {
+      // A datalist option carries the id in `value` and the human name in
+      // `label`; show the name and match on both.
+      return datalistOf(field).map((o, index) => ({
+        value: o.value,
+        label: o.label && o.label !== o.value ? `${o.label} · ${o.value}` : o.value,
+        group: null,
+        disabled: false,
+        index,
+        preview: o.dataset.preview || null,
+        font: o.dataset.font || null,
+      }));
+    }
+    return Array.from(field.options).map((o, index) => ({
+      value: o.value,
+      label: (o.textContent ?? '').trim(),
+      group: o.parentElement instanceof HTMLOptGroupElement ? o.parentElement.label : null,
+      disabled: o.disabled,
+      index,
+      preview: o.dataset.preview || null,
+      font: o.dataset.font || null,
+    }));
+  }
+
+  /** Every term must appear somewhere — so "cpu loot" finds "loothing-vps CPU". */
+  const matches = (row: Row, terms: string[]) => {
+    const hay = `${row.label} ${row.group ?? ''}`.toLowerCase();
+    return terms.every((t) => hay.includes(t));
+  };
+
+  /** Marks the matched runs without ever touching innerHTML — option labels
+   *  carry Notion page titles and service names, which are hostile input. */
+  function labelNode(text: string, terms: string[]): DocumentFragment {
+    const frag = document.createDocumentFragment();
+    if (!terms.length) {
+      frag.append(text);
+      return frag;
+    }
+    const lower = text.toLowerCase();
+    const hits: [number, number][] = [];
+    for (const t of terms) {
+      let from = 0;
+      for (;;) {
+        const at = lower.indexOf(t, from);
+        if (at === -1) break;
+        hits.push([at, at + t.length]);
+        from = at + t.length;
+      }
+    }
+    if (!hits.length) {
+      frag.append(text);
+      return frag;
+    }
+    hits.sort((a, b) => a[0] - b[0]);
+    let cursor = 0;
+    for (const [start, end] of hits) {
+      if (end <= cursor) continue;
+      const from = Math.max(start, cursor);
+      if (from > cursor) frag.append(text.slice(cursor, from));
+      const mark = document.createElement('mark');
+      mark.className = 'fd-ss-mark';
+      mark.textContent = text.slice(from, end);
+      frag.append(mark);
+      cursor = end;
+    }
+    if (cursor < text.length) frag.append(text.slice(cursor));
+    return frag;
+  }
+
+  const cssUrl = (u: string) =>
+    `url("${encodeURI(u).replace(/['()]/g, (c) => `%${c.charCodeAt(0).toString(16)}`)}")`;
+
+  function render(query: string) {
+    const st = openState;
+    if (!st) return;
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const shown = st.rows.filter((r) => matches(r, terms));
+    st.list.textContent = '';
+    st.active = -1;
+
+    // A free-text field must accept a value its suggestion list has never heard
+    // of — a model id OpenRouter added this morning, say. The typed text is
+    // offered as a row rather than the panel being a dead end. It goes LAST, so
+    // that Enter after typing "sonnet" picks the real Sonnet rather than
+    // setting the model to the literal string "sonnet".
+    const typed = query.trim();
+    const custom = st.free && typed && !st.rows.some((r) => r.value === typed);
+    const addCustom = () => {
+      const opt = document.createElement('button');
+      opt.type = 'button';
+      opt.className = 'fd-ss-opt fd-ss-custom';
+      opt.id = 'fd-ss-o-custom';
+      opt.setAttribute('role', 'option');
+      opt.dataset.index = '-1';
+      const text = document.createElement('span');
+      text.className = 'fd-ss-opt-label';
+      text.textContent = `Use “${typed}”`;
+      opt.appendChild(text);
+      st.list.appendChild(opt);
+    };
+
+    if (!shown.length) {
+      if (custom) addCustom();
+      else {
+        const none = document.createElement('p');
+        none.className = 'fd-ss-none';
+        none.textContent = 'No matches.';
+        st.list.appendChild(none);
+      }
+      setActive(0);
+      return;
+    }
+
+    let group: string | null = null;
+    shown.forEach((row) => {
+      if (row.group && row.group !== group) {
+        group = row.group;
+        const head = document.createElement('div');
+        head.className = 'fd-ss-group';
+        head.textContent = row.group;
+        st.list.appendChild(head);
+      }
+      const opt = document.createElement('button');
+      opt.type = 'button';
+      opt.className = 'fd-ss-opt';
+      opt.id = `fd-ss-o-${row.index}`;
+      opt.setAttribute('role', 'option');
+      opt.dataset.index = String(row.index);
+      const selected = row.value === st.field.value;
+      opt.setAttribute('aria-selected', String(selected));
+      if (row.disabled) opt.disabled = true;
+
+      // A CSS url() is the one place an option's data can reach the style
+      // engine, so the value is percent-escaped rather than interpolated raw.
+      if (row.preview) {
+        opt.dataset.preview = '';
+        opt.style.setProperty('--fd-ss-prev', cssUrl(row.preview));
+      }
+
+      const text = document.createElement('span');
+      text.className = 'fd-ss-opt-label';
+      // Assigned through the CSSOM, which parses and drops anything that is
+      // not a font-family — a value cannot escape into another declaration.
+      // The attribute is what frost.css sizes a previewed row off.
+      if (row.font) {
+        text.style.fontFamily = row.font;
+        text.dataset.font = '';
+      }
+      text.appendChild(labelNode(row.label || '—', terms));
+      opt.appendChild(text);
+      if (selected) opt.appendChild(tick());
+      st.list.appendChild(opt);
+    });
+    if (custom) addCustom();
+
+    // Start on the current selection so Enter re-picks it and arrows move from
+    // where you are, not from the top of a 90-item list. Found through the DOM,
+    // because a prepended custom row shifts every position by one.
+    const els = options();
+    const at = els.findIndex((el) => st.rows[Number(el.dataset.index)]?.value === st.field.value);
+    setActive(at >= 0 ? at : 0);
+  }
+
+  const options = () => Array.from(openState?.list.querySelectorAll('.fd-ss-opt') ?? []) as HTMLButtonElement[];
+
+  function setActive(i: number) {
+    const st = openState;
+    if (!st) return;
+    const els = options();
+    if (!els.length) return;
+    const next = Math.max(0, Math.min(i, els.length - 1));
+    els.forEach((el) => el.classList.remove('fd-ss-active'));
+    const el = els[next]!;
+    el.classList.add('fd-ss-active');
+    el.scrollIntoView({ block: 'nearest' });
+    st.active = next;
+    if (st.input) st.input.setAttribute('aria-activedescendant', el.id);
+  }
+
+  function choose(index: number) {
+    const st = openState;
+    if (!st) return;
+    // Wards repaint by replacing their whole subtree (an SSE tick, a poll), so
+    // the field this panel was opened from can be detached mid-choice. Writing
+    // to a detached node would look like it worked and submit the old value.
+    if (!st.field.isConnected) {
+      close();
+      return;
+    }
+    const field = st.field;
+    if (isFree(field)) {
+      // -1 is the "Use <what you typed>" row.
+      const value = index < 0 ? (st.input?.value.trim() ?? '') : (st.rows[index]?.value ?? '');
+      if (index >= 0 && !st.rows[index]) return;
+      field.value = value;
+    } else {
+      const option = field.options[index];
+      if (!option || option.disabled) return;
+      field.selectedIndex = index;
+    }
+    close();
+    // Bubbling, so every listener already on the field or its form still hears it.
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+    syncTrigger(field);
+  }
+
+  /**
+   * The coordinate space a position:fixed child of `host` actually lands in.
+   * Normally the viewport — but transform, filter and backdrop-filter each make
+   * an ancestor the containing block for its fixed descendants, and .fd-dialog
+   * has a transform while it animates open and a backdrop-filter for the whole
+   * time under a glass theme. So viewport coordinates can be both offset AND
+   * scaled.
+   *
+   * A 100px probe answers both: where its origin lands, and what its size came
+   * out as. It has to be a plain throwaway element, not the panel — the panel
+   * carries its own entrance transform, which would corrupt the reading.
+   */
+  function frame(host: HTMLElement): { x: number; y: number; scale: number } {
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;left:0;top:0;width:100px;height:100px;';
+    host.appendChild(probe);
+    const r = probe.getBoundingClientRect();
+    probe.remove();
+    return { x: r.left, y: r.top, scale: r.width ? r.width / 100 : 1 };
+  }
+
+  /** Only ever writes top/left/width, so one frame correction covers both the
+   *  popover and the sheet. Every value written is in the host's space, which
+   *  is why each one goes through `into`. */
+  function position() {
+    const st = openState;
+    if (!st) return;
+    const { panel, trigger, sheet, frame: f } = st;
+    const into = (viewportPx: number, axis: 'x' | 'y') => (viewportPx - f[axis]) / f.scale;
+    const size = (px: number) => px / f.scale;
+
+    if (sheet) {
+      panel.style.width = `${size(window.innerWidth)}px`;
+      panel.style.maxHeight = '85vh';
+      panel.style.left = `${into(0, 'x')}px`;
+      // offsetHeight is in the host's space already — the rendered height is
+      // that times the scale.
+      panel.style.top = `${into(window.innerHeight - panel.offsetHeight * f.scale, 'y')}px`;
+      return;
+    }
+
+    const box = trigger.getBoundingClientRect();
+    const width = Math.min(Math.max(box.width, 288), window.innerWidth - 16);
+    const below = window.innerHeight - box.bottom;
+    const room = Math.max(below, box.top) - 16;
+    panel.style.width = `${size(width)}px`;
+    panel.style.maxHeight = `${size(Math.min(360, room))}px`;
+    // Flip above when the space below cannot hold a usable list.
+    const flip = below < 220 && box.top > below;
+    const top = flip ? box.top - panel.offsetHeight * f.scale - 6 : box.bottom + 6;
+    const left = Math.min(Math.max(8, box.left), window.innerWidth - width - 8);
+    panel.style.left = `${into(left, 'x')}px`;
+    panel.style.top = `${into(top, 'y')}px`;
+  }
+
+  function open(field: Field, trigger: HTMLButtonElement) {
+    if (openState) close();
+    const sheet = isPhone();
+    const rows = rowsOf(field);
+    const free = isFree(field);
+    // A modal <dialog> paints in the top layer, above anything in the body no
+    // matter its z-index — so a panel for a field inside one has to live in
+    // that dialog to be visible at all.
+    const host = (field.closest('dialog[open]') as HTMLElement | null) ?? document.body;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'fd-ss-backdrop';
+
+    const panel = document.createElement('div');
+    panel.className = sheet ? 'fd-ss-panel fd-ss-sheet' : 'fd-ss-panel fd-ss-pop';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    // Without a tabindex the panel is not focusable, so on the sheet (no search
+    // box to take focus) focus stayed on the trigger behind the modal, with
+    // nothing to announce and Tab suppressed. It also needs a name of its own —
+    // the trigger already carries the field's label.
+    panel.tabIndex = -1;
+    const named = trigger.getAttribute('aria-labelledby')
+      ? ['aria-labelledby', trigger.getAttribute('aria-labelledby')!]
+      : ['aria-label', trigger.getAttribute('aria-label') || 'Choose an option'];
+    panel.setAttribute(named[0], named[1]);
+
+    if (sheet) {
+      const grip = document.createElement('div');
+      grip.className = 'fd-ss-grip';
+      panel.appendChild(grip);
+    }
+
+    let input: HTMLInputElement | null = null;
+    // A free-text field always gets the box — it is where a value the list does
+    // not have gets typed, not merely a filter.
+    if (free || rows.length >= SEARCH_MIN) {
+      const wrap = document.createElement('div');
+      wrap.className = 'fd-ss-search';
+      input = document.createElement('input');
+      input.type = 'search';
+      input.className = 'input';
+      input.autocomplete = 'off';
+      input.setAttribute('role', 'combobox');
+      input.setAttribute('aria-expanded', 'true');
+      input.setAttribute('aria-autocomplete', 'list');
+      input.placeholder = field.dataset.ssPlaceholder || (free ? 'Search or type an id…' : 'Search…');
+      wrap.appendChild(input);
+      panel.appendChild(wrap);
+    }
+
+    const list = document.createElement('div');
+    list.className = 'fd-ss-list';
+    list.id = `fd-ss-list-${++seq}`;
+    list.setAttribute('role', 'listbox');
+    panel.appendChild(list);
+    input?.setAttribute('aria-controls', list.id);
+
+    host.append(backdrop, panel);
+    openState = { field, trigger, backdrop, panel, list, input, rows, active: -1, sheet, free, frame: frame(host) };
+    render(''); // fills the list, so the height position() measures is real
+    position();
+
+    trigger.setAttribute('aria-expanded', 'true');
+    document.documentElement.classList.add('fd-ss-open');
+
+    // position() just read offsetHeight, which flushes layout — so the
+    // transition already has a "from" and the classes can go on synchronously.
+    // Deliberately NOT requestAnimationFrame: it does not run in a hidden tab,
+    // and a panel that opens at opacity 0 and stays there is a dropdown that
+    // does not work.
+    backdrop.classList.add('fd-ss-in');
+    panel.classList.add('fd-ss-in');
+
+    // On a phone the keyboard would cover the list it is filtering; let the
+    // thumb scroll first and only focus the box when someone types.
+    if (input && !sheet) input.focus();
+    else panel.focus?.();
+
+    input?.addEventListener('input', () => {
+      render(input!.value);
+      if (!sheet) position(); // the list shrank; keep a flipped panel anchored
+    });
+    backdrop.addEventListener('click', close);
+    list.addEventListener('click', (e) => {
+      const opt = (e.target as HTMLElement).closest('.fd-ss-opt') as HTMLButtonElement | null;
+      if (opt) choose(Number(opt.dataset.index));
+    });
+  }
+
+  function close() {
+    const st = openState;
+    if (!st) return;
+    openState = null;
+    st.trigger.setAttribute('aria-expanded', 'false');
+    document.documentElement.classList.remove('fd-ss-open');
+    st.backdrop.classList.remove('fd-ss-in');
+    st.panel.classList.remove('fd-ss-in');
+    // Match the CSS; a transitionend alone strands the nodes if it never fires
+    // (reduced motion cuts every duration to 0.01ms and may not fire at all).
+    setTimeout(() => {
+      st.backdrop.remove();
+      st.panel.remove();
+    }, 320);
+    if (st.trigger.isConnected) st.trigger.focus({ preventScroll: true });
+  }
+
+  document.addEventListener('keydown', (e) => {
+    const st = openState;
+    if (!st) return;
+    if (e.key === 'Escape') {
+      // Ours, not the dialog we may be sitting inside — that would close both.
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive(st.active + 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive(st.active - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      setActive(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      setActive(options().length - 1);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const el = options()[st.active];
+      if (el) choose(Number(el.dataset.index));
+    } else if (e.key === 'Tab') {
+      // A modal list has nowhere to tab to.
+      e.preventDefault();
+    } else if (st.input && !st.input.matches(':focus') && e.key.length === 1) {
+      // Typing anywhere goes to the search box, phone included.
+      st.input.focus();
+    }
+  });
+
+  // A <label for=…> still belongs to the hidden select; make clicking it open
+  // the panel rather than focusing a control nobody can see.
+  document.addEventListener('click', (e) => {
+    const label = (e.target as HTMLElement | null)?.closest?.('label[for]') as HTMLLabelElement | null;
+    if (!label) return;
+    const el = document.getElementById(label.htmlFor);
+    if ((el instanceof HTMLSelectElement || el instanceof HTMLInputElement) && el.dataset.fdSs) {
+      e.preventDefault();
+      (el as any)._fdTrigger?.click();
+    }
+  });
+
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    if ((el instanceof HTMLSelectElement || el instanceof HTMLInputElement) && el.dataset.fdSs) syncTrigger(el);
+  });
+
+  // Assigning .value in code fires no event AND mutates no DOM, so neither the
+  // change listener above nor the observer below can see it — and the config
+  // dialogs populate their fields exactly that way (edit.ts fills a ward's
+  // stored config in; notion.ts restores the old value when a save fails).
+  // Wrapping the setter is what makes a trigger label reliably follow the
+  // control it mirrors. Native behaviour is untouched: the original setter
+  // still does all the work, and nothing happens for an unenhanced field.
+  for (const proto of [HTMLSelectElement.prototype, HTMLInputElement.prototype]) {
+    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (!desc?.set) continue;
+    Object.defineProperty(proto, 'value', {
+      ...desc,
+      set(this: Field, v: string) {
+        desc.set!.call(this, v);
+        if (this.dataset?.fdSs) syncTrigger(this);
+      },
+    });
+  }
+
+  addEventListener('resize', () => {
+    if (openState) position();
+  });
+  // A dialog closing under an open panel (Escape reaches it first in some
+  // browsers) would strand the panel over the page.
+  document.addEventListener('close', () => close(), true);
+
+  const NEW = 'select:not([data-fd-ss]), input[list]:not([data-fd-ss])';
+  const DONE = 'select[data-fd-ss], input[data-fd-ss]';
+
+  function scan() {
+    // The :not() is what keeps this cheap enough to run on a dashboard that
+    // mutates on every SSE tick — the CSS engine filters, not JS.
+    document.querySelectorAll<Field>(NEW).forEach(enhance);
+    // Options arrive after the control does (the chart-metric select is built
+    // empty and filled by its own script; the agent model datalist is fetched),
+    // so the label has to catch up.
+    document.querySelectorAll<Field>(DONE).forEach(syncTrigger);
+  }
+
+  scan();
+  let queued = 0;
+  // ponytail: one whole-document scan per frame. Per-subtree diffing if a
+  // profile ever shows this on the dashboard's hot path.
+  new MutationObserver(() => {
+    if (queued) return;
+    queued = requestAnimationFrame(() => {
+      queued = 0;
+      scan();
+    });
+  }).observe(document.documentElement, { childList: true, subtree: true });
+</script>

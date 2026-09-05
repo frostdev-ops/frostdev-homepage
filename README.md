@@ -137,15 +137,10 @@ admin page or with `node bin/rimeward.mjs splash`. The wordmark, emblem, header 
 are files in `data/brand/` (`brand install <slot> <file>` normalises them); without one the
 Rimeward crystal serves.
 
-**Monitoring.** `src/lib/targets.json` (created from the example on first run, never
-committed) is what the Services wards watch: `http` and `tcp` probes, and the pm2 processes,
-docker containers and systemd units of the machine the app runs on — it sees no other machine.
-
-```json
-{ "id": "web",   "label": "web",   "group": "processes", "kind": "pm2",     "name": "web" }
-{ "id": "cache", "label": "redis", "group": "processes", "kind": "docker",  "container": "redis" }
-{ "id": "proxy", "label": "nginx", "group": "system",    "kind": "systemd", "unit": "nginx" }
-```
+**Monitoring.** The monitors the Services wards watch are a registry in the database, edited by an
+admin at `/admin/monitors` (or `node bin/rimeward.mjs monitors add|remove|import`): `http` and `tcp`
+probes, and the pm2 processes, docker containers and systemd units of the machine the app runs on —
+it sees no other machine. A Services ward shows a group, a hand-picked set, or everything.
 
 **Browser wards** drive playwright-core's Chromium (`npx playwright-core install chromium`). Run
 the server as a non-root user, or point `BROWSER_EXECUTABLE` at a wrapper that drops root; as

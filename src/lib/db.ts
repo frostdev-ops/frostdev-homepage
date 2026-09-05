@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { migrateLegacyWards, migrateWardKeys } from './migrate-wards.ts';
+import { loadMonitors } from './monitors.ts';
 
 export const DATA_DIR = process.env.HOMEPAGE_DATA_DIR ?? path.join(process.cwd(), 'data');
 
@@ -58,6 +59,10 @@ function migrate(handle: Database.Database): void {
       record.run(file);
     })();
   }
+
+  // The monitor registry (lib/targets.ts) must be in memory before any layout
+  // is validated — the data migrations below check Services wards against it.
+  loadMonitors(handle);
 
   // A data migration, not SQL: stored layouts and graphs move off the legacy
   // ward ids once (after 010_timer_step.sql; the row name keeps the sequence).

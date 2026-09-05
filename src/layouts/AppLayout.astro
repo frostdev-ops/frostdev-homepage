@@ -2,6 +2,7 @@
 import BaseLayout from './BaseLayout.astro';
 import { Font } from 'astro:assets';
 import { fontVar, normalizeTheme, parseTheme, type FontId } from '../lib/theme.ts';
+import { GROUP_TITLES, TARGETS } from '../lib/targets.ts';
 
 interface Props {
   title: string;
@@ -40,6 +41,8 @@ const declared = [...new Set([brand.uiFont, brand.brandFont, ...(Astro.props.fon
         astro.config.mjs, and this list is derived rather than literal. */}
     {faces.map((v) => <Font cssVariable={v as any} preload={themeFaces.includes(v)} />)}
     <meta name="fd-faces" content={declared} />
+    {/* The monitor registry for the client's pure helpers: lib/targets.ts reads it as it loads. */}
+    <script is:inline type="application/json" id="fd-monitors" set:html={JSON.stringify({ targets: TARGETS, titles: GROUP_TITLES }).replace(/</g, '\\u003c')} />
   </Fragment>
 
   <header class="app-header">

@@ -391,7 +391,7 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
     label: 'Service state is',
     icon: '📡',
     params: {
-      service: { kind: 'select', required: true, options: TARGETS.map((t) => t.id) },
+      service: { kind: 'select', required: true, get options() { return TARGETS.map((t) => t.id); } },
       state: { kind: 'select', required: true, options: ['up', 'down'] },
     },
   },
@@ -485,7 +485,7 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
     label: 'Service flapped recently',
     icon: '〰️',
     params: {
-      service: { kind: 'select', required: true, options: TARGETS.map((t) => t.id) },
+      service: { kind: 'select', required: true, get options() { return TARGETS.map((t) => t.id); } },
       hours: { kind: 'count', required: true },
       times: { kind: 'count', required: true },
     },
@@ -494,7 +494,7 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
     label: 'Service uptime below %',
     icon: '📉',
     params: {
-      service: { kind: 'select', required: true, options: TARGETS.map((t) => t.id) },
+      service: { kind: 'select', required: true, get options() { return TARGETS.map((t) => t.id); } },
       hours: { kind: 'count', required: true },
       pct: { kind: 'percent', required: true },
     },

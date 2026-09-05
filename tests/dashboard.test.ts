@@ -1,7 +1,7 @@
 import './_setup.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CATALOG, DEFAULT_LAYOUT, DEFAULT_PAGES, MAX_H, MAX_PAGES, MAX_W, MAX_WARDS, MAX_WARDS_PER_PAGE, pageOf, shownServiceIds, sizeParts, validateLayout, validatePages, nextUp, timerSteps, wardTitle, monthCells, dateSpan, calendarChips, type CalEventLite, type WardInstance, GROUP_TITLES } from '../src/lib/wards.ts';
+import { CATALOG, DEFAULT_LAYOUT, DEFAULT_PAGES, MAX_H, MAX_PAGES, MAX_W, MAX_WARDS, MAX_WARDS_PER_PAGE, pageOf, shownServiceIds, sizeParts, validateLayout, validatePages, nextUp, timerSteps, wardTitle, monthCells, dateSpan, calendarChips, type CalEventLite, type WardInstance, groupTitle } from '../src/lib/wards.ts';
 import { GROUPS, TARGETS } from '../src/lib/targets.ts';
 import { getDashboard, getPages, saveDashboard } from '../src/lib/dashboard.ts';
 import { getDb } from '../src/lib/db.ts';
@@ -95,7 +95,7 @@ test('service / service-group config validated against TARGETS and GROUPS', () =
   assert.equal(one('service-group', { group: 'nope' }), null);
   assert.ok(one('service-group', { services: [TARGETS[0]!.id, TARGETS[1]!.id] }));
   assert.equal(one('service-group', { services: [TARGETS[0]!.id, 'nope'] }), null);
-  assert.equal(one('service-group', {}), null);
+  assert.deepEqual(one('service-group', {})![0]!.config, {}); // no group, no list = every monitor
   // host metrics are members too; the dots view is stored, the default wards view is not
   assert.deepEqual(one('service-group', { services: ['host:disk', TARGETS[0]!.id], view: 'dots' })![0]!.config, { services: ['host:disk', TARGETS[0]!.id], view: 'dots' });
   assert.deepEqual(one('service-group', { group: GROUPS[0], view: 'wards' })![0]!.config, { group: GROUPS[0] });
@@ -120,7 +120,7 @@ test('wardTitle: override > group title > sole member label > catalog', () => {
   const t = (w: Partial<WardInstance> & { type: string }) => wardTitle({ i: 'a', size: '1x1', ...w });
   const g = GROUPS[0]!;
   assert.equal(t({ type: 'service-group', title: 'Mine', config: { group: g } }), 'Mine');
-  assert.equal(t({ type: 'service-group', config: { group: g } }), GROUP_TITLES[g] ?? g);
+  assert.equal(t({ type: 'service-group', config: { group: g } }), groupTitle(g));
   assert.equal(t({ type: 'service-group', config: { services: [TARGETS[0]!.id] } }), TARGETS[0]!.label);
   assert.equal(t({ type: 'service-group', config: { services: ['host:disk'] } }), 'Disk');
   assert.equal(t({ type: 'service-group', config: { services: [TARGETS[0]!.id, TARGETS[1]!.id] } }), 'Services');
@@ -252,8 +252,9 @@ test('shownServiceIds: only what a ward actually puts on screen', () => {
   assert.deepEqual([...shownServiceIds([w('applink', { links: [{ url: 'https://a.dev', statusService: 'a' }, { url: 'https://b.dev', statusService: 'b' }, { url: 'https://c.dev' }] })])].sort(), ['a', 'b']);
   assert.equal(shownServiceIds([{ ...w('applink', { links: [{ url: 'https://a.dev', statusService: 'a' }] }), hidden: true }]).size, 0);
 
-  // Malformed config never lands an undefined in the set.
-  assert.equal(shownServiceIds([w('service-group'), w('service-group', { services: [1, null] } as never)]).size, 0);
+  // No config = every monitor; malformed config never lands an undefined in the set.
+  assert.equal(shownServiceIds([w('service-group')]).size, TARGETS.length);
+  assert.equal(shownServiceIds([w('service-group', { services: [1, null] } as never)]).size, 0);
 
   // The stock dashboard does show services — the banner still works there.
   assert.ok(shownServiceIds(DEFAULT_LAYOUT).size > 0);

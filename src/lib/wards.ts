@@ -297,7 +297,8 @@ export const fxOf = (w: WardInstance): WardFx | undefined => (w.type === 'spacer
  *  server resolver (notion.ts taskWardRef) and the dialog all share it. */
 export const TASK_WARDS = new Set(['notion-db', 'checklist', 'notion-tasks']);
 
-export const GROUP_TITLES: Record<string, string> = { ...TARGET_GROUP_TITLES, host: 'Host' };
+/** A group's display title: the registry's, or `Host` for the host metrics column. */
+export const groupTitle = (g: string): string => (g === 'host' ? 'Host' : (TARGET_GROUP_TITLES[g] ?? g));
 
 /** Pseudo-service ids under which host metrics land in status_history, and
  *  the members a Services ward can hold beside real targets. */
@@ -493,7 +494,8 @@ export const DEFAULT_LAYOUT: WardInstance[] = [
   { i: 'notion-db', type: 'notion-db', size: '2x2', config: { view: 'list' } },
   { i: 'notion-capture', type: 'notion-page', size: '2x1', title: 'Quick capture', config: { show: ['add'] } },
   { i: 'notion-recent', type: 'notion-recent', size: '2x1' },
-  ...GROUPS.map((g) => ({ i: `svc-${g}`, type: 'service-group', size: '3x2' as WardSize, config: { group: g } })),
+  // Every monitor in the registry; empty until an admin adds some.
+  { i: 'services', type: 'service-group', size: '3x2', config: {} },
 ];
 
 /** The service ids some ward in this layout actually puts on screen.
@@ -509,8 +511,9 @@ export function shownServiceIds(layout: WardInstance[]): Set<string> {
     if (w.type === 'service-group') {
       if (Array.isArray(cfg.services)) {
         for (const id of cfg.services) if (typeof id === 'string') ids.add(id);
-      } else if (typeof cfg.group === 'string') {
-        for (const t of TARGETS) if (t.group === cfg.group) ids.add(t.id);
+      } else {
+        // A group, or (no config) every monitor.
+        for (const t of TARGETS) if (typeof cfg.group !== 'string' || t.group === cfg.group) ids.add(t.id);
       }
     } else if (w.type === 'applink' && Array.isArray(cfg.links)) {
       for (const l of cfg.links as Record<string, unknown>[]) if (typeof l?.statusService === 'string') ids.add(l.statusService);
@@ -525,7 +528,7 @@ export function wardTitle(w: WardInstance): string {
   if (w.title) return w.title;
   if (w.type === 'service-group') {
     const cfg = w.config ?? {};
-    if (typeof cfg.group === 'string') return GROUP_TITLES[cfg.group] ?? cfg.group;
+    if (typeof cfg.group === 'string') return groupTitle(cfg.group);
     const one = Array.isArray(cfg.services) && cfg.services.length === 1 ? cfg.services[0] : undefined;
     if (typeof one === 'string') return TARGETS.find((t) => t.id === one)?.label ?? HOST_LABELS[one] ?? CATALOG[w.type]!.title;
   }
@@ -753,13 +756,15 @@ function validateConfig(type: string, raw: Record<string, unknown>): Record<stri
       return out;
     }
     case 'service-group': {
+      // A group, a list of members, or neither: every monitor in the registry.
       const out: Record<string, unknown> = {};
-      if (typeof raw.group === 'string') {
+      if (typeof raw.group === 'string' && raw.group !== '') {
         if (!(GROUPS as readonly string[]).includes(raw.group)) return null;
         out.group = raw.group;
-      } else if (Array.isArray(raw.services) && raw.services.length > 0 && raw.services.length <= 100 && raw.services.every(isMemberId)) {
+      } else if (Array.isArray(raw.services)) {
+        if (raw.services.length === 0 || raw.services.length > 100 || !raw.services.every(isMemberId)) return null;
         out.services = raw.services;
-      } else return null;
+      }
       if (raw.view === 'dots') out.view = 'dots'; // the default wards view is not stored
       return out;
     }

@@ -5,7 +5,7 @@
 
 import { RENDERERS, body, readLayout } from './wards.ts';
 import { ago, el, getJson, hm } from './dom.ts';
-import { GROUP_TITLES, HOST_LABELS, HOST_SERVICE_IDS, shownServiceIds, sizeParts, type WardInstance } from '../../lib/wards.ts';
+import { groupTitle, HOST_LABELS, HOST_SERVICE_IDS, shownServiceIds, sizeParts, type WardInstance } from '../../lib/wards.ts';
 import { GROUPS, TARGETS } from '../../lib/targets.ts';
 
 interface ServiceStatus {
@@ -267,7 +267,7 @@ function membersOf(w: WardInstance, snap: Snapshot): ServiceStatus[] {
     const byId = new Map(snap.services.map((s) => [s.id, s]));
     return (cfg.services as string[]).map((id) => byId.get(id) ?? hostRow(id, snap)).filter((s): s is ServiceStatus => !!s);
   }
-  return snap.services.filter((s) => s.group === cfg.group);
+  return typeof cfg.group === 'string' ? snap.services.filter((s) => s.group === cfg.group) : snap.services;
 }
 
 /** The dots wall: one column per group, members in TARGETS order, a dot each. */
@@ -290,7 +290,7 @@ function renderDots(w: WardInstance, members: ServiceStatus[], cols: number): vo
     }
     const cap = col.querySelector<HTMLElement>('.dots-cap')!;
     cap.hidden = cols < 2;
-    cap.textContent = `${GROUP_TITLES[g] ?? g} ${ms.filter((s) => s.ok).length}/${ms.length}`;
+    cap.textContent = `${groupTitle(g)} ${ms.filter((s) => s.ok).length}/${ms.length}`;
     const row = col.querySelector<HTMLElement>('.dots-row')!;
     for (const s of ms) {
       let dot = row.querySelector<HTMLElement>(`[data-ward="${s.id}"]`);
@@ -347,7 +347,7 @@ interface IncidentSpan {
   down: string;
   up: string | null;
 }
-const LABEL = new Map(TARGETS.map((t) => [t.id, t.label]));
+const label = (id: string): string | undefined => TARGETS.find((t) => t.id === id)?.label;
 /** The last good 24h list — a failed fetch keeps rendering it. */
 let spans: IncidentSpan[] | null = null;
 const dur = (ms: number) => ago(Math.max(0, ms));
@@ -379,7 +379,7 @@ async function renderIncidents(w: WardInstance, snap: Snapshot): Promise<void> {
   } else if (rows >= 2 && spans) {
     for (const s of spans.slice(0, rows * 4)) {
       const r = el('div', 'flex justify-between gap-2');
-      r.append(el('span', `truncate${s.up ? '' : ' text-err'}`, LABEL.get(s.service) ?? s.service));
+      r.append(el('span', `truncate${s.up ? '' : ' text-err'}`, label(s.service) ?? s.service));
       r.append(el('span', 'shrink-0 tabular-nums text-ink-muted', `${hm(s.down)} → ${s.up ? hm(s.up) : 'now'} · ${dur(Date.parse(s.up ?? snap.at) - Date.parse(s.down))}`));
       wrap.append(r);
     }

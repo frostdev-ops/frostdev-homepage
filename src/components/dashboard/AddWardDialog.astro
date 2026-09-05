@@ -5,7 +5,7 @@
 // new shell. The same dialog re-opens pre-filled for the gear button.
 import Ward from './Ward.astro';
 import Icon from '../Icon.astro';
-import { CATALOG, CATEGORIES, CHART_SOURCES, GROUP_TITLES, HOST_LABELS, HOST_SERVICE_IDS, MAIL_ACCOUNTS, type Category, MCP_PRESETS } from '../../lib/wards.ts';
+import { CATALOG, CATEGORIES, CHART_SOURCES, groupTitle, HOST_LABELS, HOST_SERVICE_IDS, MAIL_ACCOUNTS, type Category, MCP_PRESETS } from '../../lib/wards.ts';
 import { TARGETS, GROUPS } from '../../lib/targets.ts';
 import { SCENES, SCENE_IDS } from '../../lib/theme.ts';
 
@@ -226,8 +226,13 @@ const groups = (Object.keys(CATEGORIES) as Category[])
       <div>
         <label class="label" for="aw-sg-group">Group</label>
         <select id="aw-sg-group" name="sg-group" class="input">
-          {GROUPS.map((g) => <option value={g}>{GROUP_TITLES[g] ?? g}</option>)}
+          <option value="">Every monitor</option>
+          {GROUPS.map((g) => <option value={g}>{groupTitle(g)}</option>)}
         </select>
+        <p class="mt-1 text-[10px] text-ink-faint">
+          {TARGETS.length ? `${TARGETS.length} monitor${TARGETS.length === 1 ? '' : 's'} in the registry.` : 'No monitors yet.'}
+          {Astro.locals.user?.role === 'admin' ? <a href="/admin/monitors" class="link">Add or edit monitors</a> : 'An admin adds them.'}
+        </p>
       </div>
       <div>
         <label class="label" for="aw-sg-services">…or pick specific services <span class="text-ink-faint">(overrides group)</span></label>

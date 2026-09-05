@@ -1,0 +1,356 @@
+{
+  "groups": {
+    "frostdev": "Frostdev",
+    "loothing": "Loothing",
+    "pma": "PMA",
+    "processes": "Processes",
+    "containers": "Containers",
+    "system": "System"
+  },
+  "targets": [
+    {
+      "id": "frostdev-io",
+      "label": "frostdev.io",
+      "group": "frostdev",
+      "kind": "http",
+      "url": "https://frostdev.io",
+      "method": "HEAD"
+    },
+    {
+      "id": "rewind",
+      "label": "rewind.frostdev.io",
+      "group": "frostdev",
+      "kind": "http",
+      "url": "https://rewind.frostdev.io",
+      "method": "HEAD"
+    },
+    {
+      "id": "warp",
+      "label": "warp (LiteLLM)",
+      "group": "frostdev",
+      "kind": "http",
+      "url": "https://warp.frostdev.io",
+      "expect": [
+        200,
+        401,
+        404
+      ]
+    },
+    {
+      "id": "loothing",
+      "label": "loothing.xyz",
+      "group": "loothing",
+      "kind": "http",
+      "url": "https://loothing.xyz",
+      "method": "HEAD"
+    },
+    {
+      "id": "loothing-app",
+      "label": "loot tracker app",
+      "group": "loothing",
+      "kind": "http",
+      "url": "http://127.0.0.1:3000",
+      "expect": [
+        200,
+        301,
+        302,
+        303
+      ]
+    },
+    {
+      "id": "loothing-api",
+      "label": "loot tracker api",
+      "group": "loothing",
+      "kind": "http",
+      "url": "http://127.0.0.1:3000/api/status"
+    },
+    {
+      "id": "voxel",
+      "label": "voxel.loothing.xyz",
+      "group": "loothing",
+      "kind": "http",
+      "url": "https://voxel.loothing.xyz",
+      "method": "HEAD"
+    },
+    {
+      "id": "voxel-node",
+      "label": "voxel node",
+      "group": "loothing",
+      "kind": "tcp",
+      "host": "127.0.0.1",
+      "port": 18789
+    },
+    {
+      "id": "movies",
+      "label": "movies (shadow-theatre)",
+      "group": "loothing",
+      "kind": "http",
+      "url": "https://movies.loothing.xyz/health"
+    },
+    {
+      "id": "lucas",
+      "label": "lucas (BF6 lab)",
+      "group": "loothing",
+      "kind": "http",
+      "url": "https://lucas.loothing.xyz",
+      "method": "HEAD"
+    },
+    {
+      "id": "livekit-web",
+      "label": "livekit.loothing.xyz",
+      "group": "loothing",
+      "kind": "http",
+      "url": "https://livekit.loothing.xyz",
+      "expect": [
+        200,
+        404
+      ]
+    },
+    {
+      "id": "pma-www",
+      "label": "pma-electric.com",
+      "group": "pma",
+      "kind": "http",
+      "url": "https://pma-electric.com",
+      "method": "HEAD"
+    },
+    {
+      "id": "pma-office",
+      "label": "PMA Office",
+      "group": "pma",
+      "kind": "http",
+      "url": "https://office.pma-electric.com/api/sync/ping",
+      "method": "HEAD",
+      "expect": [
+        204
+      ]
+    },
+    {
+      "id": "pma-api",
+      "label": "device control api",
+      "group": "pma",
+      "kind": "http",
+      "url": "http://127.0.0.1:3001/health",
+      "expect": [
+        200,
+        404
+      ]
+    },
+    {
+      "id": "berry",
+      "label": "berry field inventory",
+      "group": "pma",
+      "kind": "http",
+      "url": "http://127.0.0.1:3003",
+      "expect": [
+        200,
+        301,
+        302,
+        303,
+        404
+      ]
+    },
+    {
+      "id": "releases",
+      "label": "releases.pma-electric.com",
+      "group": "pma",
+      "kind": "http",
+      "url": "https://releases.pma-electric.com",
+      "expect": [
+        200,
+        204
+      ]
+    },
+    {
+      "id": "huberlaw",
+      "label": "huberlaw.esq",
+      "group": "pma",
+      "kind": "http",
+      "url": "https://huberlaw.esq",
+      "method": "HEAD"
+    },
+    {
+      "id": "huberlaw-api",
+      "label": "huberlaw api",
+      "group": "pma",
+      "kind": "tcp",
+      "host": "127.0.0.1",
+      "port": 3500
+    },
+    {
+      "id": "pm2-loothing",
+      "label": "loothing",
+      "group": "processes",
+      "kind": "pm2",
+      "name": "loothing"
+    },
+    {
+      "id": "pm2-pma-office",
+      "label": "pma-office",
+      "group": "processes",
+      "kind": "pm2",
+      "name": "pma-office"
+    },
+    {
+      "id": "pm2-berry",
+      "label": "berry-field-inventory",
+      "group": "processes",
+      "kind": "pm2",
+      "name": "berry-field-inventory"
+    },
+    {
+      "id": "pm2-device-control",
+      "label": "pma-device-control",
+      "group": "processes",
+      "kind": "pm2",
+      "name": "pma-device-control"
+    },
+    {
+      "id": "pm2-ml-server",
+      "label": "ml-server",
+      "group": "processes",
+      "kind": "pm2",
+      "name": "ml-server"
+    },
+    {
+      "id": "pm2-stagedoor",
+      "label": "stagedoor-portal-backend",
+      "group": "processes",
+      "kind": "pm2",
+      "name": "stagedoor-portal-backend"
+    },
+    {
+      "id": "pm2-self",
+      "label": "frostdev-homepage",
+      "group": "processes",
+      "kind": "pm2",
+      "name": "frostdev-homepage"
+    },
+    {
+      "id": "dk-livekit",
+      "label": "livekit",
+      "group": "containers",
+      "kind": "docker",
+      "container": "livekit-livekit-1"
+    },
+    {
+      "id": "dk-sip",
+      "label": "livekit-sip",
+      "group": "containers",
+      "kind": "docker",
+      "container": "livekit-sip-1"
+    },
+    {
+      "id": "dk-hbbs",
+      "label": "rustdesk hbbs",
+      "group": "containers",
+      "kind": "docker",
+      "container": "rustdesk-hbbs"
+    },
+    {
+      "id": "dk-hbbr",
+      "label": "rustdesk hbbr",
+      "group": "containers",
+      "kind": "docker",
+      "container": "rustdesk-hbbr"
+    },
+    {
+      "id": "dk-wowid-editor",
+      "label": "wowid editor",
+      "group": "containers",
+      "kind": "docker",
+      "container": "wowid-editor"
+    },
+    {
+      "id": "dk-wowid-proxy",
+      "label": "wowid proxy",
+      "group": "containers",
+      "kind": "docker",
+      "container": "wowid-editor-proxy"
+    },
+    {
+      "id": "dk-wowid-api",
+      "label": "wowid api",
+      "group": "containers",
+      "kind": "docker",
+      "container": "wowid-api"
+    },
+    {
+      "id": "dk-wowid-pg",
+      "label": "wowid postgres",
+      "group": "containers",
+      "kind": "docker",
+      "container": "wowid-postgres"
+    },
+    {
+      "id": "dk-qdrant",
+      "label": "qdrant",
+      "group": "containers",
+      "kind": "docker",
+      "container": "qdrant"
+    },
+    {
+      "id": "sd-nginx",
+      "label": "nginx",
+      "group": "system",
+      "kind": "systemd",
+      "unit": "nginx"
+    },
+    {
+      "id": "sd-huberlaw",
+      "label": "huberlaw-api",
+      "group": "system",
+      "kind": "systemd",
+      "unit": "huberlaw-api"
+    },
+    {
+      "id": "sd-location",
+      "label": "location-webhook",
+      "group": "system",
+      "kind": "systemd",
+      "unit": "location-webhook"
+    },
+    {
+      "id": "sd-logviewer",
+      "label": "loothing-log-viewer",
+      "group": "system",
+      "kind": "systemd",
+      "unit": "loothing-log-viewer"
+    },
+    {
+      "id": "sd-sms",
+      "label": "sms-webhook",
+      "group": "system",
+      "kind": "systemd",
+      "unit": "sms-webhook"
+    },
+    {
+      "id": "sd-ollama",
+      "label": "ollama",
+      "group": "system",
+      "kind": "systemd",
+      "unit": "ollama"
+    },
+    {
+      "id": "sd-redis",
+      "label": "redis",
+      "group": "system",
+      "kind": "systemd",
+      "unit": "redis-server"
+    },
+    {
+      "id": "sd-postgres",
+      "label": "postgres 17",
+      "group": "system",
+      "kind": "systemd",
+      "unit": "postgresql@17-main"
+    },
+    {
+      "id": "sd-fail2ban",
+      "label": "fail2ban",
+      "group": "system",
+      "kind": "systemd",
+      "unit": "fail2ban"
+    }
+  ]
+}

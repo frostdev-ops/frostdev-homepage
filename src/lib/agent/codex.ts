@@ -153,7 +153,7 @@ interface LiveTokens {
 }
 
 /** Refresh lazily — only when the access token expires within 5 minutes. */
-async function ensureFreshTokens(userId: number): Promise<LiveTokens> {
+export async function ensureFreshTokens(userId: number): Promise<LiveTokens> {
   const row = getAgentAccount(userId, 'codex');
   if (!row) throw new CodexError('codex: not connected — connect ChatGPT under Account → Agent');
   const meta = accountMeta(row);

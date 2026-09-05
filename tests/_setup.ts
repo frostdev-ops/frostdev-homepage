@@ -8,3 +8,9 @@ import os from 'node:os';
 process.env.TZ ??= 'UTC'; // pin local-time assertions (dailyClock, due dates) machine-independently
 process.env.HOMEPAGE_DATA_DIR = fs.mkdtempSync(os.tmpdir() + '/fdtest-');
 process.env.TOKEN_ENC_KEY = Buffer.alloc(32, 7).toString('base64');
+
+// Two monitors for the tests that name one. The registry loads from the
+// database, so this opens it (each test file has its own temp dir anyway).
+const { upsertMonitor } = await import('../src/lib/monitors.ts');
+upsertMonitor({ id: 'site', label: 'example.com', group: 'Site', kind: 'http', url: 'https://example.com', method: 'HEAD' });
+upsertMonitor({ id: 'self', label: 'dev server', group: 'This server', kind: 'http', url: 'http://127.0.0.1:4321/api/status', expect: [200, 401] });

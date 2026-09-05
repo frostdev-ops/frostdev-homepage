@@ -1913,7 +1913,8 @@ function readConfig(dialog: HTMLDialogElement, type: string): Record<string, unk
     }
     case 'service-group': {
       const picked = [...q<HTMLSelectElement>('#aw-sg-services', dialog)!.selectedOptions].map((o) => o.value);
-      const cfg: Record<string, unknown> = picked.length > 0 ? { services: picked } : { group: val('#aw-sg-group') };
+      const group = val('#aw-sg-group');
+      const cfg: Record<string, unknown> = picked.length > 0 ? { services: picked } : group ? { group } : {};
       if (val('#aw-sg-view') === 'dots') cfg.view = 'dots';
       return cfg;
     }
@@ -1995,7 +1996,7 @@ function fillConfig(dialog: HTMLDialogElement, w: WardInstance): void {
       for (const l of (cfg.links as Record<string, unknown>[] | undefined) ?? []) alRow(dialog, l);
       break;
     case 'service-group': {
-      if (typeof cfg.group === 'string') set('#aw-sg-group', cfg.group);
+      set('#aw-sg-group', typeof cfg.group === 'string' ? cfg.group : '');
       const multi = q<HTMLSelectElement>('#aw-sg-services', dialog)!;
       const picked = new Set(Array.isArray(cfg.services) ? (cfg.services as string[]) : []);
       [...multi.options].forEach((o) => (o.selected = picked.has(o.value)));

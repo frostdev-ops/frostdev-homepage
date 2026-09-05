@@ -17,15 +17,8 @@ const data = fs.mkdtempSync(path.join(os.tmpdir(), 'goldens-'));
 process.env.HOMEPAGE_DATA_DIR = data;
 process.env.TOKEN_ENC_KEY = crypto.randomBytes(32).toString('base64'); // this instance's own seal
 
-const targets = 'src/lib/targets.json';
-const keep = fs.existsSync(targets) ? fs.readFileSync(targets) : null;
-// The real list goes to a file first: a run killed mid-way must not leave the
-// example in its place with nothing to restore from.
-const backup = `${targets}.bak`;
-if (keep) fs.writeFileSync(backup, keep);
 let server;
 try {
-  fs.copyFileSync('src/lib/targets.example.json', targets);
   execSync('npm run -s build', { stdio: 'inherit' });
 
   const { createUser } = await import('../src/lib/users.ts');
@@ -34,6 +27,10 @@ try {
   const { saveDashboard } = await import('../src/lib/dashboard.ts');
   const { validateGraph } = await import('../src/lib/logic.ts');
   const { saveGraph } = await import('../src/lib/logic-engine.ts');
+  // Two monitors for the Services ward (the registry lives in this instance's own db).
+  const { upsertMonitor } = await import('../src/lib/monitors.ts');
+  upsertMonitor({ id: 'site', label: 'frostdev.io', group: 'Site', kind: 'http', url: 'https://frostdev.io', method: 'HEAD' });
+  upsertMonitor({ id: 'self', label: 'this instance', group: 'Site', kind: 'http', url: 'http://127.0.0.1:3222/api/status', expect: [200, 401] });
   const userId = createUser('demo@example.com', 'demo-' + Math.random().toString(36).slice(2), 'admin');
   const cookie = createSession(userId).id;
 
@@ -128,10 +125,6 @@ try {
       server.once('exit', r);
       setTimeout(r, 10_000);
     });
-  }
-  if (keep) {
-    fs.writeFileSync(targets, keep);
-    fs.rmSync(backup, { force: true });
   }
   fs.rmSync(data, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
 }

@@ -1,6 +1,7 @@
 import { defineMiddleware } from 'astro:middleware';
 import { SESSION_COOKIES, getSession, sessionId } from './lib/auth.ts';
 import { csrfBlocked } from './lib/csrf.ts';
+import { getDb } from './lib/db.ts';
 import { ensureStatusEngine } from './lib/status.ts';
 import { ensureLogicEngine } from './lib/logic-engine.ts';
 import { ensureBrowser } from './lib/browser/session.ts';
@@ -9,6 +10,7 @@ import { ensureTunnel } from './lib/tunnel.ts';
 
 // The status + logic engines live in-process; middleware load is the one place
 // that runs exactly once per server boot (guarded against dev-HMR double-starts).
+getDb(); // migrations, and the monitor registry the first status tick needs
 ensureStatusEngine();
 ensureLogicEngine();
 ensureBrowser(); // orphan sweep + graceful close for the browser wards

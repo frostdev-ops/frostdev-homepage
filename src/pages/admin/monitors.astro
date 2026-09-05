@@ -1,0 +1,140 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { GROUPS, GROUP_TITLES, KINDS, TARGETS, describeTarget } from '../../lib/targets.ts';
+import { siteInfo } from '../../lib/site.ts';
+
+// The monitor registry: what the status engine probes and what Services
+// wards, launcher dots, charts and leylines may name. Plain forms — saving
+// re-posts the whole row (the id keeps it the same monitor), so editing is
+// "fill the form with the row and save".
+const site = siteInfo();
+const ok = Astro.url.searchParams.get('ok');
+const err = Astro.url.searchParams.get('err');
+const editing = TARGETS.find((t) => t.id === Astro.url.searchParams.get('edit'));
+const e = (editing ?? {}) as Record<string, unknown>;
+const v = (k: string) => (typeof e[k] === 'string' || typeof e[k] === 'number' ? String(e[k]) : '');
+---
+
+<BaseLayout title={`Monitors — ${site.name}`}>
+  <main class="mx-auto max-w-4xl px-4 py-10">
+    <div class="page-head">
+      <h1 class="page-title">Monitors</h1>
+      <a href="/dash" class="back-link link">← Dashboard</a>
+    </div>
+
+    {ok && <p class="banner banner-ok">{ok === 'deleted' ? 'Monitor removed.' : `Saved ${ok}. The next status tick (within a minute) probes it.`}</p>}
+    {err && <p class="banner banner-err">{err}</p>}
+
+    <p class="mb-6 text-sm text-ink-muted">
+      Probes run from this server every minute: <code>http</code> and <code>tcp</code> reach anything it can, and
+      <code>pm2</code>, <code>docker</code> and <code>systemd</code> read the processes of the machine it runs on. A Services
+      ward shows a group, a hand-picked set, or everything here. <a href="/admin/users" class="link">Users →</a>
+    </p>
+
+    <div class="card mb-8 p-4">
+      <h2 class="section-title mb-3">{editing ? `Edit ${editing.id}` : 'Add a monitor'}</h2>
+      <form method="post" action="/api/admin/monitors" class="grid gap-3 sm:grid-cols-3">
+        <input type="hidden" name="action" value="save" />
+        <div>
+          <label for="m-label" class="label">Label</label>
+          <input id="m-label" name="label" class="input" required maxlength="60" value={v('label')} placeholder="web" />
+        </div>
+        <div>
+          <label for="m-id" class="label">Id <span class="text-ink-faint">(optional; from the label)</span></label>
+          <input id="m-id" name="id" class="input" maxlength="32" pattern="[a-z0-9-]{1,32}" value={v('id')} readonly={!!editing} />
+        </div>
+        <div>
+          <label for="m-kind" class="label">Kind</label>
+          <select id="m-kind" name="kind" class="input">
+            {KINDS.map((k) => <option value={k} selected={editing?.kind === k}>{k}</option>)}
+          </select>
+        </div>
+        <div>
+          <label for="m-group" class="label">Group</label>
+          <select id="m-group" name="group" class="input">
+            {GROUPS.map((g) => <option value={g} selected={editing?.group === g}>{GROUP_TITLES[g] ?? g}</option>)}
+          </select>
+        </div>
+        <div>
+          <label for="m-new-group" class="label">…or a new group</label>
+          <input id="m-new-group" name="new-group" class="input" maxlength="40" placeholder="Processes" />
+        </div>
+        <div></div>
+        <div class="sm:col-span-2">
+          <label for="m-url" class="label">http: URL</label>
+          <input id="m-url" name="url" class="input" maxlength="500" value={v('url')} placeholder="https://example.com/health" />
+        </div>
+        <div class="flex gap-2">
+          <label class="flex-1 text-[10px] text-ink-faint">Method<select name="method" class="input"><option value="GET" selected={v('method') !== 'HEAD'}>GET</option><option value="HEAD" selected={v('method') === 'HEAD'}>HEAD</option></select></label>
+          <label class="flex-1 text-[10px] text-ink-faint">Expect<input name="expect" class="input" value={Array.isArray(e.expect) ? (e.expect as number[]).join(',') : ''} placeholder="200,401" /></label>
+        </div>
+        <div class="sm:col-span-2">
+          <label for="m-host" class="label">tcp: host</label>
+          <input id="m-host" name="host" class="input" maxlength="253" value={v('host')} placeholder="127.0.0.1" />
+        </div>
+        <div>
+          <label for="m-port" class="label">tcp: port</label>
+          <input id="m-port" name="port" type="number" class="input" min="1" max="65535" value={v('port')} />
+        </div>
+        <div>
+          <label for="m-name" class="label">pm2: process</label>
+          <input id="m-name" name="name" class="input" maxlength="100" value={v('name')} />
+        </div>
+        <div>
+          <label for="m-container" class="label">docker: container</label>
+          <input id="m-container" name="container" class="input" maxlength="128" value={v('container')} />
+        </div>
+        <div>
+          <label for="m-unit" class="label">systemd: unit</label>
+          <input id="m-unit" name="unit" class="input" maxlength="150" value={v('unit')} placeholder="nginx" />
+        </div>
+        <div class="sm:col-span-3 flex items-center gap-3">
+          <button type="submit" class="btn-primary">{editing ? 'Save' : 'Add'}</button>
+          {editing && <a href="/admin/monitors" class="link text-xs">Cancel</a>}
+          <span class="text-xs text-ink-faint">Only the fields of the chosen kind count.</span>
+        </div>
+      </form>
+    </div>
+
+    <div class="card table-wrap p-0">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Group</th>
+            <th>Monitor</th>
+            <th class="hidden sm:table-cell">Watches</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {TARGETS.length === 0 && (
+            <tr>
+              <td colspan="4" class="text-ink-muted">Nothing yet. Add one above, or import a list: <code>node bin/rimeward.mjs monitors import targets.json</code></td>
+            </tr>
+          )}
+          {
+            TARGETS.map((t) => (
+              <tr>
+                <td class="text-ink-muted">{GROUP_TITLES[t.group] ?? t.group}</td>
+                <td>
+                  {t.label} <span class="text-xs text-ink-faint">{t.id}</span>
+                </td>
+                <td class="hidden text-ink-muted sm:table-cell">
+                  <code class="text-xs">{describeTarget(t)}</code>
+                </td>
+                <td class="text-right whitespace-nowrap">
+                  <a href={`/admin/monitors?edit=${t.id}`} class="btn px-2 py-1 text-xs">Edit</a>
+                  <form method="post" action="/api/admin/monitors" class="inline" onsubmit={`return confirm('Remove ${t.id}? Wards, dots and leylines naming it lose it.')`}>
+                    <input type="hidden" name="action" value="delete" />
+                    <input type="hidden" name="id" value={t.id} />
+                    <button type="submit" class="btn-danger px-2 py-1 text-xs">Remove</button>
+                  </form>
+                </td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+  </main>
+</BaseLayout>

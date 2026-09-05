@@ -14,10 +14,6 @@ const ENV_PATH = findUp('.env');
 if (ENV_PATH) process.loadEnvFile(ENV_PATH); // never overwrites what is already in process.env
 // db.ts resolves migrations/ and the default data dir from cwd; the lib only ever runs from the repo.
 process.chdir(ROOT);
-// The lib imports the monitor list (targets.ts → targets.json), which a fresh
-// clone lacks until an npm pre-script copies the example — do the same here.
-const TARGETS = path.join(ROOT, 'src/lib/targets.json');
-if (!fs.existsSync(TARGETS)) fs.copyFileSync(path.join(ROOT, 'src/lib/targets.example.json'), TARGETS);
 
 const lib = (m) => import(pathToFileURL(path.join(ROOT, 'src/lib', m)).href);
 const out = (s) => process.stdout.write(s + '\n');
@@ -42,6 +38,13 @@ const USAGE = `usage: rimeward <command> [options]
   brand list
   brand install <slot> <file>      slots: wordmark emblem mark (png|webp|svg)
   brand remove <slot>                     favicon apple-touch-icon icon-512 (png)
+
+  monitors list
+  monitors add --label <text> --group <title|id> --kind http|tcp|pm2|docker|systemd [--id <slug>]
+               http: --url <url> [--method GET|HEAD] [--expect 200,401]   tcp: --host <h> --port <n>
+               pm2: --name <process>   docker: --container <name>   systemd: --unit <unit>
+  monitors remove <id>
+  monitors import <targets.json>   (the old file's shape: { groups, targets })
 
   doctor
   backup <dir>
@@ -283,6 +286,42 @@ async function brand(args) {
   }
 }
 
+// ------------------------------------------------------------- monitors
+async function monitors(args) {
+  const { positionals: [sub, arg], values: v } = parse('monitors', args, {
+    id: { type: 'string' }, label: { type: 'string' }, group: { type: 'string' }, kind: { type: 'string' },
+    url: { type: 'string' }, method: { type: 'string' }, expect: { type: 'string' },
+    host: { type: 'string' }, port: { type: 'string' },
+    name: { type: 'string' }, container: { type: 'string' }, unit: { type: 'string' },
+  });
+  const m = await lib('monitors.ts');
+  const { TARGETS, GROUP_TITLES, describeTarget } = await lib('targets.ts');
+  await (await lib('db.ts')).getDb(); // loads the registry
+  switch (sub) {
+    case 'list':
+      for (const t of TARGETS) out(`${t.id}\t${t.kind}\t${GROUP_TITLES[t.group] ?? t.group}\t${t.label}\t${describeTarget(t)}`);
+      if (!TARGETS.length) out('(no monitors)');
+      return;
+    case 'add': {
+      const t = m.upsertMonitor(v);
+      out(`saved: ${t.id} (${t.kind}, ${GROUP_TITLES[t.group] ?? t.group}) — ${describeTarget(t)}`);
+      return;
+    }
+    case 'remove':
+      if (!arg) throw new Usage(groupUsage('monitors'));
+      out(m.deleteMonitor(arg) ? `removed: ${arg}` : `no such monitor: ${arg}`);
+      return;
+    case 'import': {
+      if (!arg) throw new Usage(groupUsage('monitors'));
+      const json = JSON.parse(fs.readFileSync(path.resolve(CWD, arg), 'utf8'));
+      out(`imported: ${m.importTargets(json)} monitors`);
+      return;
+    }
+    default:
+      throw new Usage(groupUsage('monitors'));
+  }
+}
+
 // --------------------------------------------------------------- doctor
 const onPath = (bin) => {
   const isExe = (p) => {
@@ -353,17 +392,11 @@ async function doctor() {
     say(n ? 'ok' : 'fail', n ? `users: ${n}` : 'users: no users — run: rimeward users create <email> --admin');
   }
 
-  const targets = findUp('src/lib/targets.json');
-  if (!targets) say('warn', 'targets: src/lib/targets.json missing (npm run targets copies the example)');
-  else {
-    const example = fs.readFileSync(path.join(ROOT, 'src/lib/targets.example.json'));
-    say(example.equals(fs.readFileSync(targets)) ? 'warn' : 'ok', `targets: ${targets}${example.equals(fs.readFileSync(targets)) ? ' is the example, unedited' : ''}`);
-    let kinds = [];
-    try {
-      kinds = [...new Set(JSON.parse(fs.readFileSync(targets, 'utf8')).targets.map((t) => t.kind))];
-    } catch (e) {
-      say('fail', `targets: ${e.message}`);
-    }
+  // The registry loaded when the database opened (the migrations check above).
+  const { TARGETS } = await lib('targets.ts');
+  const kinds = [...new Set(TARGETS.map((t) => t.kind))];
+  say(TARGETS.length ? 'ok' : 'warn', TARGETS.length ? `monitors: ${TARGETS.length} (${kinds.join(', ')})` : 'monitors: none yet — /admin/monitors, or: rimeward monitors import <targets.json>');
+  {
     for (const [kind, envVar, def] of [['pm2', 'PM2_BIN', 'pm2'], ['docker', 'DOCKER_BIN', 'docker'], ['systemd', 'SYSTEMCTL_BIN', 'systemctl']]) {
       if (!kinds.includes(kind)) continue;
       const bin = env(envVar) || def;
@@ -430,7 +463,7 @@ async function restore(args) {
 }
 
 // ----------------------------------------------------------------- main
-const COMMANDS = { users, settings, splash, brand, doctor, backup, restore };
+const COMMANDS = { users, settings, splash, brand, monitors, doctor, backup, restore };
 
 try {
   const [cmd, ...rest] = process.argv.slice(2);

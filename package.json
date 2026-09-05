@@ -21,8 +21,8 @@
     "preview": "node --env-file-if-exists=.env ./server.mjs",
     "test": "node --test 'tests/*.test.ts'",
     "dev:env": "node --env-file-if-exists=.env node_modules/astro/astro.js dev",
-    "desktop:dev": "cd desktop && cargo tauri dev --config tauri.dev.conf.json",
-    "desktop:build": "cd desktop && cargo tauri build",
+    "desktop:dev": "cd desktop && node prebuild.mjs && cargo tauri dev --config tauri.dev.conf.json",
+    "desktop:build": "cd desktop && node prebuild.mjs && cargo tauri build",
     "cli": "node bin/rimeward.mjs"
   },
   "dependencies": {

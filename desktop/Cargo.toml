@@ -1,9 +1,9 @@
 [package]
 name = "rimeward"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 rust-version = "1.84"
-description = "Rimeward — the frostdev.io dashboard on your desk, with the home route"
+description = "Rimeward — your dashboard on your desk, with the home route"
 
 # The lib/bin split is what the mobile targets (later) build against.
 [lib]

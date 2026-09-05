@@ -28,7 +28,11 @@ pub const CLOSE: u8 = 4;
 pub const STATUS: u8 = 5;
 pub const HELLO: u8 = 6;
 
-const COOKIE: &str = "frost_session";
+/// The session cookie's name — keep in step with SESSION_COOKIES in the
+/// server's src/lib/auth.ts. A session opened before the server's v0.16.0
+/// still carries the old name; the server accepts both.
+const COOKIE: &str = "rimeward_session";
+const LEGACY_COOKIE: &str = "frost_session";
 const CHUNK: usize = 64 * 1024;
 const CONNECT_MS: u64 = 20_000;
 
@@ -146,10 +150,11 @@ fn credentials(app: &AppHandle) -> Result<(url::Url, String), Wait> {
         return Err(Wait::Window);
     }
     let cookies = w.cookies_for_url(url.clone()).map_err(|_| Wait::Cookie)?;
+    // The whole `name=value` pair, under whichever name the jar holds it.
     let cookie = cookies
         .iter()
-        .find(|c| c.name() == COOKIE)
-        .map(|c| c.value().to_string())
+        .find(|c| c.name() == COOKIE || c.name() == LEGACY_COOKIE)
+        .map(|c| format!("{}={}", c.name(), c.value()))
         .ok_or(Wait::Cookie)?;
     Ok((url, cookie))
 }
@@ -166,9 +171,7 @@ async fn session(app: &AppHandle, page: &url::Url, cookie: &str) -> Result<(), F
         .map_err(|e| Fail::Other(e.to_string()))?;
     req.headers_mut().insert(
         "cookie",
-        format!("{COOKIE}={cookie}")
-            .parse()
-            .map_err(|_| Fail::Other("bad cookie".into()))?,
+        cookie.parse().map_err(|_| Fail::Other("bad cookie".into()))?,
     );
     let (ws, _) = connect_async(req).await.map_err(|e| match e {
         WsError::Http(resp) => Fail::Http(resp.status().as_u16()),

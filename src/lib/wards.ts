@@ -6,8 +6,10 @@ import { FONTS, SCENE_IDS, normalizeWardTheme, type SceneId, type WardTheme } fr
 import { TARGETS, GROUPS, GROUP_TITLES as TARGET_GROUP_TITLES } from './targets.ts';
 import { ICON_NAME_RE, ICONS, type IconId } from './icon-names.ts';
 
-/** Reasoning effort an agent ward asks its model for (`config.effort`, default medium). */
-export const AGENT_EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const;
+/** Reasoning effort an agent ward asks its model for (`config.effort`, default
+ *  medium). `max` and `ultra` are what the newest codex models list; a model
+ *  that lacks one answers with its own error, which the ward shows. */
+export const AGENT_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
 export type AgentEffort = (typeof AGENT_EFFORTS)[number];
 
 /** One page of a Notion database read (notion.ts) — the ceiling on a task

@@ -148,10 +148,11 @@ export const DEFAULT_MODELS: Record<AgentProviderId, string> = {
   openrouter: 'anthropic/claude-sonnet-5',
 };
 
-/** Suggestions for the config dialog. The ChatGPT backend has no list endpoint,
- *  so these are hand-maintained — the model field stays free text, and an id
- *  missing from here still works if you type it. */
-export const CODEX_MODELS = ['gpt-5.6-sol'];
+/** The config dialog's suggestions when the ChatGPT backend cannot be asked
+ *  (no account linked yet, or its model list is down — codex.ts
+ *  listCodexModels is the live source). The model field stays free text, so an
+ *  id missing from here still works if you type it. */
+export const CODEX_MODELS = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4-mini'];
 
 export function agentConfigured(userId: number, provider: AgentProviderId): boolean {
   if (provider === 'openrouter') return !!agentKey(userId, 'openrouter');

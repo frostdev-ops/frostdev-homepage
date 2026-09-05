@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { getSetting, setSetting, deleteSetting } from '../settings.ts';
 import { openToken } from '../crypto.ts';
+import { cached } from '../cache.ts';
 import { getDb } from '../db.ts';
 import { getAgentAccount, storeAgentAccount, deleteAgentAccount, accountMeta } from './accounts.ts';
 import {
@@ -413,6 +414,53 @@ async function callCodex(call: ProviderCall, retriedAuth = false, retriedTransie
   if (!text && !calls.length) throw new CodexError('codex: empty response');
   const u = completed?.usage;
   return { text, calls, items, ...(u?.input_tokens ? { usage: { input: u.input_tokens, cached: u.input_tokens_details?.cached_tokens ?? 0 } } : {}) };
+}
+
+/** The backend's model list. It is gated on the CLI version it thinks it is
+ *  talking to (older versions get an empty list), hence the constant; models
+ *  the backend marks hidden (its own review model, unreleased ones) are left
+ *  out. Cached an hour per user; throws when it cannot be asked, and the
+ *  models route falls back to provider.ts CODEX_MODELS. */
+const CODEX_CLIENT_VERSION = '3.0.0';
+
+export interface CodexModel {
+  id: string;
+  name: string;
+  description?: string;
+  /** Reasoning efforts the model accepts, in the backend's order. */
+  efforts: string[];
+}
+
+export function listCodexModels(userId: number): Promise<CodexModel[]> {
+  return cached(`codex:models:${userId}`, 60 * 60_000, async () => {
+    const tokens = await ensureFreshTokens(userId);
+    const res = await fetch(`https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_CLIENT_VERSION}`, {
+      headers: { Authorization: `Bearer ${tokens.access_token}`, 'chatgpt-account-id': tokens.account_id, originator: 'codex_cli_rs' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`codex models ${res.status}`);
+    const data = (await res.json()) as {
+      models?: {
+        slug: string;
+        display_name?: string;
+        description?: string;
+        visibility?: string;
+        priority?: number;
+        supported_reasoning_levels?: { effort: string }[];
+      }[];
+    };
+    const list = (data.models ?? [])
+      .filter((m) => m.slug && m.visibility !== 'hide')
+      .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
+      .map((m) => ({
+        id: m.slug,
+        name: m.display_name || m.slug,
+        ...(m.description ? { description: m.description } : {}),
+        efforts: (m.supported_reasoning_levels ?? []).map((l) => l.effort),
+      }));
+    if (!list.length) throw new Error('codex models: empty list');
+    return list;
+  });
 }
 
 export const codexProvider: AgentProvider = {

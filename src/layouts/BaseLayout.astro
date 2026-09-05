@@ -3,6 +3,7 @@ import '../styles/frost.css';
 import ThemeScript from '../components/ThemeScript.astro';
 import SearchSelect from '../components/SearchSelect.astro';
 import { parseTheme, themeColor, themeHtmlAttrs } from '../lib/theme.ts';
+import { siteInfo } from '../lib/site.ts';
 
 interface Props {
   title: string;
@@ -11,7 +12,7 @@ interface Props {
   index?: boolean;
 }
 
-const { title, description = 'Frostdev', index = false } = Astro.props;
+const { title, description = siteInfo().name, index = false } = Astro.props;
 
 // Per-user theme rides locals.user (populated by middleware from the session
 // join). Knob values land as attributes on <html> — SSR'd, so no flash.
@@ -28,8 +29,8 @@ const theme = parseTheme(Astro.locals.user?.theme ?? null);
     {!index && <meta name="robots" content="noindex, nofollow" />}
     <meta name="theme-color" content={themeColor(theme)} />
     <title>{title}</title>
-    <link rel="icon" href="/favicon.png" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" href="/brand/favicon" type="image/png" />
+    <link rel="apple-touch-icon" href="/brand/apple-touch-icon" />
     <slot name="head" />
   </head>
   <body class="min-h-screen bg-surface-2 text-ink">

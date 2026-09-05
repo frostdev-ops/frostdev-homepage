@@ -5,7 +5,7 @@ import path from 'node:path';
 import { Duplex } from 'node:stream';
 import { createRequire } from 'node:module';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { SESSION_COOKIE, getSession } from './auth.ts';
+import { SESSION_COOKIES, getSession } from './auth.ts';
 
 // The desktop app's tunnel: one websocket per user, from Rimeward on their
 // machine to this server, over which THIS side opens TCP streams that the app
@@ -212,7 +212,7 @@ export function handleUpgrade(req: http.IncomingMessage, socket: net.Socket, hea
   socket.on('error', () => {});
   if (!(req.url ?? '').startsWith(TUNNEL_PATH)) return reject(socket, 404, 'not found');
   if (req.headers.origin) return reject(socket, 403, 'not for browsers');
-  const cookie = new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`).exec(req.headers.cookie ?? '')?.[1];
+  const cookie = new RegExp(`(?:^|;\\s*)(?:${SESSION_COOKIES.join('|')})=([^;]+)`).exec(req.headers.cookie ?? '')?.[1];
   const session = getSession(cookie);
   if (!session) return reject(socket, 401, 'sign in first');
   if (state.tunnels.has(session.userId)) return reject(socket, 409, 'Rimeward is already connected from another computer');

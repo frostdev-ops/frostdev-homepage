@@ -91,4 +91,7 @@ const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" wi
 </g>
 </svg>`;
 await sharp(Buffer.from(icon)).png().toFile('desktop/icon-1024.png');
-console.log(`wrote assets/rimeward-mark.svg, assets/rimeward-lockup.svg (${Math.round(W)}x300), desktop/icon-1024.png`);
+// The built-in favicon / apple-touch / 512 icons the /brand route serves when an instance drops none of its own.
+for (const [name, size] of [['favicon', 64], ['apple-touch-icon', 180], ['icon-512', 512]])
+  await sharp(Buffer.from(icon)).resize(size, size).png().toFile(`assets/rimeward-${name}.png`);
+console.log(`wrote assets/rimeward-mark.svg, assets/rimeward-lockup.svg (${Math.round(W)}x300), assets/rimeward-{favicon,apple-touch-icon,icon-512}.png, desktop/icon-1024.png`);

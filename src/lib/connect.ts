@@ -19,8 +19,8 @@ export const MS_SCOPES_READONLY = 'openid profile email offline_access Mail.Read
 // most tenants). Asked for only from /api/connect/microsoft?teams.
 export const MS_SCOPES_TEAMS = `${MS_SCOPES_FULL} Chat.ReadWrite ChatMessage.Send ChannelMessage.Send ChannelMessage.Read.All Team.ReadBasic.All Channel.ReadBasic.All`;
 
-// Zoho Mail: the same OAuth client PMA Office uses. Its api-console app must
-// list this redirect URI alongside the office one, or the consent screen 400s.
+// Zoho Mail: the api-console app must list this redirect URI, or the consent
+// screen 400s.
 export const ZOHO_SCOPES = 'ZohoMail.accounts.READ,ZohoMail.folders.READ,ZohoMail.messages.ALL';
 
 export function connectRedirectUri(provider: 'google' | 'microsoft' | 'notion' | 'zoho'): string {

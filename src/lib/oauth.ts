@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { SESSION_COOKIE, getSession } from './auth.ts';
+import { getSession, sessionId } from './auth.ts';
 import { setSetting, sweepSettings, takeSetting } from './settings.ts';
 
 // OAuth pending state lives in the settings KV (not memory) so a pm2 restart
@@ -51,7 +51,7 @@ export function takeConnectState(
 ): PendingState | null {
   const pending = takeState(state);
   if (!pending?.userId) return null;
-  return getSession(cookies.get(SESSION_COOKIE)?.value)?.userId === pending.userId ? pending : null;
+  return getSession(sessionId(cookies))?.userId === pending.userId ? pending : null;
 }
 
 export function baseUrl(): string {

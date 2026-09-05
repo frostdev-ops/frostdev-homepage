@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { SESSION_COOKIE, createSession, sessionCookieOptions } from '../../lib/auth.ts';
+import { SESSION_COOKIES, createSession, sessionCookieOptions } from '../../lib/auth.ts';
 import { getUserByEmail, verifyUserPassword } from '../../lib/users.ts';
 
 export const prerender = false;
@@ -53,6 +53,6 @@ export const POST: APIRoute = async ({ request, cookies, redirect, clientAddress
 
   failures.delete(key);
   const session = createSession(user.id);
-  cookies.set(SESSION_COOKIE, session.id, sessionCookieOptions(session.expiresAt));
+  for (const name of SESSION_COOKIES) cookies.set(name, session.id, sessionCookieOptions(session.expiresAt));
   return redirect('/dash', 303);
 };

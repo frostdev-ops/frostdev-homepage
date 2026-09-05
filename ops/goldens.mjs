@@ -82,7 +82,7 @@ try {
   };
   const browser = await chromium.launch({ channel: 'chromium', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1.5, colorScheme: 'dark' });
-  await ctx.addCookies([{ name: 'frost_session', value: cookie, url: BASE }]);
+  await ctx.addCookies([{ name: 'rimeward_session', value: cookie, url: BASE }]);
   const page = await ctx.newPage();
   const shot = async (url, name, wait = 2500) => {
     await page.goto(`${BASE}${url}`, { waitUntil: 'networkidle', timeout: 60_000 });

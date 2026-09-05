@@ -72,7 +72,7 @@ async function probeHttp(t: Extract<Target, { kind: 'http' }>): Promise<Pick<Ser
       method: t.method ?? 'GET',
       redirect: 'manual',
       signal: AbortSignal.timeout(10_000),
-      headers: { 'user-agent': 'frostdev-heimdall/1' },
+      headers: { 'user-agent': 'rimeward-status/1' },
     });
     const ms = Math.round(performance.now() - start);
     const ok = t.expect ? t.expect.includes(res.status) : res.status < 400;

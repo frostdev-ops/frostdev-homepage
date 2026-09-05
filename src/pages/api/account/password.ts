@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { SESSION_COOKIE } from '../../../lib/auth.ts';
+import { sessionId } from '../../../lib/auth.ts';
 import { hasPassword, setUserPassword, verifyUserPassword } from '../../../lib/users.ts';
 
 export const prerender = false;
@@ -15,6 +15,6 @@ export const POST: APIRoute = async ({ request, locals, cookies, redirect }) => 
   if (hasPassword(user.userId) && !verifyUserPassword(user.userId, current))
     return redirect('/account?err=wrong', 303);
 
-  setUserPassword(user.userId, next, cookies.get(SESSION_COOKIE)?.value);
+  setUserPassword(user.userId, next, sessionId(cookies));
   return redirect('/account?ok=password', 303);
 };

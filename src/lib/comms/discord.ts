@@ -9,7 +9,7 @@ import type { ChatChannel, ChatMessage, CommsClient, CommsEvent, SendOpts, Whoam
 
 const API = 'https://discord.com/api/v10';
 const GATEWAY_URL = 'wss://gateway.discord.gg/?v=10&encoding=json';
-const UA = 'DiscordBot (https://frostdev.io, 1.0)';
+const UA = 'DiscordBot (https://github.com/frostdev-ops/frostdev-homepage, 1.0)';
 
 export const INTENTS = {
   GUILDS: 1 << 0,

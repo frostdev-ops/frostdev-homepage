@@ -1,7 +1,6 @@
 ---
 import BaseLayout from './BaseLayout.astro';
-import { Font, getImage } from 'astro:assets';
-import { mark } from '../lib/brand.ts';
+import { Font } from 'astro:assets';
 import { fontVar, normalizeTheme, parseTheme, type FontId } from '../lib/theme.ts';
 
 interface Props {
@@ -19,10 +18,10 @@ const me = Astro.locals.user!;
 
 // The brand block is per-user: everything about it but the words and the
 // picture is a CSS var (lib/theme.ts brand* knobs, derived in frost.css).
-// The built-in mark still goes through the image pipeline; its URL rides the
-// <img> so the account editor's live preview can switch back to it.
+// The built-in mark is the instance's brand slot (lib/brand-files.ts); its URL
+// rides the <img> so the account editor's live preview can switch back to it.
 const brand = parseTheme(me.theme) ?? normalizeTheme({});
-const defaultLogo = (await getImage({ src: mark, width: 56 })).src;
+const defaultLogo = '/brand/mark';
 // ONLY the faces this page paints: the catalogue is 43 families and declaring
 // all of them costs ~42KB of head CSS on every load for nothing. The two the
 // theme names are preloaded (they paint immediately); a ward's override is

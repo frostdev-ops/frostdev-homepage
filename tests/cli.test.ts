@@ -128,8 +128,8 @@ test('brand install/list/remove', () => {
 
   const r = run(['brand', 'install', 'wordmark', png]);
   assert.equal(r.code, 0, r.err);
-  const dest = path.join(DATA_A, 'brand', 'wordmark.png');
-  assert.ok(fs.existsSync(dest), 'extension lower-cased');
+  const dest = path.join(DATA_A, 'brand', 'wordmark.webp');
+  assert.ok(fs.existsSync(dest), 'a raster is normalised to webp');
   assert.match(run(['brand', 'list']).out, new RegExp(`^wordmark: ${dest.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
 
   const svg = path.join(SCRATCH, 'logo.svg');
@@ -140,7 +140,7 @@ test('brand install/list/remove', () => {
 
   const bad = run(['brand', 'install', 'favicon', svg]);
   assert.equal(bad.code, 1);
-  assert.match(bad.err, /favicon takes png/);
+  assert.match(bad.err, /favicon needs a raster/);
   assert.equal(run(['brand', 'install', 'logo', png]).code, 2, 'unknown slot is a usage error');
 
   assert.equal(run(['brand', 'remove', 'wordmark']).code, 0);

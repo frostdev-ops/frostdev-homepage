@@ -178,7 +178,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
   },
   'service-group': {
     title: 'Services', defaultSize: '3x2', icon: 'folders', blurb: 'A group or custom set — wards, or a dots wall. Host cpu/mem/disk can be members.', multi: true, configurable: true, category: 'glance',
-    concepts: ['services', 'status', 'uptime', 'monitor', 'health', 'up', 'down', 'latency', 'processes', 'containers', 'pm2', 'docker', 'systemd', 'group', 'board', 'dots', 'loothing', 'frostdev', 'pma', 'what is down'],
+    concepts: ['services', 'status', 'uptime', 'monitor', 'health', 'up', 'down', 'latency', 'processes', 'containers', 'pm2', 'docker', 'systemd', 'group', 'board', 'dots', 'what is down'],
     does: ['shows a group or custom set of monitored services', 'shows up down and latency live', 'sparklines of latency', 'fires logic when any service in the group changes', 'host metrics as rows'],
   },
   incidents: {

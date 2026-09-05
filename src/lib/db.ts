@@ -21,16 +21,18 @@ export function getDb(): Database.Database {
   return db;
 }
 
-/** The migrations folder ships beside the code, not the working directory:
- *  src/lib/ sits two levels under the repo root, the built dist/server/chunks/
- *  three — walk up from this module until it appears, cwd as the last resort. */
-export function migrationsDir(from = path.dirname(fileURLToPath(import.meta.url))): string {
+/** A folder that ships beside the code (migrations/, assets/), not the working
+ *  directory: src/lib/ sits two levels under the repo root, the built
+ *  dist/server/chunks/ three — walk up from this module until it appears, cwd
+ *  as the last resort. */
+export function repoDir(name: string, from = path.dirname(fileURLToPath(import.meta.url))): string {
   for (let dir = from; ; dir = path.dirname(dir)) {
-    const candidate = path.join(dir, 'migrations');
+    const candidate = path.join(dir, name);
     if (fs.existsSync(candidate)) return candidate;
-    if (path.dirname(dir) === dir) return path.join(process.cwd(), 'migrations');
+    if (path.dirname(dir) === dir) return path.join(process.cwd(), name);
   }
 }
+export const migrationsDir = (from?: string): string => repoDir('migrations', from);
 
 function migrate(handle: Database.Database): void {
   handle.exec(

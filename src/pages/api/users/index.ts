@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { listUsers, createUser, emailInUse, generatePassword } from '../../../lib/users.ts';
-import { SESSION_COOKIE } from '../../../lib/auth.ts';
+import { sessionId } from '../../../lib/auth.ts';
 import { setSetting } from '../../../lib/settings.ts';
 
 export const prerender = false;
@@ -34,7 +34,7 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
     createUser(email, password, role);
     // Shown once on the next page render, never in a URL (query strings hit
     // nginx logs and browser history). Keyed to this admin's session.
-    setSetting(`flash_pw:${cookies.get(SESSION_COOKIE)?.value}`, password);
+    setSetting(`flash_pw:${sessionId(cookies)}`, password);
     return redirect('/admin/users?ok=created', 303);
   }
   createUser(email, null, role);

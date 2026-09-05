@@ -10,7 +10,6 @@ import { GENERAL_ICON_SETS, ICON_SETS } from '../lib/icon-names.ts';
 import Icon from '../components/Icon.astro';
 import { Image } from 'astro:assets';
 import GfxKnobs from '../components/GfxKnobs.astro';
-import { mark } from '../lib/brand.ts';
 import { listBackgrounds, MAX_PER_USER } from '../lib/backgrounds.ts';
 import { getSetting } from '../lib/settings.ts';
 import { ALERT_MODES } from './api/account/prefs.ts';
@@ -687,7 +686,7 @@ const TABS = [
             <div class="bg-thumb">
               <label>
                 <input type="radio" name="brandLogo" value="" form="theme-form" checked={theme.brandLogo === ''} />
-                <Image src={mark} alt="" width={96} title="Built-in mark" />
+                <img src="/brand/mark" alt="" width="96" height="96" title="Built-in mark" />
               </label>
             </div>
             {bgImages.map((name) => (

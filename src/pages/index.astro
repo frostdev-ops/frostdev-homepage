@@ -1,41 +1,51 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import { Image } from 'astro:assets';
-import { wordmark, emblem } from '../lib/brand.ts';
+import { RimewardLockup, RimewardMark, brandSrc } from '../lib/brand.ts';
+import { siteInfo } from '../lib/site.ts';
+
+// Everything this page says is a setting (lib/site.ts) and every picture a
+// brand slot (lib/brand.ts): the repo ships Rimeward, an instance its own.
+const site = siteInfo();
+const wordmark = brandSrc('wordmark');
+const emblem = brandSrc('emblem');
 ---
 
-<BaseLayout title="Frostdev" description="Frostdev — projects, services, and experiments." index>
+<BaseLayout title={site.name} description={`${site.name} — ${site.tagline}`} index>
   <div class="splash-ground">
-    <Image src={emblem} alt="" width={1024} class="emblem" loading="eager" />
+    {emblem ? <img src={emblem} alt="" class="emblem" loading="eager" /> : <RimewardMark class="emblem" aria-hidden="true" />}
   </div>
   <canvas id="splash-canvas" aria-hidden="true"></canvas>
   <div id="gate-flash"></div>
 
   <section class="splash-overlay">
-    <Image src={wordmark} alt="Frostdev" width={1280} class="splash-wordmark" loading="eager" />
-    <p class="splash-tagline">Power · Maintenance · Automation</p>
+    {
+      wordmark ? (
+        <img src={wordmark} alt={site.name} class="splash-wordmark" loading="eager" />
+      ) : (
+        <RimewardLockup class="splash-wordmark" aria-label={site.name} />
+      )
+    }
+    <p class="splash-tagline">{site.tagline}</p>
     <a id="enter" href="/login" class="splash-enter">Enter</a>
   </section>
 
   <section class="splash-band">
-    <div class="mx-auto w-full max-w-4xl">
-      <h2 class="section-title mb-4 text-center">What runs here</h2>
-      <div class="grid gap-4 sm:grid-cols-3">
-        <article class="card p-5">
-          <h3 class="text-base font-semibold">Loothing</h3>
-          <p class="mt-1 text-sm text-ink-muted">Guild tooling — loot tracking, history, and standings for raid nights.</p>
-        </article>
-        <article class="card p-5">
-          <h3 class="text-base font-semibold">PMA</h3>
-          <p class="mt-1 text-sm text-ink-muted">Database administration for everything stateful behind the gate.</p>
-        </article>
-        <article class="card p-5">
-          <h3 class="text-base font-semibold">Frostdev services</h3>
-          <p class="mt-1 text-sm text-ink-muted">Dashboards, monitors, and the internal APIs that keep the frost running.</p>
-        </article>
-      </div>
-    </div>
-    <footer class="splash-foot">© Frostdev · admin@frostdev.io</footer>
+    {
+      site.cards.length > 0 && (
+        <div class="mx-auto w-full max-w-4xl">
+          <h2 class="section-title mb-4 text-center">What runs here</h2>
+          <div class="grid gap-4 sm:grid-cols-3">
+            {site.cards.map((c) => (
+              <article class="card p-5">
+                <h3 class="text-base font-semibold">{c.title}</h3>
+                {c.blurb && <p class="mt-1 text-sm text-ink-muted">{c.blurb}</p>}
+              </article>
+            ))}
+          </div>
+        </div>
+      )
+    }
+    {site.footer && <footer class="splash-foot">{site.footer}</footer>}
   </section>
 </BaseLayout>
 

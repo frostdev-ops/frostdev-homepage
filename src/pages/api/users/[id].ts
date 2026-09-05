@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { getUser, setUserRole, setUserPassword, deleteUser, generatePassword } from '../../../lib/users.ts';
-import { SESSION_COOKIE, type Role } from '../../../lib/auth.ts';
+import { sessionId, type Role } from '../../../lib/auth.ts';
 import { setSetting } from '../../../lib/settings.ts';
 
 export const prerender = false;
@@ -25,7 +25,7 @@ export const POST: APIRoute = async ({ params, request, cookies, redirect }) => 
       case 'reset-password': {
         const password = generatePassword();
         setUserPassword(id, password);
-        setSetting(`flash_pw:${cookies.get(SESSION_COOKIE)?.value}`, password);
+        setSetting(`flash_pw:${sessionId(cookies)}`, password);
         return redirect('/admin/users?ok=reset', 303);
       }
       case 'delete': {

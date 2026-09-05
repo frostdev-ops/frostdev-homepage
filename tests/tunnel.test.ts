@@ -5,7 +5,7 @@ import http from 'node:http';
 import net from 'node:net';
 import WebSocket from 'ws';
 import { getDb } from '../src/lib/db.ts';
-import { createSession } from '../src/lib/auth.ts';
+import { SESSION_COOKIE, createSession } from '../src/lib/auth.ts';
 import { OP, chromiumSpec, frame, handleUpgrade, openStream, parseFrame, subscribeTunnel, tunnelOnline, tunnelStatus } from '../src/lib/tunnel.ts';
 
 // The desktop app's side of the protocol, faked: every `host:port` target
@@ -97,7 +97,7 @@ const servers: { close(): void }[] = [];
 before(async () => {
   getDb().prepare(`INSERT INTO users (email, password_hash, role) VALUES ('t@x.io', 'x', 'admin')`).run();
   userId = (getDb().prepare(`SELECT id FROM users WHERE email = 't@x.io'`).get() as { id: number }).id;
-  cookie = `frost_session=${createSession(userId).id}`;
+  cookie = `${SESSION_COOKIE}=${createSession(userId).id}`;
   const srv = http.createServer((_req, res) => res.end()).on('upgrade', handleUpgrade);
   await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
   port = (srv.address() as net.AddressInfo).port;
@@ -113,7 +113,7 @@ after(() => servers.forEach((s) => s.close()));
 
 test('handshake: browsers, strangers and dead sessions are refused', async () => {
   assert.equal(await dial(port, {}), 401);
-  assert.equal(await dial(port, { cookie: 'frost_session=nope' }), 401);
+  assert.equal(await dial(port, { cookie: `${SESSION_COOKIE}=nope` }), 401);
   assert.equal(await dial(port, { cookie, origin: 'https://frostdev.io' }), 403);
   assert.equal(tunnelOnline(userId), false);
 });

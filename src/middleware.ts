@@ -1,5 +1,5 @@
 import { defineMiddleware } from 'astro:middleware';
-import { SESSION_COOKIE, getSession } from './lib/auth.ts';
+import { SESSION_COOKIES, getSession, sessionId } from './lib/auth.ts';
 import { csrfBlocked } from './lib/csrf.ts';
 import { ensureStatusEngine } from './lib/status.ts';
 import { ensureLogicEngine } from './lib/logic-engine.ts';
@@ -28,14 +28,13 @@ const PUBLIC_PREFIXES = [
   '/api/connect/notion/callback',
   '/api/connect/zoho/callback',
   '/_astro/',
-  '/_image', // Astro's image optimizer — the splash wordmark/emblem live here
-  '/favicon',
+  '/_image', // Astro's image optimizer
+  '/brand/', // the favicon and the splash's art (lib/brand-files.ts)
+  '/favicon', // browsers ask for /favicon.ico unprompted: a 404, not a bounce to /login
   '/apple-touch-icon',
-  '/bb-frost/', // the Blackboard theme's installer + zip (public/bb-frost), curl'd unauthenticated
-  '/icon-',
 ];
 
-const ADMIN_PREFIXES = ['/admin', '/api/users'];
+const ADMIN_PREFIXES = ['/admin', '/api/users', '/api/admin'];
 
 export const onRequest = defineMiddleware((context, next) => {
   const { pathname } = context.url;
@@ -48,13 +47,13 @@ export const onRequest = defineMiddleware((context, next) => {
   if (pathname === '/') return next();
   if (PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return next();
 
-  const cookie = context.cookies.get(SESSION_COOKIE)?.value;
+  const cookie = sessionId(context.cookies);
   const session = getSession(cookie);
   if (!session) {
     // A cookie that no longer names a session is dead weight: an HttpOnly
     // cookie the browser keeps sending, that no script can replace, and that
     // this branch would otherwise bounce on forever.
-    if (cookie) context.cookies.delete(SESSION_COOKIE, { path: '/' });
+    if (cookie) for (const name of SESSION_COOKIES) context.cookies.delete(name, { path: '/' });
     if (pathname.startsWith('/api/')) {
       return new Response(JSON.stringify({ error: 'unauthorized' }), {
         status: 401,

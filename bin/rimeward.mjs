@@ -170,22 +170,16 @@ async function settings(args) {
 // --------------------------------------------------------------- splash
 const SPLASH_KEYS = { name: 'site_name', tagline: 'site_tagline', footer: 'site_footer', cards: 'splash_cards' };
 
-function parseCards(file) {
+async function parseCards(file) {
   let cards;
   try {
     cards = JSON.parse(fs.readFileSync(path.resolve(CWD, file), 'utf8'));
   } catch (e) {
     throw new Error(`cards: ${e.message}`);
   }
-  if (!Array.isArray(cards)) throw new Error('cards: expected a JSON array');
-  if (cards.length > 6) throw new Error(`cards: at most 6 (got ${cards.length})`);
-  cards.forEach((c, i) => {
-    if (!c || typeof c.title !== 'string' || typeof c.blurb !== 'string')
-      throw new Error(`cards[${i}]: expected { "title": string, "blurb": string }`);
-    if (c.title.length > 60) throw new Error(`cards[${i}].title: over 60 chars`);
-    if (c.blurb.length > 200) throw new Error(`cards[${i}].blurb: over 200 chars`);
-  });
-  return JSON.stringify(cards.map(({ title, blurb }) => ({ title, blurb })));
+  // The same bounds the admin form and the splash apply (src/lib/site.ts).
+  const { validateCards } = await lib('site.ts');
+  return JSON.stringify(validateCards(cards));
 }
 
 async function splash(args) {
@@ -208,20 +202,25 @@ async function splash(args) {
       out(`cleared: ${key}`);
       continue;
     }
-    s.setSetting(key, flag === 'cards' ? parseCards(v.cards) : v[flag]);
+    s.setSetting(key, flag === 'cards' ? await parseCards(v.cards) : v[flag]);
     out(`set: ${key}`);
   }
 }
 
 // ---------------------------------------------------------------- brand
+// Mirrors src/lib/brand-files.ts (which the CLI cannot import: brand.ts beside
+// it pulls .svg files in as Astro components). Rasters are normalised on
+// install so the /brand route stays a plain file read: the art slots become
+// webp bounded by width, the icon slots exact-square png; svg passes through.
 const SLOTS = {
-  wordmark: ['png', 'webp', 'svg'],
-  emblem: ['png', 'webp', 'svg'],
-  mark: ['png', 'webp', 'svg'],
+  wordmark: ['svg', 'webp', 'png'],
+  emblem: ['svg', 'webp', 'png'],
+  mark: ['svg', 'webp', 'png'],
   favicon: ['png'],
   'apple-touch-icon': ['png'],
   'icon-512': ['png'],
 };
+const RASTER = { wordmark: { width: 1280 }, emblem: { width: 1024 }, mark: { width: 256 }, favicon: { square: 64 }, 'apple-touch-icon': { square: 180 }, 'icon-512': { square: 512 } };
 
 async function brand(args) {
   const { positionals: [sub, slot, file] } = parse('brand', args);
@@ -239,13 +238,32 @@ async function brand(args) {
       checkSlot(slot);
       if (!file) throw new Usage(groupUsage('brand'));
       const src = path.resolve(CWD, file);
-      const ext = path.extname(src).slice(1).toLowerCase();
-      if (!SLOTS[slot].includes(ext)) throw new Error(`${slot} takes ${SLOTS[slot].join('|')}, not .${ext || '?'}`);
       if (!fs.existsSync(src)) throw new Error(`no such file: ${src}`);
-      fs.mkdirSync(dir, { recursive: true });
-      for (const p of candidates(slot)) fs.rmSync(p, { force: true });
-      const dest = path.join(dir, `${slot}.${ext}`);
-      fs.copyFileSync(src, dest);
+      const ext = path.extname(src).slice(1).toLowerCase();
+      const spec = RASTER[slot];
+      let dest;
+      if (ext === 'svg') {
+        if (!SLOTS[slot].includes('svg')) throw new Error(`${slot} needs a raster image (png, jpg, webp), not svg`);
+        fs.mkdirSync(dir, { recursive: true });
+        for (const p of candidates(slot)) fs.rmSync(p, { force: true });
+        dest = path.join(dir, `${slot}.svg`);
+        fs.copyFileSync(src, dest);
+      } else {
+        const { default: sharp } = await import('sharp');
+        const img = sharp(src);
+        await img.metadata().catch(() => {
+          throw new Error(`${file}: not an image sharp can read (png, jpg, webp, svg)`);
+        });
+        fs.mkdirSync(dir, { recursive: true });
+        for (const p of candidates(slot)) fs.rmSync(p, { force: true });
+        if (spec.square) {
+          dest = path.join(dir, `${slot}.png`);
+          await img.resize(spec.square, spec.square, { fit: 'cover' }).png().toFile(dest);
+        } else {
+          dest = path.join(dir, `${slot}.webp`);
+          await img.resize({ width: spec.width, withoutEnlargement: true }).webp({ quality: 90 }).toFile(dest);
+        }
+      }
       out(`installed: ${slot} -> ${dest}`);
       return;
     }

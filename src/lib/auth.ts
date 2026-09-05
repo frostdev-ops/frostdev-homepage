@@ -1,8 +1,19 @@
 import crypto from 'node:crypto';
 import { getDb } from './db.ts';
 
-export const SESSION_COOKIE = 'frost_session';
-export const SSO_STATE_COOKIE = 'frost_sso';
+export const SESSION_COOKIE = 'rimeward_session';
+export const SSO_STATE_COOKIE = 'rimeward_sso';
+/** v0.16.0 renamed the cookies from frost_*. Browsers still carry the old one
+ *  until they log in again, and the desktop app reads the session cookie BY
+ *  NAME from its webview — so reads accept both names and a login sets both.
+ *  Drop the legacy name once desktop-v0.1.3 (reads rimeward_session) is out. */
+export const LEGACY_SESSION_COOKIE = 'frost_session';
+export const SESSION_COOKIES = [SESSION_COOKIE, LEGACY_SESSION_COOKIE] as const;
+
+/** The session id a request carries, whichever name it came under. */
+export function sessionId(cookies: { get(name: string): { value: string } | undefined }): string | undefined {
+  return cookies.get(SESSION_COOKIE)?.value ?? cookies.get(LEGACY_SESSION_COOKIE)?.value;
+}
 /** Only an https site can set a Secure cookie: an install reached over plain
  *  http (a LAN, Tailscale) would otherwise bounce on the login forever. */
 const SECURE = (process.env.PUBLIC_BASE_URL ?? '').startsWith('https:');

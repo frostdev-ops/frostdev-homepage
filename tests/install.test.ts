@@ -52,3 +52,11 @@ test('weather has no built-in town: env or settings, else null', () => {
   process.env.WEATHER_LON = '-74';
   assert.deepEqual(coords(), { lat: 40.7, lon: -74 });
 });
+
+test('sessionId reads the new cookie name, then the legacy one', async () => {
+  const { LEGACY_SESSION_COOKIE, SESSION_COOKIE, sessionId } = await import('../src/lib/auth.ts');
+  const jar = (m: Record<string, string>) => ({ get: (n: string) => (n in m ? { value: m[n]! } : undefined) });
+  assert.equal(sessionId(jar({ [SESSION_COOKIE]: 'new', [LEGACY_SESSION_COOKIE]: 'old' })), 'new');
+  assert.equal(sessionId(jar({ [LEGACY_SESSION_COOKIE]: 'old' })), 'old');
+  assert.equal(sessionId(jar({})), undefined);
+});

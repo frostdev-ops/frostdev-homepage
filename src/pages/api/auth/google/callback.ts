@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import {
-  SESSION_COOKIE,
+  SESSION_COOKIES,
   SSO_STATE_COOKIE,
   createSession,
   sessionCookieOptions,
@@ -43,7 +43,7 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
   }
 
   const session = createSession(userId);
-  cookies.set(SESSION_COOKIE, session.id, sessionCookieOptions(session.expiresAt));
+  for (const name of SESSION_COOKIES) cookies.set(name, session.id, sessionCookieOptions(session.expiresAt));
   // Hard-coded destination: the callback never honors a return-to parameter.
   return redirect('/dash', 303);
 };

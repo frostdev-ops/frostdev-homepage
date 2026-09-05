@@ -5,7 +5,7 @@
 <p align="center">
   A personal operations dashboard, the splash in front of it, and a desktop app that lends it your own connection.
   <br>
-  <a href="https://github.com/frostdev-ops/frostdev-homepage/releases/latest">Latest desktop release</a> · macOS (signed, universal) · Windows · Linux
+  <a href="https://github.com/frostdev-ops/rimeward/releases/latest">Latest desktop release</a> · macOS (signed, universal) · Windows · Linux
 </p>
 
 Rimeward is a personal operations dashboard: live service status for your own servers,

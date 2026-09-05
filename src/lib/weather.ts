@@ -27,10 +27,15 @@ export interface Forecast {
   hourly: { t: string; tempF: number; code: number; precipPct: number }[];
 }
 
-/** Settings rows beat env; no built-in town — until one is set the ward says so. */
+/** Settings rows beat env; no built-in town — until one is set the ward says so.
+ *  An empty value (the .env.example line left blank) is unset, not 0°,0°. */
 export function coords(): { lat: number; lon: number } | null {
-  const lat = Number(getSetting('weather_lat') ?? process.env.WEATHER_LAT ?? NaN);
-  const lon = Number(getSetting('weather_lon') ?? process.env.WEATHER_LON ?? NaN);
+  const read = (setting: string, env: string): number => {
+    const raw = (getSetting(setting) ?? process.env[env] ?? '').trim();
+    return raw ? Number(raw) : NaN;
+  };
+  const lat = read('weather_lat', 'WEATHER_LAT');
+  const lon = read('weather_lon', 'WEATHER_LON');
   return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
 }
 

@@ -8,7 +8,7 @@ cp .env.example .env                         # PUBLIC_BASE_URL and TOKEN_ENC_KEY
 node bin/rimeward.mjs users create you@example.com --admin
 npm run dev:env                              # http://localhost:4321
 npm test                                     # node --test tests/*.test.ts
-npx tsc --noEmit -p .
+npm run typecheck
 ```
 
 Every test file seeds its own temporary data directory (`tests/_setup.ts`, imported first) and

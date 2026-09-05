@@ -14,6 +14,10 @@ const ENV_PATH = findUp('.env');
 if (ENV_PATH) process.loadEnvFile(ENV_PATH); // never overwrites what is already in process.env
 // db.ts resolves migrations/ and the default data dir from cwd; the lib only ever runs from the repo.
 process.chdir(ROOT);
+// The lib imports the monitor list (targets.ts → targets.json), which a fresh
+// clone lacks until an npm pre-script copies the example — do the same here.
+const TARGETS = path.join(ROOT, 'src/lib/targets.json');
+if (!fs.existsSync(TARGETS)) fs.copyFileSync(path.join(ROOT, 'src/lib/targets.example.json'), TARGETS);
 
 const lib = (m) => import(pathToFileURL(path.join(ROOT, 'src/lib', m)).href);
 const out = (s) => process.stdout.write(s + '\n');

@@ -1,7 +1,7 @@
 {
   "name": "rimeward",
   "type": "module",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "private": true,
   "license": "MIT",
   "engines": {
@@ -23,7 +23,9 @@
     "dev:env": "node --env-file-if-exists=.env node_modules/astro/astro.js dev",
     "desktop:dev": "cd desktop && node prebuild.mjs && cargo tauri dev --config tauri.dev.conf.json",
     "desktop:build": "cd desktop && node prebuild.mjs && cargo tauri build",
-    "cli": "node bin/rimeward.mjs"
+    "cli": "node bin/rimeward.mjs",
+    "pretypecheck": "npm run -s targets",
+    "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "@astrojs/node": "^9.5.5",

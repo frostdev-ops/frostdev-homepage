@@ -46,6 +46,9 @@ test('weather has no built-in town: env or settings, else null', () => {
   delete process.env.WEATHER_LAT;
   delete process.env.WEATHER_LON;
   assert.equal(coords(), null);
+  process.env.WEATHER_LAT = '';
+  process.env.WEATHER_LON = ' '; // the .env.example lines left blank are unset, not 0°,0°
+  assert.equal(coords(), null);
   process.env.WEATHER_LAT = '40.7';
   process.env.WEATHER_LON = 'east'; // half a location is no location
   assert.equal(coords(), null);

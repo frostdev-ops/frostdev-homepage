@@ -315,6 +315,23 @@ const groups = (Object.keys(CATEGORIES) as Category[])
       </div>
     </div>
 
+    <div data-cfg="weather" class="hidden flex-col gap-3">
+      <div>
+        <label class="label" for="aw-we-place">Place</label>
+        <div class="flex gap-2">
+          <input id="aw-we-place" type="text" class="input flex-1" maxlength="80" placeholder="A city, a town, a postcode" autocomplete="off" />
+          <button type="button" class="btn min-h-0 px-3 text-xs" data-we-find>Find</button>
+        </div>
+        <div class="mt-2 flex flex-wrap gap-2" data-we-matches></div>
+        <p class="mt-1 text-[10px] text-ink-faint">Pick a match and the coordinates fill in (Open-Meteo's geocoder). Without a place the ward shows the server's default location, if it has one.</p>
+      </div>
+      <div class="flex gap-2">
+        <label class="flex-1 text-[10px] text-ink-faint">Name<input id="aw-we-name" name="we-name" type="text" class="input" maxlength="40" placeholder="Home" /></label>
+        <label class="flex-1 text-[10px] text-ink-faint">Latitude<input id="aw-we-lat" name="we-lat" type="number" class="input" step="any" min="-90" max="90" /></label>
+        <label class="flex-1 text-[10px] text-ink-faint">Longitude<input id="aw-we-lon" name="we-lon" type="number" class="input" step="any" min="-180" max="180" /></label>
+      </div>
+    </div>
+
     <div data-cfg="mail" class="hidden flex-col gap-3">
       <div>
         <label class="label" for="aw-ml-account">Account</label>

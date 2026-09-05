@@ -3,9 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { wmoLabel, getForecast } from '../src/lib/weather.ts';
 
-// No built-in town any more: the forecast needs a location before it fetches.
-process.env.WEATHER_LAT = '40.93';
-process.env.WEATHER_LON = '-74.13';
+const AT = { lat: 40.93, lon: -74.13 };
 
 test('wmoLabel: known codes', () => {
   assert.equal(wmoLabel(0), 'Clear');
@@ -19,7 +17,7 @@ test('wmoLabel: unknown code falls back', () => {
   assert.equal(wmoLabel(-1), 'Weather');
 });
 
-// getForecast caches successes module-wide under one key, so the failure test
+// getForecast caches successes per place, so the failure test
 // must run before the success test (failures cache nothing).
 
 const realFetch = globalThis.fetch;
@@ -31,10 +29,10 @@ test('getForecast: failing fetch yields null (and caches nothing)', async (t) =>
   globalThis.fetch = (async () => {
     throw new Error('network down');
   }) as unknown as typeof fetch;
-  assert.equal(await getForecast(), null);
+  assert.equal(await getForecast(AT), null);
 
   globalThis.fetch = (async () => ({ ok: false, status: 500 })) as unknown as typeof fetch;
-  assert.equal(await getForecast(), null);
+  assert.equal(await getForecast(AT), null);
 });
 
 test('getForecast: maps Open-Meteo JSON to the Forecast contract', async (t) => {
@@ -63,7 +61,7 @@ test('getForecast: maps Open-Meteo JSON to the Forecast contract', async (t) => 
     return { ok: true, json: async () => canned };
   }) as unknown as typeof fetch;
 
-  const fc = await getForecast();
+  const fc = await getForecast(AT);
   assert.ok(fc);
   assert.match(requestedUrl, /^https:\/\/api\.open-meteo\.com\/v1\/forecast\?latitude=/);
   assert.deepEqual(fc.current, { tempF: 70.1, condition: 'Partly cloudy', code: 2, windMph: 5.5, humidity: 40 });
@@ -73,4 +71,27 @@ test('getForecast: maps Open-Meteo JSON to the Forecast contract', async (t) => 
   assert.equal(fc.daily[1]!.condition, 'Light rain');
   assert.deepEqual(fc.hourly[0], { t: '2026-08-30T00:00', tempF: 65, code: 3, precipPct: 0 });
   assert.equal(fc.hourly[1]!.precipPct, 10);
+});
+
+test('wardLocation: a ward\'s own place, the board\'s first placed ward for everyone else, the env fallback last', async () => {
+  const { wardLocation } = await import('../src/lib/weather.ts');
+  const { createUser } = await import('../src/lib/users.ts');
+  const { saveDashboard } = await import('../src/lib/dashboard.ts');
+  const { validateLayout } = await import('../src/lib/wards.ts');
+  delete process.env.WEATHER_LAT;
+  delete process.env.WEATHER_LON;
+  const uid = createUser('weather@example.com', 'pw', 'admin');
+  saveDashboard(
+    uid,
+    validateLayout([
+      { i: 'w1', type: 'weather', size: '2x1' },
+      { i: 'w2', type: 'weather', size: '2x1', config: { lat: 51.5, lon: -0.12, name: 'London' } },
+    ])!
+  );
+  assert.deepEqual(wardLocation(uid, 'w2'), { lat: 51.5, lon: -0.12, name: 'London' });
+  assert.equal(wardLocation(uid, 'w1'), null); // its own place or the fallback, never a sibling's
+  assert.deepEqual(wardLocation(uid), { lat: 51.5, lon: -0.12, name: 'London' }); // a chart, a condition, the agent
+  process.env.WEATHER_LAT = '40.93';
+  process.env.WEATHER_LON = '-74.13';
+  assert.deepEqual(wardLocation(uid, 'w1'), { lat: 40.93, lon: -74.13 });
 });

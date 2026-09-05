@@ -1769,6 +1769,11 @@ const pendingSecrets = new Map<string, Record<string, string>>();
 
 const FIELDS: Record<string, Field[]> = {
   embed: [{ sel: '#aw-em-url', key: 'url' }],
+  weather: [
+    { sel: '#aw-we-name', key: 'name' },
+    { sel: '#aw-we-lat', key: 'lat', kind: 'num' },
+    { sel: '#aw-we-lon', key: 'lon', kind: 'num' },
+  ],
   browser: [
     { sel: '#aw-bw-url', key: 'url' },
     { sel: '#aw-bw-backend', key: 'backend', def: 'local' },
@@ -1875,7 +1880,10 @@ function readConfig(dialog: HTMLDialogElement, type: string): Record<string, unk
         continue;
       }
       if (f.kind === 'bool') cfg[f.key] = q<HTMLInputElement>(f.sel, dialog)!.checked;
-      else if (f.kind === 'num') cfg[f.key] = Number(val(f.sel));
+      else if (f.kind === 'num') {
+        const v = val(f.sel);
+        if (v !== '') cfg[f.key] = Number(v); // empty = absent: the validator owns the default
+      }
       else {
         const v = f.key === 'text' ? q<HTMLInputElement>(f.sel, dialog)!.value : val(f.sel);
         if (v) cfg[f.key] = v;
@@ -2189,6 +2197,37 @@ function bootDialog(): void {
     addInto = null;
   });
   q<HTMLSelectElement>('#aw-fx', dialog)?.addEventListener('change', () => syncFx(dialog));
+  // Weather: the geocoder's matches are buttons; picking one fills the coordinates.
+  const findPlace = async () => {
+    const place = q<HTMLInputElement>('#aw-we-place', dialog)!.value.trim();
+    const box = q('[data-we-matches]', dialog)!;
+    box.textContent = '';
+    if (place.length < 2) return;
+    const { status, data } = await getJson(`/api/weather/geocode?q=${encodeURIComponent(place)}`);
+    const places = status === 200 && Array.isArray(data?.places) ? (data.places as { name: string; region: string; lat: number; lon: number }[]) : [];
+    if (!places.length) {
+      box.append(el('p', 'text-[10px] text-ink-faint', status === 200 ? 'No match.' : 'The geocoder is unavailable — type the coordinates.'));
+      return;
+    }
+    for (const p of places) {
+      const b = el('button', 'btn min-h-0 px-2 py-1 text-xs', p.region ? `${p.name} · ${p.region}` : p.name);
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        q<HTMLInputElement>('#aw-we-lat', dialog)!.value = String(p.lat);
+        q<HTMLInputElement>('#aw-we-lon', dialog)!.value = String(p.lon);
+        const name = q<HTMLInputElement>('#aw-we-name', dialog)!;
+        if (!name.value.trim()) name.value = p.name;
+        box.textContent = '';
+      });
+      box.append(b);
+    }
+  };
+  q('[data-we-find]', dialog)?.addEventListener('click', () => void findPlace());
+  q('#aw-we-place', dialog)?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    void findPlace();
+  });
   // Launcher rows: add, remove, and a picked https target prefills an empty URL.
   dialog.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;

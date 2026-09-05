@@ -63,7 +63,7 @@ import { askJson, askModel } from './agent/oneshot.ts';
 import { asAccount, mailUnreadCount, sendNow, linkedMailAccounts, mailInboxMerged } from './mail.ts';
 import { BOOT_ID, buildInfo, getHistory, getSnapshot, hostPct, type ServiceStatus } from './status.ts';
 import { getSetting, setSetting } from './settings.ts';
-import { getForecast, type Forecast } from './weather.ts';
+import { forecastFor, type Forecast } from './weather.ts';
 import type { MailMessage } from './google.ts';
 import { agenda, eventMs, type CalEvent } from './calendar.ts';
 import { TARGETS } from './targets.ts';
@@ -459,8 +459,8 @@ export const CONDITION_EXECS: Record<string, (ctx: FireCtx, params: Record<strin
     if (!svc || svc.ok === null) throw new Error('service state unknown');
     return (svc.ok ? 'up' : 'down') === p.state;
   },
-  'weather-is': async (_ctx, p) => {
-    const forecast = await getForecast();
+  'weather-is': async (ctx, p) => {
+    const forecast = await forecastFor(ctx.userId);
     if (!forecast) throw new Error('weather unavailable');
     return classifyWeather(forecast.current.code) === p.kind;
   },
@@ -491,15 +491,15 @@ export const CONDITION_EXECS: Record<string, (ctx: FireCtx, params: Record<strin
     const until = now + Number(p.minutes) * 60_000;
     return !(await agenda(ctx.userId)).some((e) => !e.allDay && eventMs(e.end) > now && eventMs(e.start) < until);
   },
-  'rain-chance-above': async (_ctx, p) => {
-    const f = await getForecast();
+  'rain-chance-above': async (ctx, p) => {
+    const f = await forecastFor(ctx.userId);
     if (!f) throw new Error('weather unavailable');
     const d = f.daily[p.day === 'tomorrow' ? 1 : 0];
     if (!d) throw new Error('no daily forecast');
     return d.precipPct >= Number(p.pct);
   },
-  'rain-within': async (_ctx, p) => {
-    const f = await getForecast();
+  'rain-within': async (ctx, p) => {
+    const f = await forecastFor(ctx.userId);
     if (!f) throw new Error('weather unavailable');
     return f.hourly.slice(0, Math.min(Number(p.hours), 24)).some((h) => h.precipPct >= Number(p.pct));
   },
@@ -1418,9 +1418,9 @@ export const WATCHERS: Record<string, WatcherSpec> = {
     },
   },
   'weather-turned': {
-    intervalMs: 5 * 60_000, // getForecast caches 30 min anyway
-    probe: async (_ctx, prev) => {
-      const forecast = await getForecast();
+    intervalMs: 5 * 60_000, // the forecast caches 30 min anyway
+    probe: async (ctx, prev) => {
+      const forecast = await forecastFor(ctx.userId, ctx.ward);
       if (!forecast) return { state: prev, fires: [] };
       const kind = classifyWeather(forecast.current.code);
       const fires: WatcherFire[] =
@@ -1458,7 +1458,7 @@ export const WATCHERS: Record<string, WatcherSpec> = {
     intervalMs: WATCH_TICK_MS,
     probe: (ctx, prev) =>
       dailyClock(ctx, prev, async () => {
-        const f = await getForecast();
+        const f = await forecastFor(ctx.userId, ctx.ward);
         if (!f) throw new Error('weather unavailable'); // state unwritten → retries next tick
         return weatherVars(f);
       }),
@@ -1615,7 +1615,7 @@ export const WATCHERS: Record<string, WatcherSpec> = {
   'temp-crossed': {
     intervalMs: 5 * 60_000,
     probe: async (ctx, prev) => {
-      const f = await getForecast();
+      const f = await forecastFor(ctx.userId, ctx.ward);
       if (!f) return { state: prev, fires: [] }; // outage: hold the baseline
       return crossings(ctx, prev, {
         band: () => 1, // 1°F dead band

@@ -53,11 +53,11 @@ test('validateLayout rejects garbage shapes', () => {
     ]),
     null
   );
-  // duplicate non-multi type
+  // duplicate non-multi type (weather is multi now: one ward per place)
   assert.equal(
     validateLayout([
-      { i: 'a', type: 'weather', size: '2x1' },
-      { i: 'b', type: 'weather', size: '2x1' },
+      { i: 'a', type: 'calendar', size: '2x2' },
+      { i: 'b', type: 'calendar', size: '2x2' },
     ]),
     null
   );
@@ -511,4 +511,15 @@ test('saveDashboard: the page list is kept unless one is given; wards heal again
   assert.deepEqual(getPages(userId), pages); // untouched by a layout-only save
   saveDashboard(userId, layout, [{ id: 'home', title: 'Home' }]);
   assert.equal(getDashboard(userId)[0]!.page, undefined); // its page went away → first page
+});
+
+test('weather config: a place is both coordinates in range plus an optional name; anything else is no place', () => {
+  const one = (config: unknown) => validateLayout([{ i: 'w', type: 'weather', size: '2x1', config }])?.[0]?.config;
+  assert.deepEqual(one({ lat: '40.7', lon: '-74', name: ' Home ' }), { lat: 40.7, lon: -74, name: 'Home' });
+  assert.deepEqual(one({ lat: 0, lon: 0 }), { lat: 0, lon: 0 }); // the equator is a place
+  assert.deepEqual(one({ lat: 91, lon: 0 }), {});
+  assert.deepEqual(one({ lat: 40.7 }), {});
+  assert.deepEqual(one({ lat: '', lon: '' }), {});
+  assert.deepEqual(one(undefined), {});
+  assert.equal(wardTitle({ i: 'w', type: 'weather', size: '2x1', config: { lat: 1, lon: 2, name: 'Cabin' } }), 'Weather · Cabin');
 });

@@ -122,8 +122,8 @@ export type Category = keyof typeof CATEGORIES;
 
 export const CATALOG: Record<string, CatalogEntry> = {
   weather: {
-    title: 'Weather', defaultSize: '2x1', icon: 'weather', blurb: 'Now and 3 days; at 2x2 the next 24 hours and the week.', category: 'glance',
-    concepts: ['forecast', 'temperature', 'rain', 'snow', 'sun', 'clouds', 'wind', 'humidity', 'outlook', 'today', 'tomorrow', 'umbrella', 'cold', 'hot', 'conditions', '3 day', 'week'],
+    title: 'Weather', defaultSize: '2x1', icon: 'weather', blurb: 'Now and 3 days for a place you pick; at 2x2 the next 24 hours and the week.', multi: true, configurable: true, category: 'glance',
+    concepts: ['forecast', 'temperature', 'rain', 'snow', 'sun', 'clouds', 'wind', 'humidity', 'outlook', 'today', 'tomorrow', 'umbrella', 'cold', 'hot', 'conditions', '3 day', 'week', 'location', 'city', 'place'],
     does: ['reads the open-meteo forecast', 'shows current conditions and a three-day outlook', 'triggers logic when the weather turns', 'daily weather report', 'temperature crosses a threshold'],
   },
   mail: {
@@ -529,6 +529,7 @@ export function wardTitle(w: WardInstance): string {
     const one = Array.isArray(cfg.services) && cfg.services.length === 1 ? cfg.services[0] : undefined;
     if (typeof one === 'string') return TARGETS.find((t) => t.id === one)?.label ?? HOST_LABELS[one] ?? CATALOG[w.type]!.title;
   }
+  if (w.type === 'weather' && typeof w.config?.name === 'string' && w.config.name) return `Weather · ${w.config.name}`;
   return CATALOG[w.type]?.title ?? w.type;
 }
 
@@ -717,6 +718,17 @@ function validateConfig(type: string, raw: Record<string, unknown>): Record<stri
     case 'embed': {
       const url = httpUrl(raw.url);
       return url ? { url } : null;
+    }
+    // A place: both coordinates, in range — else no place, and the ward uses
+    // the instance fallback if there is one (lib/weather.ts). Never null: an
+    // unplaced weather ward is still a ward. `name` is what the title shows.
+    case 'weather': {
+      const num = (v: unknown) => (v === undefined || v === null || v === '' ? NaN : Number(v));
+      const lat = num(raw.lat);
+      const lon = num(raw.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return {};
+      const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 40) : '';
+      return { lat: Math.round(lat * 1e4) / 1e4, lon: Math.round(lon * 1e4) / 1e4, ...(name ? { name } : {}) };
     }
     // Label = the title override; the icon is the only knob. Never null.
     case 'button':

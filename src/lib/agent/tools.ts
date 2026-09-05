@@ -14,7 +14,7 @@ import {
   timerOp,
 } from '../logic-engine.ts';
 import { getSnapshot } from '../status.ts';
-import { getForecast } from '../weather.ts';
+import { forecastFor } from '../weather.ts';
 import { agenda } from '../calendar.ts';
 import { MAIL_ACCOUNTS } from '../wards.ts';
 import {
@@ -362,11 +362,11 @@ export const TOOLS: Record<string, ToolDef> = {
   },
   get_weather: {
     kind: 'read',
-    description: 'Current conditions and the short forecast.',
+    description: 'Current conditions and the short forecast, for the first weather ward on the board that has a place.',
     parameters: obj({}),
-    run: async () => {
-      const f = await getForecast();
-      if (!f) throw new Error('weather unavailable');
+    run: async (_a, ctx) => {
+      const f = await forecastFor(ctx.userId);
+      if (!f) throw new Error('weather unavailable — no weather ward has a place');
       return f;
     },
   },

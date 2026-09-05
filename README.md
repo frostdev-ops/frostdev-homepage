@@ -127,7 +127,6 @@ repo carries nothing of yours.
 | `SSO_WORKSPACE_DOMAIN` | A Google Workspace domain that may sign in without an invite (its first user becomes admin). Unset: invited addresses only. |
 | `MS_CLIENT_ID/SECRET`, `MS_TENANT_ID` | Outlook and Teams. The tenant defaults to `common`. |
 | `NOTION_CLIENT_ID/SECRET`, `ZOHO_CLIENT_ID/SECRET` | Notion pages and databases; Zoho Mail. |
-| `WEATHER_LAT`, `WEATHER_LON` | The weather ward's location (or the `weather_lat` / `weather_lon` settings). |
 | `BROWSER_EXECUTABLE`, `BROWSER_PROFILES` | A Chromium (or a wrapper that drops root) and where its profiles live. Unset: playwright-core's own, under the data dir. |
 | `PM2_BIN`, `DOCKER_BIN`, `SYSTEMCTL_BIN` | The tools behind pm2 / docker / systemd monitor targets when PATH does not carry them. |
 | `PUBLIC_APP_BUILD` | The build stamp on the dashboard. Default: the package version. |

@@ -1,13 +1,30 @@
-# frostdev homepage · Rimeward
+<p align="center">
+  <img src="assets/rimeward-lockup.svg" alt="Rimeward by frostdev" width="560">
+</p>
 
-The public splash at [frostdev.io](https://frostdev.io), the **Rimeward** dashboard behind
-the login, and the Rimeward desktop app.
+<p align="center">
+  The public splash at <a href="https://frostdev.io">frostdev.io</a>, the <b>Rimeward</b> dashboard behind the login, and the Rimeward desktop app.
+  <br>
+  <a href="https://github.com/frostdev-ops/frostdev-homepage/releases/latest">Latest desktop release</a> · macOS (signed, universal) · Windows · Linux
+</p>
 
 Rimeward is a personal operations dashboard: live service status for your own servers,
 weather, one inbox over every linked mailbox, a merged agenda, Notion wards, a notepad,
 routine timers, chat wards (Discord, Telegram, Slack, Twilio, push, Matrix, Teams), a real
 browser you and the built-in agent drive together, and **leylines**, a small automation graph
 that wires any of it to any of it.
+
+## Screens
+
+<p align="center">
+  <img src="docs/goldens/splash.png" alt="The splash: living topography" width="880">
+</p>
+<p align="center">
+  <img src="docs/goldens/login.png" alt="Sign in" width="430">
+  <img src="docs/goldens/dashboard.png" alt="The dashboard, default layout" width="430">
+</p>
+
+Regenerate them with `node ops/goldens.mjs` (a throwaway instance, nothing personal in them).
 
 ## Stack
 

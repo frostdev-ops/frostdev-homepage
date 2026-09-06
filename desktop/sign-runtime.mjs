@@ -37,7 +37,13 @@ const options = ["--force", "--sign", identity, "--options", "runtime",
   "--entitlements", path.join(desktop, "entitlements.plist"),
   ...(identity === "-" ? ["--timestamp=none"] : ["--timestamp"]),
   ...(process.env.RIMEWARD_SIGNING_KEYCHAIN ? ["--keychain", process.env.RIMEWARD_SIGNING_KEYCHAIN] : [])];
-// Sign individual code first, then bundles from the inside out. Never --deep sign.
-for (const file of [...files, ...bundles]) execFileSync("codesign", [...options, file], { stdio: "pipe" });
-for (const file of [...files, ...bundles]) execFileSync("codesign", ["--verify", "--strict", file], { stdio: "pipe" });
+// A framework binary can seal its bundle, so sign all nested code first.
+const code = [...files, ...bundles].sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
+for (const file of code) {
+  // Finder can restore bundle metadata while a large runtime is being signed.
+  const bundle = bundles.find((dir) => file === dir || file.startsWith(dir + path.sep));
+  if (bundle) execFileSync("xattr", ["-c", bundle], { stdio: "pipe" });
+  execFileSync("codesign", [...options, file], { stdio: "pipe" });
+}
+for (const file of code) execFileSync("codesign", ["--verify", "--strict", file], { stdio: "pipe" });
 console.log(`Signed and verified ${files.length} native binaries and ${bundles.length} bundles.`);

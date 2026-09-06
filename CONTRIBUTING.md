@@ -53,7 +53,8 @@ Install-script permissions are pinned in `package.json` for native dependencies.
 network-based model-type freshness check is disabled; models are discovered at runtime.
 The current `just-bash` dependency emits Node's experimental `stripTypeScriptTypes` notice
 when its JavaScript worker starts under Node 22. Its optional compression dependency also
-uses the deprecated `prebuild-install` package. These upstream notices are not suppressed.
+uses the deprecated `prebuild-install` package. Node 22 also marks the built-in mock timers
+used by Discord tests as experimental. These upstream/tooling notices are not suppressed.
 
 After a web build, run `npm run test:ui` with the staged Chromium available. These checks
 exercise real editor/PTY behavior, shared-client control, recovery, and isolated HTTPS

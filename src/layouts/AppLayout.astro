@@ -19,6 +19,8 @@ interface Props {
 
 const { search = true } = Astro.props;
 const me = Astro.locals.user!;
+const sharedCatalog = isDesktop() ? getSetting(`instance:catalog:${me.userId}`) : null;
+const monitorCatalog = sharedCatalog ? JSON.parse(sharedCatalog) : { targets: TARGETS, titles: GROUP_TITLES };
 
 // The brand block is per-user: everything about it but the words and the
 // picture is a CSS var (lib/theme.ts brand* knobs, derived in frost.css).
@@ -45,7 +47,7 @@ const declared = [...new Set([brand.uiFont, brand.brandFont, ...(Astro.props.fon
     {faces.map((v) => <Font cssVariable={v as any} preload={themeFaces.includes(v)} />)}
     <meta name="fd-faces" content={declared} />
     {/* The monitor registry for the client's pure helpers: lib/targets.ts reads it as it loads. */}
-    <script is:inline type="application/json" id="fd-monitors" set:html={JSON.stringify({ targets: TARGETS, titles: GROUP_TITLES }).replace(/</g, '\\u003c')} />
+    <script is:inline type="application/json" id="fd-monitors" set:html={JSON.stringify(monitorCatalog).replace(/</g, '\\u003c')} />
   </Fragment>
 
   <header class="app-header">

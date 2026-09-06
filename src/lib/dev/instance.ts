@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { getDb } from '../db.ts';
 import { getDashboard, getPages, saveDashboard } from '../dashboard.ts';
 import { getSetting, setSetting } from '../settings.ts';
+import { TARGETS, GROUP_TITLES } from '../targets.ts';
 import { parseTheme } from '../theme.ts';
 import { DEFAULT_LAYOUT, DEFAULT_PAGES, pageOf, validateLayout, validatePages, type PageDef, type WardInstance } from '../wards.ts';
 import { isDesktop, workDb } from './runtime.ts';
@@ -12,10 +13,12 @@ export interface InstanceDashboard {
   pages: PageDef[];
   theme: string | null;
   name: string;
+  catalog?: { targets: { id: string; label: string; group: string }[]; titles: Record<string, string> };
 }
 export function instanceDashboard(user: number): InstanceDashboard {
   const profile = getDb().prepare('SELECT theme,display_name,email FROM users WHERE id=?').get(user) as { theme: string | null; display_name: string; email: string };
-  return validateInstance({ layout: getDashboard(user), pages: getPages(user), theme: profile.theme,
+  const catalog = isDesktop() ? JSON.parse(getSetting(`instance:catalog:${user}`) ?? 'null') : { targets: TARGETS.map(({ id, label, group }) => ({ id, label, group })), titles: GROUP_TITLES };
+  return validateInstance({ ...(catalog ? { catalog } : {}), layout: getDashboard(user), pages: getPages(user), theme: profile.theme,
     name: getSetting(`instance:name:${user}`) ?? (profile.display_name || profile.email.split('@')[0] || 'Rimeward') });
 }
 /** Uploaded images have account-local filenames; the shared identity is their content hash. */
@@ -35,7 +38,16 @@ export function validateInstance(value: unknown): InstanceDashboard {
     typeof data.name !== 'string' || data.name.length > 120) throw Error('Invalid shared dashboard.');
   const theme = data.theme === null ? null : parseTheme(data.theme);
   if (data.theme !== null && !theme) throw Error('Invalid shared theme.');
-  return { pages, layout, theme: theme ? JSON.stringify(theme) : null, name: data.name };
+  let catalog: InstanceDashboard['catalog'];
+  if (data.catalog) {
+    const { targets, titles } = data.catalog;
+    if (!Array.isArray(targets) || targets.length > 1000 || !titles || typeof titles !== 'object' || Array.isArray(titles)) throw Error('Invalid monitor catalog.');
+    catalog = { targets: targets.map(t => {
+      if (!t || typeof t.id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(t.id) || typeof t.label !== 'string' || t.label.length > 120 || typeof t.group !== 'string' || t.group.length > 80) throw Error('Invalid monitor reference.');
+      return { id: t.id, label: t.label, group: t.group };
+    }), titles: Object.fromEntries(Object.entries(titles).filter(([k,v]) => k.length <= 80 && typeof v === 'string' && v.length <= 120)) };
+  }
+  return { pages, layout, theme: theme ? JSON.stringify(theme) : null, name: data.name, ...(catalog ? { catalog } : {}) };
 }
 export function installInstance(user: number, raw: unknown) {
   const value = validateInstance(raw);
@@ -47,7 +59,10 @@ export function installInstance(user: number, raw: unknown) {
   getDb().transaction(() => {
     saveDashboard(user, value.layout, value.pages);
     getDb().prepare('UPDATE users SET theme=? WHERE id=?').run(value.theme, user);
-    if (isDesktop()) setSetting(`instance:name:${user}`, value.name);
+    if (isDesktop()) {
+      setSetting(`instance:name:${user}`, value.name);
+      if (value.catalog) setSetting(`instance:catalog:${user}`, JSON.stringify(value.catalog));
+    }
   })();
 }
 

@@ -3,7 +3,7 @@
 // module must never import db.ts; it ships to the browser.
 
 import { FONTS, SCENE_IDS, normalizeWardTheme, type SceneId, type WardTheme } from './theme.ts';
-import { TARGETS, GROUPS, GROUP_TITLES as TARGET_GROUP_TITLES } from './targets.ts';
+import { TARGETS, GROUP_TITLES as TARGET_GROUP_TITLES } from './targets.ts';
 import { ICON_NAME_RE, ICONS, type IconId } from './icon-names.ts';
 
 /** Reasoning effort an agent ward asks its model for (`config.effort`, default
@@ -602,7 +602,8 @@ export function httpUrl(v: unknown): string | null {
   }
 }
 
-const isTargetId = (v: unknown): v is string => typeof v === 'string' && TARGETS.some((t) => t.id === v);
+// References may belong to a connected server whose monitor registry is not local.
+const isTargetId = (v: unknown): v is string => typeof v === 'string' && ID_RE.test(v);
 /** A Services ward member: a target, or a host metric row. isTargetId stays
  *  narrow on purpose — applink dots and charts never see host:* ids. */
 const isMemberId = (v: unknown): v is string => isTargetId(v) || (HOST_SERVICE_IDS as readonly string[]).includes(v as string);
@@ -772,7 +773,7 @@ function validateConfig(type: string, raw: Record<string, unknown>): Record<stri
       // A group, a list of members, or neither: every monitor in the registry.
       const out: Record<string, unknown> = {};
       if (typeof raw.group === 'string' && raw.group !== '') {
-        if (!(GROUPS as readonly string[]).includes(raw.group)) return null;
+        if (raw.group.length > 80 || /[\x00-\x1f]/.test(raw.group)) return null;
         out.group = raw.group;
       } else if (Array.isArray(raw.services)) {
         if (raw.services.length === 0 || raw.services.length > 100 || !raw.services.every(isMemberId)) return null;
@@ -920,10 +921,12 @@ export function validateLayout(raw: unknown, pages?: PageDef[]): WardInstance[] 
     const { i, type, size, title, hidden, theme, font, config, in: parent, page, device } = item as Record<string, unknown>;
     if (typeof i !== 'string' || !ID_RE.test(i) || seen.has(i)) return null;
     if (typeof type !== 'string' || !CATALOG[type]) return null;
-    if (!CATALOG[type].multi && seenTypes.has(type)) return null;
+    const placement = typeof device === 'string' && /^[a-f0-9-]{36}$/.test(device) ? device : '';
+    const uniqueType = `${placement}:${type}`;
+    if (!CATALOG[type].multi && seenTypes.has(uniqueType)) return null;
     if (typeof size !== 'string' || !SIZE_RE.test(size)) return null;
     seen.add(i);
-    seenTypes.add(type);
+    seenTypes.add(uniqueType);
     const w: WardInstance = { i, type, size: size as WardSize };
     if (typeof device === 'string' && /^[a-f0-9-]{36}$/.test(device)) w.device = device;
     if (typeof title === 'string' && title.trim() && title.length <= 60) w.title = title.trim();

@@ -78,7 +78,7 @@ test('applink/embed config: http(s) only, junk stripped', () => {
   assert.ok(ok);
   assert.deepEqual(ok[0]!.config, { links: [{ url: 'https://grafana.example.com/', icon: '📊', statusService: TARGETS[0]!.id }] });
 
-  assert.equal(mk({ url: 'https://x.dev', statusService: 'not-a-target' }), null);
+  assert.equal(mk({ url: 'https://x.dev', statusService: '../not-a-target' }), null);
   // a launcher holds 1..12 links; one bad link or a non-object entry rejects the layout
   const link = (n: number) => ({ url: `https://x${n}.dev` });
   assert.equal((mk({ links: Array.from({ length: 12 }, (_, n) => link(n)) })![0]!.config!.links as unknown[]).length, 12);
@@ -89,12 +89,12 @@ test('applink/embed config: http(s) only, junk stripped', () => {
   assert.equal(mk({ links: [link(1), { url: 'https://x.dev', statusService: 'host:disk' }] }), null); // host rows are not launcher dots
 });
 
-test('service / service-group config validated against TARGETS and GROUPS', () => {
+test('service references accept remote IDs and reject malformed values', () => {
   const one = (type: string, config: unknown) => validateLayout([{ i: 'a', type, size: '1x1', config }]);
   assert.ok(one('service-group', { group: GROUPS[0] }));
-  assert.equal(one('service-group', { group: 'nope' }), null);
+  assert.equal(one('service-group', { group: 'x'.repeat(81) }), null);
   assert.ok(one('service-group', { services: [TARGETS[0]!.id, TARGETS[1]!.id] }));
-  assert.equal(one('service-group', { services: [TARGETS[0]!.id, 'nope'] }), null);
+  assert.equal(one('service-group', { services: [TARGETS[0]!.id, '../nope'] }), null);
   assert.deepEqual(one('service-group', {})![0]!.config, {}); // no group, no list = every monitor
   // host metrics are members too; the dots view is stored, the default wards view is not
   assert.deepEqual(one('service-group', { services: ['host:disk', TARGETS[0]!.id], view: 'dots' })![0]!.config, { services: ['host:disk', TARGETS[0]!.id], view: 'dots' });

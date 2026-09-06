@@ -102,3 +102,5 @@ Release validation still requires signed installers and native PTY/credential-st
 ## macOS shutdown investigation
 
 The September 5 WindowServer report recorded a 40-second watchdog timeout; it does not establish which app triggered it. A separate Rimeward hang report showed its main thread waiting during Quit. Shutdown previously called `block_on` from the UI event callback. It now defers exit, awaits backend/browser cleanup asynchronously, and exits after cleanup, without blocking the event loop. The WindowServer trigger remains unconfirmed; the app was not relaunched to try reproducing a system-wide failure.
+
+Monitor names and groups travel with the shared dashboard for rendering. Monitor execution targets and credentials stay on their host; shared references do not create local probes. Singleton wards remain unique per owning installation when existing dashboards merge.

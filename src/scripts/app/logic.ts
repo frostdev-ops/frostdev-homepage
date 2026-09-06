@@ -72,18 +72,41 @@ export interface AgentLive {
 const agentLiveSubs = new Map<string, Set<(d?: AgentLive) => void>>();
 const runSubs = new Set<(r: RunEvent) => void>();
 let es: EventSource | null = null;
+const instanceStreams = new Map<string, EventSource>();
+const instanceHandlers = new Map<string, (data: any) => void>();
+window.addEventListener('fd:instance', (event) => {
+  if (!es) return;
+  const status = (event as CustomEvent).detail;
+  const paths = new Set<string>();
+  if (status.ownDevice && status.configured) paths.add('/api/instance/events');
+  for (const device of status.devices ?? []) if (device.online && device.id !== status.ownDevice) paths.add(`/runtime/${device.id}/api/logic/stream`);
+  for (const [path, stream] of instanceStreams) if (!paths.has(path)) { stream.close(); instanceStreams.delete(path); }
+  for (const path of paths) {
+    if (instanceStreams.has(path)) continue;
+    const stream = new EventSource(path);
+    instanceStreams.set(path, stream);
+    // Dashboard/theme changes arrive through reconciliation, never over an unsaved local edit.
+    for (const [name, handle] of instanceHandlers) {
+      if (name === 'layout' || name === 'theme') continue;
+      stream.addEventListener(name, e => { try { handle(JSON.parse((e as MessageEvent).data)); } catch {} });
+    }
+  }
+});
+window.addEventListener('pagehide', () => { for (const stream of instanceStreams.values()) stream.close(); instanceStreams.clear(); });
 
 /** Connect the per-user logic stream once (native EventSource retry handles
  *  reconnects). Renderers and the wire editor call this on boot. */
 export function ensureStream(): void {
   if (es) return;
   es = new EventSource('/api/logic/stream');
-  const on = (event: string, fn: (data: any) => void) =>
+  const on = (event: string, fn: (data: any) => void) => {
+    instanceHandlers.set(event, fn);
     es!.addEventListener(event, (e) => {
       try {
         fn(JSON.parse((e as MessageEvent).data));
       } catch {}
     });
+  };
   on('timer', (t: TimerState) => {
     timers.set(t.ward, t);
     timerSubs.get(t.ward)?.forEach((fn) => fn());

@@ -465,6 +465,17 @@ export async function dropSession(userId: number, ward: string): Promise<void> {
   dropBrowserbase(userId, ward);
 }
 
+/** Preserve a browser's profile when a desktop joins an existing instance. */
+export async function rekeySession(userId: number, before: string, after: string): Promise<void> {
+  if (!WARD_RE.test(before) || !WARD_RE.test(after)) throw Error('Invalid browser ward');
+  const active = sessions.get(`${userId}:${before}`);
+  if (active) await closeSession(active);
+  const source = path.join(PROFILES, String(userId), before), target = path.join(PROFILES, String(userId), after);
+  if (fs.existsSync(source)) fs.renameSync(source, target);
+  const { getDb } = await import('../db.ts');
+  getDb().prepare('UPDATE settings SET key=? WHERE key=?').run(`browserbase_ctx:${userId}:${after}`, `browserbase_ctx:${userId}:${before}`);
+}
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** SIGKILL every chromium whose profile sits under `prefix`. At boot that is

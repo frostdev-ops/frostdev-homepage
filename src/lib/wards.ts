@@ -53,6 +53,8 @@ export function sizeParts(size: string): [number, number] {
 export const rowsOf = (w: WardInstance): number => sizeParts(w.size)[1];
 
 export interface WardInstance {
+  /** Execution placement, managed by the app; never a user-facing mode. */
+  device?: string;
   /** Instance id, [a-z0-9-]{1,32}, unique within a layout. */
   i: string;
   /** Key of CATALOG. */
@@ -557,6 +559,8 @@ export interface PageDef {
   title: string;
   icon?: IconId;
   project?: string;
+  /** The computer that owns this project's files. No filesystem path is shared. */
+  device?: string;
 }
 /** What an empty stored page list means. */
 export const DEFAULT_PAGES: PageDef[] = [{ id: 'home', title: 'Home' }];
@@ -574,6 +578,7 @@ export function validatePages(raw: unknown): PageDef[] | null {
     if (typeof title !== 'string' || !title.trim() || title.trim().length > PAGE_TITLE_MAX) return null;
     seen.add(id);
     const p: PageDef = { id, title: title.trim() };
+    if (typeof (item as PageDef).device === 'string' && /^[a-f0-9-]{36}$/.test((item as PageDef).device!)) p.device = (item as PageDef).device;
     if (typeof (item as PageDef).project === 'string' && /^[\w-]{1,80}$/.test((item as PageDef).project!)) p.project = (item as PageDef).project;
     if (typeof icon === 'string' && icon in ICONS) p.icon = icon as IconId;
     out.push(p);
@@ -912,7 +917,7 @@ export function validateLayout(raw: unknown, pages?: PageDef[]): WardInstance[] 
   const out: WardInstance[] = [];
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) return null;
-    const { i, type, size, title, hidden, theme, font, config, in: parent, page } = item as Record<string, unknown>;
+    const { i, type, size, title, hidden, theme, font, config, in: parent, page, device } = item as Record<string, unknown>;
     if (typeof i !== 'string' || !ID_RE.test(i) || seen.has(i)) return null;
     if (typeof type !== 'string' || !CATALOG[type]) return null;
     if (!CATALOG[type].multi && seenTypes.has(type)) return null;
@@ -920,6 +925,7 @@ export function validateLayout(raw: unknown, pages?: PageDef[]): WardInstance[] 
     seen.add(i);
     seenTypes.add(type);
     const w: WardInstance = { i, type, size: size as WardSize };
+    if (typeof device === 'string' && /^[a-f0-9-]{36}$/.test(device)) w.device = device;
     if (typeof title === 'string' && title.trim() && title.length <= 60) w.title = title.trim();
     if (hidden === true) w.hidden = true;
     if (typeof parent === 'string' && ID_RE.test(parent)) w.in = parent;

@@ -203,7 +203,7 @@ pub async fn launch(app: AppHandle) -> Result<(), Box<dyn std::error::Error + Se
                     if let Some(window) = app.get_webview_window("main") {
                         window.navigate(bootstrap)?;
                     }
-                    super::set_status(&app, "Local runtime running");
+                    super::set_status(&app, "Rimeward is running");
                 }
             }
             Some("vault") => {
@@ -243,7 +243,7 @@ pub async fn launch(app: AppHandle) -> Result<(), Box<dyn std::error::Error + Se
             _ => {}
         }
     }
-    super::set_status(&app, "Local runtime stopped; reopen Rimeward to recover");
+    super::set_status(&app, "Rimeward stopped; reopen to recover");
     Ok(())
 }
 async fn desktop_request(

@@ -141,6 +141,7 @@ test("history keeps raw items and attachments while continuing a copy without ap
     .run("do-not-replay", conv.id);
   const manifest = syncManifest(source);
   for (const entry of manifest) {
+    if (entry.key === 'instance/dashboard') continue; // This scenario imports a chat, not another account's dashboard.
     const saved = syncRecord(source, entry.key);
     assert.ok(saved);
     assert.equal(acceptRecord(target, saved, null).ok, true);

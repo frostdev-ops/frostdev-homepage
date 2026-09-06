@@ -3,32 +3,38 @@
     "name": "Rimeward live relay cache policy",
     "kind": "zone",
     "phase": "http_request_cache_settings",
-    "rules": [{
-      "ref": "rimeward_relay_no_cache",
-      "description": "Never cache desktop-owned content",
-      "expression": "starts_with(http.request.uri.path, \"/runtime/\") or http.request.uri.path eq \"/api/devices/connect\" or starts_with(http.request.uri.path, \"/api/devices/harness\")",
-      "action": "set_cache_settings",
-      "action_parameters": { "cache": false }
-    }]
+    "rules": [
+      {
+        "ref": "rimeward_relay_no_cache",
+        "description": "Never cache desktop-owned content",
+        "expression": "starts_with(http.request.uri.path, \"/runtime/\") or http.request.uri.path eq \"/api/devices/connect\" or starts_with(http.request.uri.path, \"/api/devices/harness\") or starts_with(http.request.uri.path, \"/api/dev/\") or starts_with(http.request.uri.path, \"/api/browser/\") or starts_with(http.request.uri.path, \"/api/note/\") or starts_with(http.request.uri.path, \"/api/agent/\") or starts_with(http.request.uri.path, \"/api/instance/\")",
+        "action": "set_cache_settings",
+        "action_parameters": {
+          "cache": false
+        }
+      }
+    ]
   },
   {
     "name": "Rimeward live relay privacy",
     "kind": "zone",
     "phase": "http_config_settings",
-    "rules": [{
-      "ref": "rimeward_relay_no_transform",
-      "description": "Stream desktop payloads without analytics or content rewriting",
-      "expression": "starts_with(http.request.uri.path, \"/runtime/\") or http.request.uri.path eq \"/api/devices/connect\" or starts_with(http.request.uri.path, \"/api/devices/harness\")",
-      "action": "set_config",
-      "action_parameters": {
-        "disable_rum": true,
-        "disable_zaraz": true,
-        "rocket_loader": false,
-        "email_obfuscation": false,
-        "automatic_https_rewrites": false,
-        "request_body_buffering": "none",
-        "response_body_buffering": "none"
+    "rules": [
+      {
+        "ref": "rimeward_relay_no_transform",
+        "description": "Stream desktop payloads without analytics or content rewriting",
+        "expression": "starts_with(http.request.uri.path, \"/runtime/\") or http.request.uri.path eq \"/api/devices/connect\" or starts_with(http.request.uri.path, \"/api/devices/harness\") or starts_with(http.request.uri.path, \"/api/dev/\") or starts_with(http.request.uri.path, \"/api/browser/\") or starts_with(http.request.uri.path, \"/api/note/\") or starts_with(http.request.uri.path, \"/api/agent/\") or starts_with(http.request.uri.path, \"/api/instance/\")",
+        "action": "set_config",
+        "action_parameters": {
+          "disable_rum": true,
+          "disable_zaraz": true,
+          "rocket_loader": false,
+          "email_obfuscation": false,
+          "automatic_https_rewrites": false,
+          "request_body_buffering": "none",
+          "response_body_buffering": "none"
+        }
       }
-    }]
+    ]
   }
 ]

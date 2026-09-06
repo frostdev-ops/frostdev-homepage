@@ -58,8 +58,8 @@ export const POST: APIRoute = async ({ locals, request }) => {
         .get(user, Number(body.conflict)) as
         | { key: string; payload: string }
         | undefined;
-      if (!saved?.key.startsWith("work/"))
-        throw Error("Agent file recovery version not found.");
+      if (!saved || !(saved.key.startsWith('work/') || saved.key === 'instance/dashboard' || saved.key.startsWith('appearance/image/')))
+        throw Error("Recovery version not found.");
       captureRime(user);
       const current = syncRecord(user, saved.key);
       if (current) preserveConflict(user, current);

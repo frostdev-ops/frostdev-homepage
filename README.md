@@ -49,8 +49,9 @@ agent may do on its own.
   with a left-hand file explorer, tabs, search/replace, recovery diffs, and bundled Biome
   linting and formatting. Real terminals run your shell, Codex, or Claude Code; Rime can
   coordinate their assignments and Git worktrees. A paired server relays the same live
-  desktop environment. If that desktop disconnects, its projects are unavailable remotely;
-  the server's own dashboard keeps working.
+  desktop environment through one dashboard. Pages, settings, icons, backgrounds, branding,
+  and Rime stay in sync; the app routes work automatically. Project folders stay on their
+  computer, and its tools become unavailable remotely while that computer is offline.
 
 ## The words
 
@@ -86,9 +87,7 @@ memory and skills as wards, drives the same browser you drive, and asks before a
 the building: mail, chat, and the rest of the outbound tools wait for a confirm. A **routine** is
 a timer with rounds. A **packet** is what moves between flow wards. The **home route** is the
 desktop app's tunnel: a browser ward on the server egressing from your own connection, or running
-its Chromium on your machine entirely. It remains compatible with earlier clients. The
-**Workspaces** navigator brings server pages and paired computers together; each runtime owns its pages, credentials,
-and agent conversations. A **project** is an approved local folder referenced by a page's
+its Chromium on your machine entirely. It remains compatible with earlier clients. One shared dashboard brings pages, appearance, and Rime together without a server/local selector. Execution placement and connection recovery are handled by the app. A **project** is an approved local folder referenced by a page's
 development wards.
 
 <p align="center">

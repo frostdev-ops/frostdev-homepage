@@ -15,6 +15,10 @@ import {
   type TurnSource,
 } from "./conversations.ts";
 import type { AgentProviderId } from "./provider.ts";
+import { INSTANCE_KEY, dashboardForSync, validateInstance, installInstance } from '../dev/instance.ts';
+import { isDesktop } from '../dev/runtime.ts';
+import { BG_DIR, listBackgrounds, MAX_PER_USER } from '../backgrounds.ts';
+import { brandFile, BRAND_DIR, SLOTS, isSlot } from '../brand-files.ts';
 
 export const SYNC_RECORD_MAX = 64 * 1024 * 1024;
 export interface SyncRecord {
@@ -49,6 +53,15 @@ const digest = (text: string) =>
   createHash("sha256").update(text).digest("hex");
 const failure = (text: string) =>
   Object.assign(new Error(text), { status: 400 });
+function assetDirectory(dir: string, create = false) {
+  try {
+    const stat = fs.lstatSync(dir);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw failure('Shared appearance directories cannot be symlinks.');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    if (create) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+}
 function agentDir(user: number, kind: "work" | "history" | "docs") {
   let dir = fs.realpathSync(DATA_DIR);
   for (const part of ["agent", String(user), kind]) {
@@ -156,7 +169,19 @@ export function validateRecord(record: SyncRecord) {
   )
     throw failure("Invalid Rime sync record.");
   const value: unknown = JSON.parse(record.payload);
-  if (record.key.startsWith("work/")) {
+  if (record.key.startsWith('appearance/image/')) {
+    if (!/^appearance\/image\/[a-f0-9]{16}$/.test(record.key)) throw failure('Invalid shared image.');
+    if (value !== null) {
+      const bytes = payloadData(record.payload);
+      if (createHash('sha256').update(bytes).digest('hex').slice(0, 16) !== record.key.slice(17) || bytes.toString('ascii', 0, 4) !== 'RIFF' || bytes.toString('ascii', 8, 12) !== 'WEBP') throw failure('Invalid shared image.');
+    }
+  } else if (record.key.startsWith('appearance/brand/')) {
+    const slot = record.key.slice(17), asset = value as { ext: string; data: string } | null;
+    if (!isSlot(slot) || !asset || !SLOTS[slot].some(ext => ext === asset.ext)) throw failure('Invalid brand asset.');
+    payloadData(JSON.stringify(asset.data));
+  } else if (record.key === INSTANCE_KEY) {
+    validateInstance(value);
+  } else if (record.key.startsWith("work/")) {
     workParts(record.key);
     if (value !== null) payloadData(record.payload);
   } else if (/^(chat|file)\/[a-f0-9-]{36}\/\d+$/.test(record.key)) {
@@ -231,6 +256,22 @@ function store(user: number, key: string, value: unknown) {
 }
 /** Hash only Rime's own work directory and records. No project path is read. */
 export function captureRime(user: number) {
+  if (!isDesktop() || getSetting(`instance:joined:${user}`)) store(user, INSTANCE_KEY, dashboardForSync(user));
+  const images = new Set<string>();
+  assetDirectory(BG_DIR);
+  for (const name of listBackgrounds(user)) {
+    const key = `appearance/image/${name.slice(name.indexOf('-') + 1, -5)}`;
+    images.add(key);
+    if (!syncRecord(user, key) || syncRecord(user, key)?.payload === 'null') store(user, key, readFile(path.join(BG_DIR, name)).toString('base64'));
+  }
+  for (const row of getDb().prepare("SELECT key FROM agent_sync_records WHERE user_id=? AND key LIKE 'appearance/image/%' AND payload!='null'").all(user) as { key: string }[])
+    if (!images.has(row.key)) store(user, row.key, null);
+  if (!isDesktop()) for (const slot of Object.keys(SLOTS)) {
+    assetDirectory(BRAND_DIR);
+    if (!isSlot(slot)) continue;
+    const file = brandFile(slot);
+    store(user, `appearance/brand/${slot}`, { ext: path.extname(file).slice(1), data: readFile(file).toString('base64') });
+  }
   const files = new Set<string>();
   function walk(dir: string, prefix = "work/") {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -352,6 +393,16 @@ export function syncManifest(user: number) {
     .all(user) as { key: string; hash: string }[];
 }
 export function refreshWorkRecord(user: number, key: string) {
+  if (key === INSTANCE_KEY) {
+    store(user, key, dashboardForSync(user));
+    return;
+  }
+  if (key.startsWith('appearance/image/')) {
+    assetDirectory(BG_DIR);
+    const file = path.join(BG_DIR, `${user}-${key.slice(17)}.webp`);
+    if (!fs.existsSync(file) && syncRecord(user, key)) store(user, key, null);
+    return;
+  }
   if (!key.startsWith("work/")) return;
   const target = workPath(user, key);
   if (fs.existsSync(target))
@@ -377,6 +428,22 @@ function replaceFile(target: string, data: string | Buffer) {
 /** The caller checks its base immediately before installing. Atomic file replacement. */
 export function installRecord(user: number, record: SyncRecord) {
   validateRecord(record);
+  if (record.key === INSTANCE_KEY) installInstance(user, JSON.parse(record.payload));
+  if (record.key.startsWith('appearance/image/')) {
+    assetDirectory(BG_DIR, record.payload !== 'null');
+    const file = path.join(BG_DIR, `${user}-${record.key.slice(17)}.webp`);
+    if (record.payload === 'null') { if (fs.existsSync(file)) fs.unlinkSync(file); }
+    else {
+      if (!fs.existsSync(file) && listBackgrounds(user).length >= MAX_PER_USER) throw failure('Remove an unused background before syncing more images.');
+      replaceFile(file, payloadData(record.payload));
+    }
+  }
+  if (record.key.startsWith('appearance/brand/') && isDesktop()) {
+    const asset = JSON.parse(record.payload) as { ext: string; data: string }, slot = record.key.slice(17);
+    assetDirectory(BRAND_DIR, true);
+    replaceFile(path.join(BRAND_DIR, `${slot}.${asset.ext}`), payloadData(JSON.stringify(asset.data)));
+    if (isSlot(slot)) for (const ext of SLOTS[slot]) if (ext !== asset.ext) fs.rmSync(path.join(BRAND_DIR, `${slot}.${ext}`), { force: true });
+  }
   if (record.key.startsWith("work/")) {
     const target = workPath(user, record.key, record.payload !== "null");
     if (record.payload === "null") {

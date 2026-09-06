@@ -9,6 +9,7 @@ import { ensureTunnel } from './lib/tunnel.ts';
 import { ensureRemote } from './lib/dev/remote.ts';
 import { ensureDevices } from './lib/dev/devices.ts';
 import { nativeRequest } from './lib/dev/native.ts';
+import { routeInstance } from './lib/dev/instance-routing.ts';
 import { validUserCode, CONNECT_COOKIE } from './lib/dev/device-auth.ts';
 
 // The status + logic engines live in-process; middleware load is the one place
@@ -50,10 +51,10 @@ const PUBLIC_PREFIXES = [
 
 const ADMIN_PREFIXES = ['/admin', '/api/users', '/api/admin'];
 
-export const onRequest = defineMiddleware((context, next) => {
+export const onRequest = defineMiddleware(async (context, next) => {
   const native=nativeRequest(context);
   if(native)return native;
-  if(context.locals.user)return next();
+  if(context.locals.user)return (await routeInstance(context)) ?? next();
   const { pathname } = context.url;
   if (csrfBlocked(context.request)) {
     return new Response(JSON.stringify({ error: 'forbidden origin' }), {
@@ -95,5 +96,5 @@ export const onRequest = defineMiddleware((context, next) => {
   }
 
   context.locals.user = session;
-  return next();
+  return (await routeInstance(context)) ?? next();
 });

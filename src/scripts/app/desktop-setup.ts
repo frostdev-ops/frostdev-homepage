@@ -39,10 +39,10 @@ const action = (label: string, fn: () => Promise<unknown>) => {
   };
   return b;
 };
-async function openServer(id: string) {
-  status.textContent = "Opening your server dashboard…";
-  await desktopApi("onboard", { home: id });
-  await desktopApi("open-server", { id });
+async function openServer(_id: string) {
+  status.textContent = "Opening your workspace…";
+  await desktopApi("onboard", { home: "local" });
+  location.assign('/dash');
 }
 function showConnected(p: { id: string; server: string; email?: string }) {
   connected.hidden = false;
@@ -55,7 +55,7 @@ function showConnected(p: { id: string; server: string; email?: string }) {
       undefined,
       p.email ? `Connected as ${p.email}` : "Already connected to this server",
     ),
-    action("Open server dashboard", () => openServer(p.id)),
+    action("Open Rimeward", () => openServer(p.id)),
   );
   connected.append(row);
 }
@@ -70,7 +70,7 @@ async function poll() {
       wait.hidden = true;
       submit.disabled = false;
       status.textContent =
-        "Connected. Your existing server dashboard is ready.";
+        "Connected. Your pages, settings and Rime will come together automatically.";
       showConnected(result);
       return;
     }
@@ -151,15 +151,7 @@ void desktopApi<Awaited<ReturnType<typeof onboarding>>>("onboarding")
   .then(async (state) => {
     for (const p of state.pairs) showConnected(p);
     if (state.complete && root.dataset.setup !== "1") {
-      if (state.home === "local") {
-        location.replace("/dash");
-        return;
-      }
-      try {
-        await openServer(state.home);
-      } catch (e) {
-        report(e);
-      }
+      location.replace('/dash');
     }
   })
   .catch(report);

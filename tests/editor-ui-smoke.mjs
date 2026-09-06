@@ -34,7 +34,7 @@ try {
   await pc.addInitScript(()=>{const Native=EventSource;window.__streams=[];window.EventSource=class extends Native{constructor(...args){super(...args);window.__streams.push(this);}};});
   page.on('pageerror',e=>errors.push(e.message));
   await page.goto(url); await page.waitForURL('**/desktop/start');
-  await page.getByRole('button',{name:'Use this desktop for now'}).click(); await page.waitForURL('**/dash');
+  await page.getByRole('button',{name:'Continue without connecting'}).click(); await page.waitForURL('**/dash');
   assert.equal(await page.getByRole('button',{name:'Development workspace',exact:true}).count(),0);
   await page.getByRole('button',{name:'Open project',exact:true}).click();
   const chooser=page.getByRole('dialog',{name:'Open a project'});

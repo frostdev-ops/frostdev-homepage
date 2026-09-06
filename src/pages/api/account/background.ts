@@ -1,5 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getDb } from '../../../lib/db.ts';
+import { isDesktop } from '../../../lib/dev/runtime.ts';
+import { getSetting } from '../../../lib/settings.ts';
 import { deleteBackground, saveBackground, MAX_UPLOAD_BYTES } from '../../../lib/backgrounds.ts';
 import { normalizeTheme, parseTheme } from '../../../lib/theme.ts';
 
@@ -32,8 +34,11 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   if (!form) return back(redirect, '?err=bad+upload');
   const hash = form.get('logo') ? '#header' : '#background';
 
-  const remove = form.get('delete');
-  if (typeof remove === 'string' && remove) {
+  const selected = form.get('delete');
+  if (typeof selected === 'string' && selected) {
+    // The shared account form can carry its server-local image filename.
+    const remove = isDesktop() && getSetting(`instance:joined:${userId}`)
+      ? selected.replace(/^\d+-/, `${userId}-`) : selected;
     deleteBackground(userId, remove);
     // One file, two possible uses: clear whichever knobs pointed at it.
     const cfg = parseTheme(stored);

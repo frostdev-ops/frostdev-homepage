@@ -54,8 +54,8 @@ try {
     });
     await ctx.route('**/api/agent/**',async route=>{
       const req=route.request();
-      if(req.method()==='GET')return route.fulfill({json:{configured:true,provider:'codex',transcript:req.url().endsWith('reviewer')?[]:transcript,pending:null,busy:false}});
-      if(req.url().endsWith('/files'))return route.fulfill({json:{files:[{ok:true,id:'12',name:'example.txt'}]}});
+      if(req.method()==='GET')return route.fulfill({json:{configured:true,provider:'codex',transcript:new URL(req.url()).pathname.endsWith('reviewer')?[]:transcript,pending:null,busy:false}});
+      if(new URL(req.url()).pathname.endsWith('/files'))return route.fulfill({json:{files:[{ok:true,id:'12',name:'example.txt'}]}});
       const body=req.postDataJSON(); requests.push(body);
       if(body.action==='clear')return route.fulfill({status:failClear?503:200,json:failClear?{error:'Try again shortly'}:{ok:true}});
       if(body.action==='interrupt'||body.mode==='steer')return route.fulfill({json:{ok:true,steered:true}});

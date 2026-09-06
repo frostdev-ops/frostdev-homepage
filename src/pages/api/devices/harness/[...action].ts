@@ -10,6 +10,7 @@ import {
   type ProviderCall,
 } from "../../../../lib/agent/provider.ts";
 import { getDashboard } from "../../../../lib/dashboard.ts";
+import { INSTANCE_KEY, instanceDashboard } from '../../../../lib/dev/instance.ts';
 import {
   acceptRecord,
   profileId,
@@ -91,12 +92,28 @@ export const ALL: APIRoute = async ({
       value = await listCodexModels(user);
     } else if (request.method === "POST" && !params.action) {
       const body = await bodyOf(request);
+      if (body.record?.key?.startsWith('appearance/brand/')) return Response.json({ error: 'Instance brand assets are managed on the server.' }, { status: 403 });
       value = acceptRecord(
         user,
         body.record,
         typeof body.base === "string" ? body.base : null,
       );
       if (!(value as { ok: boolean }).ok) status = 409;
+      else if (body.record?.key === INSTANCE_KEY) {
+        const { broadcast } = await import('../../../../lib/logic-engine.ts');
+        const state = instanceDashboard(user);
+        broadcast(user, 'layout', { layout: state.layout, pages: state.pages });
+        broadcast(user, 'theme', state.theme ? JSON.parse(state.theme) : {});
+      }
+    } else if (request.method === 'POST' && params.action === 'tool') {
+      limitDeviceAuth(`rime-tool:${user}`, 240);
+      const body = await bodyOf(request);
+      const { serverTool } = await import('../../../../lib/agent/sync.ts');
+      const { TOOLS } = await import('../../../../lib/agent/tools.ts');
+      if (typeof body.name !== 'string' || !serverTool(body.name) || !TOOLS[body.name] ||
+        !body.args || typeof body.args !== 'object' || Array.isArray(body.args) ||
+        !getDashboard(user).some(w => w.i === body.ward && w.type === 'agent')) throw Error('Invalid integration tool request.');
+      value = await TOOLS[body.name].run(body.args, { userId: user, ward: body.ward, conv: 0 });
     } else if (request.method === "POST" && params.action === "model") {
       limitDeviceAuth(`rime-model:${user}`, 240);
       if ((active.get(user) ?? 0) >= 4)

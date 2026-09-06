@@ -65,7 +65,7 @@ pub fn run() {
                 if runtime::launch(handle.clone()).await.is_err() {
                     set_status(
                         &handle,
-                        "Local runtime could not start; check OS credential store",
+                        "Rimeward could not start; check OS credential store",
                     );
                 }
             });
@@ -139,15 +139,8 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     use tauri::tray::TrayIconBuilder;
     use tauri_plugin_autostart::ManagerExt;
 
-    let status = MenuItem::with_id(
-        app,
-        "status",
-        "Local runtime: starting",
-        false,
-        None::<&str>,
-    )?;
+    let status = MenuItem::with_id(app, "status", "Starting Rimeward…", false, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", "Open Rimeward", true, None::<&str>)?;
-    let local = MenuItem::with_id(app, "local", "Open this desktop", true, None::<&str>)?;
     let autostart = CheckMenuItem::with_id(
         app,
         "autostart",
@@ -157,7 +150,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let quit = MenuItem::with_id(app, "quit", "Quit Rimeward", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&status, &open, &local, &autostart, &quit])?;
+    let menu = Menu::with_items(app, &[&status, &open, &autostart, &quit])?;
     app.manage(TrayStatus(status));
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().cloned().expect("bundle icon"))
@@ -165,20 +158,6 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main(app),
-            "local" => {
-                if let Ok(data) = app.path().app_data_dir() {
-                    if let Ok(port) = std::fs::read_to_string(data.join("runtime-port")) {
-                        if let Ok(port) = port.trim().parse::<u16>() {
-                            if let Some(window) = app.get_webview_window("main") {
-                                if let Ok(url) = format!("http://127.0.0.1:{port}/dash").parse() {
-                                    let _ = window.navigate(url);
-                                }
-                            }
-                        }
-                    }
-                }
-                show_main(app);
-            }
             "autostart" => {
                 let launch = app.autolaunch();
                 let _ = if launch.is_enabled().unwrap_or(false) {

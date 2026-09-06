@@ -241,7 +241,12 @@ export async function openServer(user: number, id: string, path = "/dash") {
   await remotePairs(user);
   const p = pairs.find((p) => p.id === id);
   if (!p) throw new DevError("Connect this server first.", 404);
-  let session = serverSessions.get(id);
+  const session = await serverSession(p);
+  await nativeDesktop("server", { url: `${p.server}${path}`, session: session.id, device: p.id });
+  return { ok: true };
+}
+async function serverSession(p: Pair) {
+  let session = serverSessions.get(p.id);
   if (!session || Date.parse(`${session.expiresAt.replace(" ", "T")}Z`) < Date.now() + 60_000) {
   const response = await fetch(`${p.server}/api/devices/session`, {
     method: "POST",
@@ -261,14 +266,42 @@ export async function openServer(user: number, id: string, path = "/dash") {
       response.status,
     );
   session = await response.json() as { id: string; expiresAt: string };
-  serverSessions.set(id, session);
+  serverSessions.set(p.id, session);
   }
-  await nativeDesktop("server", {
-    url: `${p.server}${path}`,
-    session: session.id,
-    device: p.id,
-  });
-  return { ok: true };
+  return session;
+}
+
+/** Authenticated streaming transport for the connected instance. Never retry a mutation. */
+export async function instanceRequest(user: number, path: string, request: Request): Promise<Response> {
+  const pair = await rimeConnection(user);
+  if (!pair || !path.startsWith('/') || path.startsWith('//')) throw new DevError('Connection unavailable.', 503);
+  const session = await serverSession(pair);
+  const headers = new Headers({ cookie: `rimeward_session=${session.id}` });
+  for (const key of forwardHeaders) {
+    const value = request.headers.get(key);
+    if (value) headers.set(key, value);
+  }
+  // A same-origin request on the desktop remains same-origin at the server.
+  headers.set('origin', pair.server);
+  const body = !['GET', 'HEAD'].includes(request.method) ? request.body : undefined;
+  const connect = new AbortController(), timeout = setTimeout(() => connect.abort(), 15000);
+  let response: Response;
+  try {
+    response = await fetch(`${pair.server}${path}`, {
+      method: request.method, headers, body, ...(body ? { duplex: 'half' } : {}), redirect: 'manual',
+      signal: AbortSignal.any([request.signal, connect.signal]),
+    } as RequestInit);
+  } catch (e) {
+    if (!request.signal.aborted) disconnectRime(user);
+    throw e;
+  } finally { clearTimeout(timeout); }
+  const out = new Headers(response.headers);
+  for (const key of ['set-cookie', 'content-length', 'content-encoding']) out.delete(key);
+  out.set('cache-control', 'no-store');
+  out.set('x-accel-buffering', 'no');
+  const location = out.get('location');
+  if (location?.startsWith(`${pair.server}/`)) out.set('location', location.slice(pair.server.length));
+  return new Response(response.body, { status: response.status, headers: out });
 }
 export async function previewPair(user: number, server: string, code: string) {
   await remotePairs(user);

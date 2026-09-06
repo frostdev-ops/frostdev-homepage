@@ -1,5 +1,6 @@
 import { DEV_TOOLS } from '../dev/tools.ts';
 import { isDesktop } from '../dev/runtime.ts';
+import { sharedTool, serverTool } from './sync.ts';
 import { randomBytes } from 'node:crypto';
 import { getDb } from '../db.ts';
 import { browserWard, getDashboard, getPages, saveDashboard } from '../dashboard.ts';
@@ -1334,6 +1335,15 @@ export const TOOLS: Record<string, ToolDef> = {
     },
   },
 };
+
+for (const [name, definition] of Object.entries(TOOLS)) {
+  if (!serverTool(name)) continue;
+  const run = definition.run;
+  definition.run = async (args, ctx) => {
+    const remote = await sharedTool(ctx.userId, ctx.ward, name, args);
+    return remote ? remote.value : run(args, ctx);
+  };
+}
 
 /** js-exec's `tools.<name>(args)` proxy (agent/shell.ts): READ tools only —
  *  a write stays a call the agent makes itself, where the approvals policy

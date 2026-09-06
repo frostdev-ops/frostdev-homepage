@@ -13,7 +13,7 @@ Astro.response.headers.set('cache-control','no-store');
       <p>Bring your Rimeward dashboard with you.<br />Build on this desktop, and pick up from anywhere.</p>
     </header>
     <p id="setup-status" role="status" aria-live="polite"></p>
-    <section id="setup-connected" hidden class="setup-connected" aria-label="Connected servers"></section>
+    <section id="setup-connected" hidden class="setup-connected" aria-label="Connections"></section>
     <div class="setup-options">
       <section class="setup-card setup-primary" id="setup-connect">
         <span class="setup-card-icon"><Icon id="route" /></span>
@@ -45,10 +45,10 @@ Astro.response.headers.set('cache-control','no-store');
           <li><Icon id="code" /><span><strong>Your tools, together</strong><small>Editor, terminal, browser, and agents.</small></span></li>
           <li><Icon id="sparkle" /><span><strong>Works on its own</strong><small>Keep working when your server is offline.</small></span></li>
         </ul>
-        <div class="setup-local-actions"><button class="btn" id="setup-project" aria-label="Open or create a project" type="button"><Icon id="plus" /> Open or create a project</button><button class="setup-text-button" id="setup-local" type="button">Use this desktop for now <span aria-hidden="true">→</span></button></div>
+        <div class="setup-local-actions"><button class="btn" id="setup-project" aria-label="Open or create a project" type="button"><Icon id="plus" /> Open or create a project</button><button class="setup-text-button" id="setup-local" type="button">Continue without connecting <span aria-hidden="true">→</span></button></div>
       </section>
     </div>
-    <p class="setup-footnote">Rime’s chats, memories, and agent files stay in sync. Project folders stay on this computer.<br />Your pages and connected computers are together in Workspaces.</p>
+    <p class="setup-footnote">Rime’s chats, memories, and agent files stay in sync. Project folders stay on this computer.<br />Your pages, settings, and Rime are one shared workspace.</p>
   </main>
   <script>import '../../scripts/app/desktop-setup.ts';</script>
 </AppLayout>

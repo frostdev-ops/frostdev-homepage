@@ -346,7 +346,7 @@ const layoutOf = (): WardInstance[] =>
 
 /** Field order is not stable across Object.assign, so compare a fixed shape. */
 const layoutKey = (l: WardInstance[]) =>
-  JSON.stringify(l.map((w) => [w.i, w.type, w.size, w.title ?? null, w.hidden ?? false, w.in ?? null, w.page ?? null, w.theme ?? null, w.config ?? null]));
+  JSON.stringify(l.map((w) => [w.i, w.type, w.size, w.title ?? null, w.hidden ?? false, w.in ?? null, w.page ?? null, w.device ?? null, w.theme ?? null, w.config ?? null]));
 
 function record(): void {
   syncGroups();

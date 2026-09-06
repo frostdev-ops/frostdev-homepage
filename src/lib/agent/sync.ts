@@ -2,6 +2,8 @@ import { getDb } from "../db.ts";
 import { getSetting, setSetting } from "../settings.ts";
 import { isDesktop } from "../dev/runtime.ts";
 import { rimeConnection } from "../dev/remote.ts";
+import { INSTANCE_KEY, instanceDashboard, mergeInstance, moveLocalWardState, localWardsWithContent } from '../dev/instance.ts';
+import { createHash } from 'node:crypto';
 import {
   refreshWorkRecord,
   syncManifest,
@@ -140,6 +142,22 @@ export function syncRime(user: number, force = false): Promise<void> {
           config: remote.config,
         }),
       );
+      let instanceChanged = !last?.online;
+      const instance = remote.manifest.find(r => r.key === INSTANCE_KEY);
+      if (instance && !getSetting(`instance:joined:${user}`)) {
+        const record = await request(connection.server, connection.token, `?key=${encodeURIComponent(INSTANCE_KEY)}`).then(r => r.json()) as SyncRecord;
+        const { dashboard, wardIds } = mergeInstance(JSON.parse(record.payload), instanceDashboard(user), connection.id, localWardsWithContent(user));
+        const payload = JSON.stringify(dashboard);
+        // Preserve the pre-join dashboard before any re-keying or layout replacement.
+        const original = JSON.stringify(instanceDashboard(user));
+        setSetting(`instance:before-join:${user}`, original);
+        await moveLocalWardState(user, wardIds);
+        installRecord(user, { key: INSTANCE_KEY, payload, hash: createHash('sha256').update(payload).digest('hex') });
+        setSetting(`instance:joined:${user}`, remote.profile);
+        getDb().prepare('INSERT INTO agent_sync_baselines VALUES(?,?,?,?) ON CONFLICT(user_id,profile,key) DO UPDATE SET hash=excluded.hash')
+          .run(user, remote.profile, INSTANCE_KEY, record.hash);
+        changed = instanceChanged = true;
+      }
       const local = new Map(syncManifest(user).map((r) => [r.key, r.hash])),
         other = new Map(remote.manifest.map((r) => [r.key, r.hash]));
       const db = getDb();
@@ -160,6 +178,7 @@ export function syncRime(user: number, force = false): Promise<void> {
           .run(user, remote.profile, key, hash);
       const receive = (record: SyncRecord) => {
         changed = true;
+        if (record.key === INSTANCE_KEY) instanceChanged = true;
         // Re-read after network I/O: an editor or agent may have written in the meantime.
         refreshWorkRecord(user, record.key);
         const current = syncRecord(user, record.key);
@@ -224,6 +243,11 @@ export function syncRime(user: number, force = false): Promise<void> {
         broadcast(user, "refresh", { type: "memory" });
         broadcast(user, "refresh", { type: "skill" });
         broadcast(user, "refresh", { type: "agent" });
+        if (instanceChanged) {
+          const dashboard = instanceDashboard(user);
+          broadcast(user, 'layout', { layout: dashboard.layout, pages: dashboard.pages });
+          broadcast(user, 'theme', dashboard.theme ? JSON.parse(dashboard.theme) : {});
+        }
       }
     } catch (e) {
       statuses.set(user, {
@@ -311,4 +335,19 @@ export async function sharedCodexModels(
     "/models",
   );
   return await response.json();
+}
+
+/** Integration authority remains with the connected account; tool approvals remain in core. */
+export function serverTool(name: string) {
+  return /^(?:notion_|chat_)/.test(name) || ['service_status', 'get_weather', 'list_mail', 'send_mail', 'list_calendar', 'list_checklist', 'add_checklist_item', 'check_checklist_item'].includes(name);
+}
+export async function sharedTool(user: number, ward: string, name: string, args: Record<string, unknown>) {
+  if (!isDesktop() || !serverTool(name)) return null;
+  const connection = await rimeConnection(user);
+  if (!connection) return null;
+  if (!sharedRime(user)?.online) throw Error('This service needs a connection. Your local project tools remain available.');
+  const response = await request(connection.server, connection.token, '/tool', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, ward, args }),
+  });
+  return { value: await response.json() };
 }

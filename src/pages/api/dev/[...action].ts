@@ -26,6 +26,7 @@ import {
   onboarding,
   completeOnboarding,
   nativeDesktop,
+  rimeConnection,
 } from "../../../lib/dev/remote.ts";
 import crypto from "node:crypto";
 import { analyzeFile } from "../../../lib/dev/lint.ts";
@@ -202,9 +203,10 @@ export const ALL: APIRoute = async ({ params, request, locals, url }) => {
         const existing = getPages(user).find((page) => page.project === p.id && getDashboard(user).some((w) => w.type === "editor" && w.page === page.id));
         if (existing) return json({ page: existing.id });
         const page = `p${crypto.randomBytes(4).toString("hex")}`;
+        const device = (await rimeConnection(user))?.id;
         const pages = validatePages([
           ...getPages(user),
-          { id: page, title: p.name, project: p.id },
+          { id: page, title: p.name, project: p.id, device },
         ]);
         const types = [
           "editor",
@@ -219,6 +221,7 @@ export const ALL: APIRoute = async ({ params, request, locals, url }) => {
               i: `w${crypto.randomBytes(4).toString("hex")}`,
               type,
               page,
+              device,
               size: type === "editor" ? "4x4" : type === "agent" ? "2x4" : "3x2",
             })),
           ],

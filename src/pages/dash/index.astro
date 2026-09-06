@@ -15,8 +15,14 @@ import { getDashboard, getPages } from '../../lib/dashboard.ts';
 import { pageOf } from '../../lib/wards.ts';
 import { getGraph, getRuns } from '../../lib/logic-engine.ts';
 import { getSetting } from '../../lib/settings.ts';
+import { syncRime } from '../../lib/agent/sync.ts';
 
 const userId = Astro.locals.user!.userId;
+if (isDesktop()) {
+  await syncRime(userId);
+  const { getDb } = await import('../../lib/db.ts');
+  Astro.locals.user!.theme = (getDb().prepare('SELECT theme FROM users WHERE id=?').get(userId) as { theme: string | null }).theme;
+}
 const layout = getDashboard(userId);
 const pages = getPages(userId);
 // Entrance stagger per PAGE: an off-stage card (display:none) starts its CSS
@@ -48,7 +54,7 @@ const logicJson = JSON.stringify({
     <div id="sse-banner" class="banner banner-warn hidden">Live feed lost — retrying…</div>
 
     <div class="mb-3 flex flex-wrap items-center justify-end gap-2" id="wd-toolbar">
-      {isDesktop() && <button id="dev-open-project" class="btn text-xs" type="button" aria-label="Open project"><Icon id="folder" /> Open project</button>}
+      <button id="dev-open-project" class="btn text-xs" type="button" aria-label="Open project" hidden={!isDesktop()}><Icon id="folder" /> Open project</button>
       <span class="mr-auto truncate text-xs text-ink-faint" data-tb-hint>Right-click a ward for options</span>
       <button type="button" class="btn px-2 py-1 text-xs hidden" data-tb="undo" aria-label="Undo" title="Undo"><Icon id="undo" /><span class="tb-label">Undo</span></button>
       <button type="button" class="btn px-2 py-1 text-xs hidden" data-tb="add" aria-label="Add ward" title="Add ward"><Icon id="plus" /><span class="tb-label">Add ward</span></button>

@@ -34,7 +34,7 @@ try {
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(url);
   await page.waitForURL('**/desktop/start');
-  await page.getByRole('button',{name:'Use this desktop for now'}).click();
+  await page.getByRole('button',{name:'Continue without connecting'}).click();
   await page.waitForURL('**/dash');
   await page.evaluate(async()=>{
     const r=await fetch('/api/dashboard',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({layout:[{i:'terminal-ui',type:'terminal',size:'6x4'}],pages:[]})});
@@ -108,11 +108,11 @@ try {
   await page.screenshot({path:path.join(screenshotDir,'rimeward-terminal-desktop.png'),animations:'disabled'});
   // Lose one input acknowledgement after the backend actually accepted it.
   let sent=0;
-  await page.route('**/api/dev/input',async route=>{sent++;await route.fetch();await route.abort('failed');});
+  await page.route('**/api/dev/input*',async route=>{sent++;await route.fetch();await route.abort('failed');});
   await terminal.focus();await page.keyboard.type('x');
   await ward.getByText('Input unconfirmed · review the screen',{exact:true}).waitFor();
   await page.keyboard.type('y');assert.equal(sent,1,'uncertain keystrokes must not be retried');
-  await page.unroute('**/api/dev/input');
+  await page.unroute('**/api/dev/input*');
   await ward.getByRole('button',{name:'Review & take control'}).click();
   await ward.getByText('You’re in control',{exact:true}).waitFor();
   await terminal.focus();await page.keyboard.press('Control+c');

@@ -879,7 +879,7 @@ async function addFiles(st: State, picked: FileList | File[]): Promise<void> {
   st.uploading += list.length;
   paint(st);
   try {
-    const res = await fetch('/api/agent/files', { method: 'POST', body: form });
+    const res = await fetch(`/api/agent/files?_ward=${encodeURIComponent(st.w.i)}`, { method: 'POST', body: form });
     const data = await res.json().catch(() => null);
     if (!res.ok) {
       st.items.push({ k: 'note', err: true, text: `Upload failed${data?.error ? ` — ${data.error}` : ''}.` });
@@ -1268,31 +1268,31 @@ async function openHistory(w:WardInstance) {
   const failure=(e:unknown)=>{error.hidden=false;error.textContent=e instanceof Error?e.message:String(e);};
   content.textContent='Loading your chats…';
   try{
-    const {status,data}=await getJson('/api/agent/history');if(status!==200)throw Error(data?.error??'Could not load history.');
+    const {status,data}=await getJson(`/api/agent/history?_ward=${encodeURIComponent(w.i)}`);if(status!==200)throw Error(data?.error??'Could not load history.');
     content.replaceChildren();
     const state=data.sync;
-    content.append(el('p','muted',state?.server?`${new URL(state.server).host} · ${state.online?'Synced':'Using local copy'}${state.error?` · ${state.error}`:''}`:'Rime on this installation'));
+    content.append(el('p','muted',state?.server?`${state.online?'Up to date':'Working offline'}${state.error?` · ${state.error}`:''}`:'Your conversations'));
     const list=el('div','ag-history-list');content.append(list);
     const open=async(key:string)=>{
-      const {data:chat,status}=await getJson(`/api/agent/history?key=${encodeURIComponent(key)}`);if(status!==200||!chat)throw Error('Conversation unavailable.');
+      const {data:chat,status}=await getJson(`/api/agent/history?_ward=${encodeURIComponent(w.i)}&key=${encodeURIComponent(key)}`);if(status!==200||!chat)throw Error('Conversation unavailable.');
       list.replaceChildren(el('h3',undefined,chat.title));
       for(const m of chat.messages){const msg=el('div','ag-history-message');msg.append(el('strong',undefined,m.role==='user'?'You':'Rime'),markdown(m.text));list.append(msg);}
       submit.hidden=false;submit.textContent='Continue here';
       list.append(el('p','muted','Continues a copy here. The original chat and any work running there are preserved.'));
-      form.onsubmit=async(e)=>{e.preventDefault();submit.disabled=true;try{const {ok,data}=await postJson('/api/agent/history',{ward:w.i,key});if(!ok)throw Error(data?.error??'Could not continue chat.');d.close();await renderAgent(w);}catch(e){failure(e);}finally{submit.disabled=false;}};
+      form.onsubmit=async(e)=>{e.preventDefault();submit.disabled=true;try{const {ok,data}=await postJson(`/api/agent/history?_ward=${encodeURIComponent(w.i)}`,{ward:w.i,key});if(!ok)throw Error(data?.error??'Could not continue chat.');d.close();await renderAgent(w);}catch(e){failure(e);}finally{submit.disabled=false;}};
     };
     for(const chat of data.chats??[]){const b=el('button','btn ag-history-row');b.type='button';b.append(el('strong',undefined,chat.title),el('small','muted',chat.device));b.onclick=()=>void open(chat.key).catch(failure);list.append(b);}
     if(!data.chats?.length)list.append(el('p','muted','Your conversations will appear here.'));
     for(const saved of state?.conflicts??[]){
       const b=el('button','btn ag-history-row',`Recovered version · ${saved.key}`);b.type='button';list.append(b);
       b.onclick=()=>void(async()=>{
-        const {data:copy,status}=await getJson(`/api/agent/history?conflict=${saved.id}`);if(status!==200)throw Error('Recovery version unavailable.');
+        const {data:copy,status}=await getJson(`/api/agent/history?_ward=${encodeURIComponent(w.i)}&conflict=${saved.id}`);if(status!==200)throw Error('Recovery version unavailable.');
         const value=JSON.parse(copy.payload);let text='Deleted locally';
         if(typeof value==='string'){try{text=new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(atob(value),c=>c.charCodeAt(0)));}catch{text='Binary agent file — this version can be restored.';}}
         else if(value)text=JSON.stringify(value,null,2);
         list.replaceChildren(el('h3',undefined,copy.key),el('pre','ag-history-message',text));
-        submit.hidden=!copy.key.startsWith('work/');submit.textContent='Restore this version';
-        form.onsubmit=async(e)=>{e.preventDefault();submit.disabled=true;try{const {ok,data}=await postJson('/api/agent/history',{conflict:saved.id});if(!ok)throw Error(data?.error??'Could not restore.');d.close();}catch(e){failure(e);}finally{submit.disabled=false;}};
+        submit.hidden=!(copy.key.startsWith('work/')||copy.key==='instance/dashboard'||copy.key.startsWith('appearance/image/'));submit.textContent='Restore this version';
+        form.onsubmit=async(e)=>{e.preventDefault();submit.disabled=true;try{const {ok,data}=await postJson(`/api/agent/history?_ward=${encodeURIComponent(w.i)}`,{conflict:saved.id});if(!ok)throw Error(data?.error??'Could not restore.');d.close();}catch(e){failure(e);}finally{submit.disabled=false;}};
       })().catch(failure);
     }
   }catch(e){failure(e);}
@@ -1323,7 +1323,7 @@ async function renderAgent(w: WardInstance): Promise<void> {
     b.replaceChildren(unavailable);
     return;
   }
-  st.sharedStatus=data.sync?.server?data.sync.online?`Rime · ${new URL(data.sync.server).host}`:'Rime · local fallback':undefined;
+  st.sharedStatus=data.sync?.server?data.sync.online?'Rime':'Rime · working offline':undefined;
   st.configured = data.configured;
   if (!data.configured && !data.transcript?.length) {
     const setup = el('div', 'ag-empty ag-setup');

@@ -19,17 +19,16 @@ import "@xterm/xterm/css/xterm.css";
 import "../../styles/development.css";
 
 const owner = `client:${crypto.randomUUID()}`;
-async function api<T = unknown>(
+async function request<T = unknown>(
   action: string,
   data: Record<string, unknown> = {},
   method = "GET",
+  ward = '',
 ): Promise<T> {
   const response = await fetch(
     "/api/dev/" +
       action +
-      (method === "GET"
-        ? `?${new URLSearchParams(data as Record<string, string>)}`
-        : ""),
+      `?${new URLSearchParams({ ...(method === 'GET' ? data as Record<string, string> : {}), _ward: ward })}`,
     {
       method,
       cache: "no-store",
@@ -97,6 +96,7 @@ interface State {
   active?: string;
 }
 async function mount(w: WardInstance) {
+  const api = <T = unknown>(action: string, data: Record<string, unknown> = {}, method = 'GET') => request<T>(action, data, method, w.i);
   const b = body(w.i);
   if (!b || states.has(w.i)) return;
   const host = el("div", "dev-workspace"),
@@ -135,7 +135,7 @@ async function mount(w: WardInstance) {
       void mount(w);
     };
     const projectButton = button("Open / new project", async () => {
-      const project = await chooseProject();
+      const project = await chooseProject(w.i);
       if (!project) return;
       state = { project: project.id };
       await remember();
@@ -597,6 +597,7 @@ async function mount(w: WardInstance) {
     }
   } catch (err) {
     content.textContent = (err as Error).message;
+    cleanup.push(poll(() => { states.get(w.i)?.stop(); void mount(w); }, 5000));
   }
 }
 for (const type of DEV_WARDS)

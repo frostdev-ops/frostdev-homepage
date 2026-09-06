@@ -4,7 +4,8 @@ import type { Project } from "../../lib/dev/types.ts";
 import "../../styles/development.css";
 
 export async function desktopApi<T = unknown>(action: string, body?: unknown): Promise<T> {
-  const r = await fetch(`/api/dev/${action}`, {
+  const page = new URLSearchParams(location.hash.slice(1)).get('p');
+  const r = await fetch(`/api/dev/${action}${page ? `${action.includes('?') ? '&' : '?'}_page=${encodeURIComponent(page)}` : ''}`, {
     method: body === undefined ? "GET" : "POST",
     cache: "no-store",
     ...(body === undefined
@@ -80,7 +81,8 @@ export function confirmAction(text: string): Promise<boolean> {
     };
   });
 }
-export function chooseProject(): Promise<Project | null> {
+export function chooseProject(ward?: string): Promise<Project | null> {
+  const api = <T = unknown>(action: string, body?: unknown) => desktopApi<T>(action + (ward ? `?_ward=${encodeURIComponent(ward)}` : ''), body);
   const { d, form, error, actions, submit } = dialog("Open a project");
   const modes = el("div", "dev-project-modes"),
     existing = el("button", "btn", "Existing folder"),
@@ -134,7 +136,7 @@ export function chooseProject(): Promise<Project | null> {
   submit.textContent = "Open project";
   browse.onclick = async () => {
     try {
-      const r = await desktopApi<{ path: string | null }>("folder", {});
+      const r = await api<{ path: string | null }>("folder", {});
       if (r.path) folder.value = r.path;
     } catch (e) {
       error.textContent =
@@ -154,7 +156,7 @@ export function chooseProject(): Promise<Project | null> {
       d.remove();
       resolve(result);
     };
-    void Promise.all([desktopApi<Project[]>("projects"), desktopApi<{ parent: string }>("project-defaults")])
+    void Promise.all([api<Project[]>("projects"), api<{ parent: string }>("project-defaults")])
       .then(([projects, defaults]) => {
         parent = defaults.parent;
         if (create && !folder.value) folder.value = parent;
@@ -181,7 +183,7 @@ export function chooseProject(): Promise<Project | null> {
       error.hidden = true;
       try {
         finish(
-          await desktopApi(
+          await api(
             "projects",
             create
               ? { create: true, parent: folder.value, name: name.value }

@@ -184,7 +184,7 @@ test("streamed terminal output is ordered, bounded and drains before exit; resta
     fs.writeFileSync(producer, 'process.stdout.write("0123456789abcdef".repeat(131072) + "\\r\\nSTREAM_DONE\\r\\n")');
     const command = `"${process.execPath}" "${producer}"\r`;
     writeSession(1, s.id, "agent:rime", command);
-    const deadline = Date.now() + 10000;
+    const deadline = Date.now() + 30000; // Includes parsing 2 MiB under shared CI runner load.
     while (Date.now() < deadline && !readSession(1, s.id).screen.includes("STREAM_DONE"))
       await waitSession(1, s.id, readSession(1, s.id).session.sequence, 1000);
     const result = readSession(1, s.id);

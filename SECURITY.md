@@ -26,8 +26,13 @@ release does not provide end-to-end encryption against the server operator.
 
 Deploy the [relay nginx configuration](ops/runtime-relay.nginx.conf), and disable payload
 capture, cache overrides, disk buffering, and request-body reporting at every proxy/CDN.
-Server backups must not contain desktop workspace content. No remote mutation or terminal
-input is automatically replayed after an uncertain acknowledgement.
+Server backups may contain explicitly synced Rime files, memories, skills, attachments,
+and chat histories (including code/tool excerpts), but never a replica of project folders
+or native workspace databases. Sync is scoped to the paired server account, validates
+regular-file paths, and preserves conflicting local versions. Provider credentials stay
+on the server; its model endpoint resolves the user from the pairing credential and never
+executes desktop tools. No remote mutation, pending approval, or terminal input is
+automatically replayed after an uncertain acknowledgement.
 
 Native terminal agents run with the local user's filesystem access. Human is the default
 permission mode. Only the user can configure delegated Rimeward control or a CLI's explicit

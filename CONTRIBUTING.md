@@ -37,7 +37,8 @@ routes, tables and CSS classes keep their engineering names (`WardInstance`, log
 native dependencies before Tauri builds. Build on the target platform; do not copy another
 Node version's `better-sqlite3` or `node-pty` binaries into the payload. The desktop process
 owns `workspaces.db`, recovery, PTYs, and agent tasks. The ordinary server must reject native
-execution and persist only device pairing metadata. Keep relay paths free of payload logging
+execution. Shared Rime files/history use the separate, account-scoped sync journal;
+project files and native process state never enter it. Keep relay/sync paths free of payload logging
 and persistent caching. See [the runtime contract and checks](docs/development-workspaces.md).
 
 Rust 1.98.0 is pinned in `rust-toolchain.toml` and the release workflow so local and CI
@@ -92,3 +93,12 @@ Update README, this guide, the security boundaries, and the workspace guide toge
 changing setup or ownership. `docs/pages-spec.md` records the page model and its workspace
 extension. Keep private deployment instructions (`AGENTS.md`, `CLAUDE.md`, local deployment
 scripts) out of the public repository.
+
+
+Workspace navigation changes must pass `node --test tests/workspace-navigation.test.ts`
+and the built `node tests/remote-workspace-smoke.mjs` handoff test. The latter exercises
+the real workspace picker on desktop and phone, a native-command adapter, page continuity,
+terminal and buffer identity across navigation, offline recovery, and exclusion of desktop
+content from server files/logs. Native command permissions and origin checks also require
+`npm run desktop:check`; use a separate app identifier/data directory for interactive native
+previews so testing cannot take over an existing runtime's database or terminal processes.

@@ -28,7 +28,7 @@ try {
       <h1 class="text-2xl font-semibold tracking-tight">{done?(declined?'Connection declined':'Desktop approved'):'Connect this desktop?'}</h1>
       {error?<p role="alert" class="banner banner-err">{error}</p>:done?<><p>Return to the Rimeward app to continue.</p><a class="btn" href="/dash">Open my dashboard</a></>:<>
         <p><strong>{grant!.name}</strong> wants to connect to your Rimeward account, <strong>{Astro.locals.user!.email}</strong>.</p>
-        <p>This lets the app open your server dashboard and lets you access this desktop’s projects, terminals, and agents while it is online. Project content stays on the desktop.</p>
+        <p>This connects Rime’s provider access, chat history, memories, skills, and agent files, with a local copy for offline work. It also lets you remotely control this desktop while it is online. Project folders stay on the desktop; code excerpts and attachments shared with Rime travel with its chats.</p>
         <p>Confirm this matches the request you just started in the app: <strong class="setup-approval-code">{code}</strong></p>
         <form method="post" class="flex gap-3"><button class="btn-primary" name="decision" value="allow">Allow this desktop</button><button class="btn" name="decision" value="deny">Decline</button></form>
       </>}

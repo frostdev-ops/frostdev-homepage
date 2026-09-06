@@ -127,3 +127,7 @@ dialog.ag-dialog { width:min(94vw,68rem); height:min(90dvh,60rem); max-height:94
 .ag-setup { align-items:center; text-align:center; }
 .ag-setup .btn { margin-top:.5rem; font-size:.78rem; }
 .ag-jump-icon { display:inline-flex; vertical-align:middle; rotate:90deg; }
+.ag-history { min-height: 8rem; max-height: 65dvh; overflow: auto; }
+.ag-history-list { display: grid; gap: .65rem; }
+.ag-history-row { display: flex; flex-direction: column; align-items: flex-start; text-align: left; white-space: normal; }
+.ag-history-message { padding: .8rem; border: 1px solid var(--color-line); border-radius: .75rem; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -207,3 +207,12 @@ export async function openProjectWorkspace() {
     location.assign(next.href);
   }
 }
+
+/** Give mounted editors time to acknowledge recovery before crossing runtimes. */
+export async function prepareWorkspaceNavigation() {
+  const pending: Promise<unknown>[] = [];
+  window.dispatchEvent(new CustomEvent("fd:before-workspace-navigation", {
+    detail: { waitUntil: (promise: Promise<unknown>) => pending.push(promise) },
+  }));
+  await Promise.all(pending);
+}

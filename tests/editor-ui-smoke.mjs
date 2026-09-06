@@ -43,6 +43,12 @@ try {
   await page.waitForURL(u=>u.pathname==='/dash'&&u.hash.startsWith('#p='));
   const ward=page.locator('[data-wd-type=editor]:not([data-wd-off])');
   await ward.locator('.editor-explorer').waitFor();
+  const rime=page.locator('[data-wd-type=agent]:not([data-wd-off])');
+  await rime.waitFor();
+  assert.equal(await rime.count(),1,'new project workspaces include one Rime chat');
+  await page.locator('[data-wd-type=editor], [data-wd-type=agent]').evaluateAll(els=>Promise.all(els.flatMap(el=>el.getAnimations()).map(a=>a.finished.catch(()=>{}))));
+  const editorBox=await ward.boundingBox(), rimeBox=await rime.boundingBox();
+  assert.ok(Math.abs(editorBox.y-rimeBox.y)<2 && rimeBox.x>=editorBox.x+editorBox.width,'Rime sits beside the editor on desktop');
   const p=(await page.evaluate(()=>fetch('/api/dev/projects').then(r=>r.json()))).find(p=>p.root===fs.realpathSync(project));
   const post=(target,route,body)=>target.evaluate(async({route,body})=>{const r=await fetch('/api/dev/'+route,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const v=await r.json();if(!r.ok)throw Error(v.error);return v;},{route,body});
   const before=await page.locator('[data-wd-type]').count();

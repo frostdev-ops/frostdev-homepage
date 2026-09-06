@@ -93,7 +93,7 @@ enum Fail {
 }
 
 #[derive(Default)]
-pub struct Tunnel(Mutex<Option<JoinHandle<()>>>);
+pub struct Tunnel(Mutex<Option<(String, JoinHandle<()>)>>);
 
 /// Only the native, approved server handoff may start a legacy home route.
 pub async fn start(
@@ -103,29 +103,45 @@ pub async fn start(
     device: String,
 ) -> Result<(), String> {
     let origin = page.origin().ascii_serialization();
+    let route = format!("{origin}:{device}:{session}");
+    if app
+        .state::<Tunnel>()
+        .0
+        .lock()
+        .await
+        .as_ref()
+        .is_some_and(|(key, task)| key == &route && !task.is_finished())
+    {
+        return Ok(());
+    }
     app.add_capability(
         tauri::ipc::CapabilityBuilder::new(format!("browser-{origin}"))
             .window("main")
             .local(false)
             .remote(format!("{origin}/*"))
             .permission("allow-ward-browser")
-            .permission("allow-ward-touch"),
+            .permission("allow-ward-touch")
+            .permission("allow-workspace-navigation")
+            .permission("allow-open-workspace"),
     )
     .map_err(|_| "Could not enable this server's browser wards")?;
     stop(app).await;
     let shared = app.state::<Shared>().inner().clone();
     chromium::shutdown(&shared).await;
     chromium::set_server(&shared, origin, device).await;
-    *app.state::<Tunnel>().0.lock().await = Some(tokio::spawn(run(
-        app.clone(),
-        page,
-        format!("rimeward_session={session}"),
-    )));
+    *app.state::<Tunnel>().0.lock().await = Some((
+        route,
+        tokio::spawn(run(
+            app.clone(),
+            page,
+            format!("rimeward_session={session}"),
+        )),
+    ));
     Ok(())
 }
 
 pub async fn stop(app: &AppHandle) {
-    if let Some(task) = app.state::<Tunnel>().0.lock().await.take() {
+    if let Some((_, task)) = app.state::<Tunnel>().0.lock().await.take() {
         task.abort();
         let _ = task.await;
     }

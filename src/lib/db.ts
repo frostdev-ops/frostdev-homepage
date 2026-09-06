@@ -48,7 +48,8 @@ function migrate(handle: Database.Database): void {
   const applied = new Set(
     (handle.prepare('SELECT name FROM applied_migrations').all() as { name: string }[]).map((r) => r.name)
   );
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+  // Only release migration names; Finder/cloud conflict copies must never run as new SQL.
+  const files = fs.readdirSync(dir).filter((f) => /^\d{3}_[a-z0-9_]+\.sql$/.test(f)).sort();
   const record = handle.prepare('INSERT INTO applied_migrations (name) VALUES (?)');
 
   for (const file of files) {

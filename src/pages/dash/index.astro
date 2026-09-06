@@ -1,4 +1,5 @@
 ---
+import { runtimeNavigation } from '../../lib/dev/navigation.ts';
 import { isDesktop } from '../../lib/dev/runtime.ts';
 import AppLayout from '../../layouts/AppLayout.astro';
 import Ward from '../../components/dashboard/Ward.astro';
@@ -43,7 +44,6 @@ const logicJson = JSON.stringify({
 
 <AppLayout title="Rimeward" fonts={layout.map((w) => w.theme?.font)}>
   <main class="mx-auto max-w-7xl px-4 py-6">
-    {isDesktop() && <aside class="dev-runtime-bar"><span class="dev-runtime-dot"></span><div><strong>This desktop</strong><span>Your local workspace</span></div><a href="/desktop/start?setup=1">Connect or open a server <Icon id="right" /></a></aside>}
     <div id="alerts" data-mode={alertMode}></div>
     <div id="sse-banner" class="banner banner-warn hidden">Live feed lost — retrying…</div>
 
@@ -78,7 +78,7 @@ const logicJson = JSON.stringify({
   <WardThemeDialog />
 
   <script type="application/json" id="layout-data" set:html={layoutJson} />
-  <script type="application/json" id="pages-data" set:html={pagesJson} />
+  <script type="application/json" id="pages-data" data-active-page={runtimeNavigation(userId).activePage} set:html={pagesJson} />
   <script type="application/json" id="logic-data" set:html={logicJson} />
 
   <script>

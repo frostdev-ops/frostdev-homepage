@@ -9,6 +9,72 @@ use tokio::{
 };
 
 pub struct Runtime(pub Arc<Mutex<Option<Child>>>);
+#[derive(Default)]
+pub struct Workspace(pub Mutex<Option<(url::Url, String)>>);
+
+/// Fixed loopback destination; the native token never reaches page JavaScript.
+pub async fn workspace_request(
+    app: &AppHandle,
+    body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let (origin, token) = app
+        .state::<Workspace>()
+        .0
+        .lock()
+        .await
+        .clone()
+        .ok_or("Local workspace is starting")?;
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(25))
+        .build()
+        .map_err(|_| "Local connection failed")?;
+    let endpoint = origin
+        .join(if body.is_some() {
+            "/api/dev/navigate"
+        } else {
+            "/api/dev/navigation"
+        })
+        .map_err(|_| "Invalid local address")?;
+    let mut request = if let Some(body) = body {
+        client
+            .post(endpoint)
+            .header("content-type", "application/json")
+            .body(body.to_string())
+    } else {
+        client.get(endpoint)
+    };
+    request = request.header("x-rimeward-native-token", token);
+    let response = request
+        .send()
+        .await
+        .map_err(|_| "Local workspace is unavailable")?;
+    let status = response.status();
+    let value: serde_json::Value = serde_json::from_str(
+        &response
+            .text()
+            .await
+            .map_err(|_| "Local workspace disconnected")?,
+    )
+    .map_err(|_| "Invalid workspace response")?;
+    if !status.is_success() {
+        return Err(value["error"]
+            .as_str()
+            .unwrap_or("Workspace request failed")
+            .to_string());
+    }
+    Ok(value)
+}
+pub async fn local_url(app: &AppHandle, path: &str) -> Result<url::Url, String> {
+    let state = app.state::<Workspace>();
+    let workspace = state.0.lock().await;
+    let (origin, _) = workspace.as_ref().ok_or("Local workspace is starting")?;
+    origin
+        .join(path)
+        .map_err(|_| "Invalid local destination".to_string())
+}
+
 fn vault(service: &str) -> Result<keyring::Entry, keyring::Error> {
     keyring::Entry::new(service, "device-pairings")
 }
@@ -118,8 +184,24 @@ pub async fn launch(app: AppHandle) -> Result<(), Box<dyn std::error::Error + Se
         match message["type"].as_str() {
             Some("ready") => {
                 if let Some(url) = message["url"].as_str() {
+                    let bootstrap = url::Url::parse(url)?;
+                    let token = bootstrap
+                        .query_pairs()
+                        .find(|(key, _)| key == "token")
+                        .map(|(_, value)| value.into_owned())
+                        .ok_or("Missing local credential")?;
+                    let origin = bootstrap.join("/")?;
+                    app.add_capability(
+                        tauri::ipc::CapabilityBuilder::new("local-workspace")
+                            .window("main")
+                            .local(false)
+                            .remote(format!("{}/*", origin.origin().ascii_serialization()))
+                            .permission("allow-workspace-navigation")
+                            .permission("allow-open-workspace"),
+                    )?;
+                    *app.state::<Workspace>().0.lock().await = Some((origin, token));
                     if let Some(window) = app.get_webview_window("main") {
-                        window.navigate(url.parse()?)?;
+                        window.navigate(bootstrap)?;
                     }
                     super::set_status(&app, "Local runtime running");
                 }
@@ -172,6 +254,21 @@ async fn desktop_request(
     use tauri_plugin_opener::OpenerExt;
     let value = &message["value"];
     match message["op"].as_str() {
+        Some("local") => {
+            let path = value["path"].as_str().ok_or("Missing local destination")?;
+            if !(path == "/desktop/start?setup=1"
+                || path == "/dash"
+                || path.starts_with("/dash#p="))
+            {
+                return Err("Invalid local destination".into());
+            }
+            let url = local_url(app, path).await?;
+            app.get_webview_window("main")
+                .ok_or("Desktop window is unavailable")?
+                .navigate(url)
+                .map_err(|_| "Could not open workspace")?;
+            Ok(serde_json::json!(true))
+        }
         Some("folder") => {
             let app = app.clone();
             let selected = tauri::async_runtime::spawn_blocking(move || {

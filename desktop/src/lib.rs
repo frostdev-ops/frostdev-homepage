@@ -30,9 +30,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(Shutdown::default())
+        .manage(runtime::Workspace::default())
         .invoke_handler(tauri::generate_handler![
             commands::ward_browser,
-            commands::ward_touch
+            commands::ward_touch,
+            commands::workspace_navigation,
+            commands::open_workspace
         ])
         .setup(|app| {
             #[cfg(desktop)]

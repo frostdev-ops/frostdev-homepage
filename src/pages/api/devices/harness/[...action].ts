@@ -1,0 +1,159 @@
+import type { APIRoute } from "astro";
+import {
+  authenticatedDevice,
+  limitDeviceAuth,
+} from "../../../../lib/dev/device-auth.ts";
+import { isDesktop } from "../../../../lib/dev/runtime.ts";
+import {
+  agentConfigured,
+  getProvider,
+  type ProviderCall,
+} from "../../../../lib/agent/provider.ts";
+import { getDashboard } from "../../../../lib/dashboard.ts";
+import {
+  acceptRecord,
+  profileId,
+  syncManifest,
+  syncRecord,
+  SYNC_RECORD_MAX,
+} from "../../../../lib/agent/sync-store.ts";
+
+const active = new Map<number, number>();
+async function bodyOf(request: Request) {
+  const reader = request.body?.getReader();
+  if (!reader) throw Error("Missing request.");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > SYNC_RECORD_MAX + 8192) throw Error("Request too large.");
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel();
+  }
+  return JSON.parse(Buffer.concat(chunks).toString());
+}
+export const ALL: APIRoute = async ({
+  params,
+  locals: _locals,
+  request,
+  url,
+}) => {
+  let modelUser: number | undefined;
+  try {
+    if (isDesktop() || request.headers.has("origin"))
+      return Response.json(
+        { error: "Native server connection required." },
+        { status: 403 },
+      );
+    const device = authenticatedDevice(
+        request.headers.get("authorization")?.replace(/^Bearer /, ""),
+      ),
+      user = device.user_id;
+    let value: unknown,
+      status = 200;
+    if (request.method === "GET" && !params.action) {
+      const key = url.searchParams.get("key");
+      if (key) {
+        value = syncRecord(user, key);
+        if (!value)
+          return Response.json({ error: "Record not found." }, { status: 404 });
+      } else {
+        const providers = {
+          codex: agentConfigured(user, "codex"),
+          openrouter: agentConfigured(user, "openrouter"),
+        };
+        const config = getDashboard(user).find((w) => w.type === "agent")
+          ?.config ?? { provider: providers.codex ? "codex" : "openrouter" };
+        // Provider credentials and integration tokens never enter sync payloads.
+        const { model, effort, persona } = config;
+        const provider =
+          config.provider === "codex" || config.provider === "openrouter"
+            ? config.provider
+            : providers.codex
+              ? "codex"
+              : "openrouter";
+        value = {
+          profile: profileId(user),
+          providers,
+          config: { provider, model, effort, persona },
+          manifest: syncManifest(user),
+        };
+      }
+    } else if (request.method === "GET" && params.action === "models") {
+      const { listCodexModels } = await import(
+        "../../../../lib/agent/codex.ts"
+      );
+      value = await listCodexModels(user);
+    } else if (request.method === "POST" && !params.action) {
+      const body = await bodyOf(request);
+      value = acceptRecord(
+        user,
+        body.record,
+        typeof body.base === "string" ? body.base : null,
+      );
+      if (!(value as { ok: boolean }).ok) status = 409;
+    } else if (request.method === "POST" && params.action === "model") {
+      limitDeviceAuth(`rime-model:${user}`, 240);
+      if ((active.get(user) ?? 0) >= 4)
+        return Response.json({ error: "Rime is busy." }, { status: 429 });
+      active.set(user, (active.get(user) ?? 0) + 1);
+      modelUser = user;
+      const body = await bodyOf(request);
+      if (
+        !["codex", "openrouter"].includes(body.provider) ||
+        typeof body.model !== "string" ||
+        body.model.length > 200 ||
+        typeof body.instructions !== "string" ||
+        !Array.isArray(body.items) ||
+        !Array.isArray(body.tools) ||
+        body.tools.length > 512
+      )
+        throw Error("Invalid model request.");
+      if (!agentConfigured(user, body.provider))
+        return Response.json(
+          { error: "Provider not configured on the server." },
+          { status: 503 },
+        );
+      const provider = await getProvider(body.provider);
+      // Exactly one model call. The desktop owns the loop and executes its tools.
+      const call: ProviderCall = {
+        userId: user,
+        model: body.model,
+        effort: typeof body.effort === "string" ? body.effort : undefined,
+        instructions: body.instructions,
+        items: body.items,
+        tools: body.tools,
+        cacheKey:
+          typeof body.cacheKey === "string"
+            ? `device:${device.id}:${body.cacheKey.slice(0, 120)}`
+            : undefined,
+        signal: request.signal,
+      };
+      value = await provider.run(call);
+    } else
+      return Response.json(
+        { error: "Unknown Rime operation." },
+        { status: 404 },
+      );
+    return Response.json(value, {
+      status,
+      headers: { "cache-control": "no-store", "x-accel-buffering": "no" },
+    });
+  } catch (e) {
+    return Response.json(
+      { error: e instanceof Error ? e.message : "Rime request failed." },
+      {
+        status: (e as { status?: number }).status ?? 400,
+        headers: { "cache-control": "no-store" },
+      },
+    );
+  } finally {
+    if (modelUser !== undefined)
+      active.set(modelUser, Math.max(0, (active.get(modelUser) ?? 1) - 1));
+  }
+};

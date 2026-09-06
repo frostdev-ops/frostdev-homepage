@@ -488,11 +488,14 @@ export function projectEditor(host: HTMLElement, options: {
   }, 2000, () => !host.getClientRects().length);
   const themeObserver = new MutationObserver(() => editor.dispatch({ effects: theme.reconfigure(editorTheme()) }));
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-mode"] });
+  const beforeNavigate = (e: Event) => (e as CustomEvent<{ waitUntil(p: Promise<unknown>): void }>).detail.waitUntil(runExclusive(flush));
+  window.addEventListener("fd:before-workspace-navigation", beforeNavigate);
   const unload = (e: BeforeUnloadEvent) => { if (pending) { e.preventDefault(); e.returnValue = ""; } };
   window.addEventListener("beforeunload", unload);
   renderTabs(); refreshStatus(); renderProblems(); const active = state.active; if (active) run(() => load(active));
   return () => {
     stopped = true; clearTimeout(recoveryTimer); clearTimeout(lintTimer); lintGeneration++; stopPoll(); stopMenu(); stopChrome(); explorer.stop(); themeObserver.disconnect(); tabResize.disconnect();
+    window.removeEventListener("fd:before-workspace-navigation", beforeNavigate);
     window.removeEventListener("fd:open-file", onOpen); window.removeEventListener("beforeunload", unload); host.removeEventListener("keydown", onKey);
     void flush().catch(() => {}).finally(() => editor.destroy());
   };

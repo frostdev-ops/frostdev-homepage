@@ -20,7 +20,8 @@ fs.writeFileSync(path.join(project, "hello.txt"), "hello\n");
 execFileSync("git", ["init", project], { stdio: "ignore" });
 const marker = "HANDOFF_" + crypto.randomUUID(),
   children = [];
-let browser, proxy;
+let browser, proxy, unavailableNavigation = false, unavailableHarness = false;
+let modelFixture = null, modelRequests = 0;
 let nativeHandler = async () => {
   throw new Error("Native test adapter not ready");
 };
@@ -102,7 +103,7 @@ try {
   const fixture = path.join(repo, "tests/.handoff-server-fixture.mjs");
   fs.writeFileSync(
     fixture,
-    `import { createUser } from '../src/lib/users.ts';import { createSession } from '../src/lib/auth.ts';const user=createUser('test@example.com','test-only-password');const cookie=createSession(user).id;const {httpServer}=await import('../server.mjs');if(!httpServer.listening)await new Promise(r=>httpServer.once('listening',r));console.log(JSON.stringify({type:'server',port:httpServer.address().port,cookie}));`,
+    `import { createUser } from '../src/lib/users.ts';import { createSession } from '../src/lib/auth.ts';import {writeDoc} from '../src/lib/agent/store.ts';import {storeAgentAccount} from '../src/lib/agent/accounts.ts';import {saveDashboard} from '../src/lib/dashboard.ts';import {activeConversation,addMessage} from '../src/lib/agent/conversations.ts';const user=createUser('test@example.com','test-only-password');const cookie=createSession(user).id;writeDoc(user,'memory','shared','Shared memory','server memory');storeAgentAccount({userId:user,provider:'codex',token:'fixture-only-never-sent'});saveDashboard(user,[{i:'server-rime',type:'agent',size:'2x2',config:{provider:'codex'}}]);addMessage(activeConversation(user,'server-rime','codex'),{role:'user',text:'Shared Rime history fixture'});const {httpServer}=await import('../server.mjs');if(!httpServer.listening)await new Promise(r=>httpServer.once('listening',r));console.log(JSON.stringify({type:'server',port:httpServer.address().port,cookie}));`,
   );
   const server = child([fixture], {
     HOMEPAGE_DATA_DIR: path.join(temporary, "server"),
@@ -116,6 +117,18 @@ try {
   proxy = https.createServer(
     { key: fs.readFileSync(key), cert: fs.readFileSync(cert) },
     (req, res) => {
+      if (unavailableHarness && req.url.startsWith('/api/devices/harness')) { res.writeHead(503); res.end(); return; }
+      if (modelFixture && req.url === '/api/devices/harness/model') {
+        const chunks=[];req.on('data',chunk=>chunks.push(chunk));req.on('end',()=>{
+          const call=JSON.parse(Buffer.concat(chunks));modelRequests++;
+          assert.equal(call.provider,'codex');assert.equal('userId' in call,false);
+          assert.equal(typeof call.instructions,'string');assert.ok(Array.isArray(call.tools));
+          res.writeHead(modelFixture.status,{'content-type':'application/json'});res.end(JSON.stringify(modelFixture.body));
+        });return;
+      }
+      if (unavailableNavigation && req.url === "/api/devices/navigation") {
+        res.writeHead(404); res.end(); return;
+      }
       const forward = http.request(
         {
           host: "127.0.0.1",
@@ -180,6 +193,19 @@ try {
       hasTouch: true,
       ignoreHTTPSErrors: true,
     });
+  // Emulate only the native transport boundary; all navigation and workspace UI is real.
+  const localOrigin = new URL(url).origin;
+  const localHeaders = { "x-rimeward-native-token": new URL(url).searchParams.get("token") };
+  await pc.exposeBinding("workspaceInvoke", async ({ page }, command, args) => {
+    if (command === "workspace_navigation") {
+      const result = await fetch(localOrigin + "/api/dev/navigation", { headers: localHeaders }).then(r => r.json());
+      if (new URL(page.url()).origin === origin) result.current = result.workspaces.find(w => w.kind === "server").id;
+      return result;
+    }
+    if (command === "open_workspace") return fetch(localOrigin + "/api/dev/navigate", { method: "POST", headers: { ...localHeaders, "content-type": "application/json" }, body: JSON.stringify(args) }).then(r => r.json());
+    throw new Error("Unexpected native command: " + command);
+  });
+  await pc.addInitScript(() => { window.__TAURI__ = { core: { invoke: (command, args) => window.workspaceInvoke(command, args) } }; });
   const desktopPage = await pc.newPage();
   const errors = [];
   desktopPage.on("pageerror", (e) => errors.push(e.message));
@@ -190,6 +216,9 @@ try {
       return true;
     }
     if (m.op === "folder") return project;
+    if (m.op === "local") {
+      await desktopPage.goto(localOrigin + m.value.path); return true;
+    }
     if (m.op === "server") {
       await pc.addCookies([
         { name: "rimeward_session", value: m.value.session, url: origin },
@@ -246,7 +275,35 @@ try {
     1,
   );
   await approvalContext.close();
-  await desktopPage.goto(new URL("/dash", url).href);
+  await desktopPage.getByRole("button", { name: "Workspaces", exact: true }).click();
+  await desktopPage.getByRole("dialog", { name: "Your workspaces" }).getByRole("button", { name: /This computer/ }).click();
+  await desktopPage.waitForURL(localOrigin + "/dash#p=home");
+  const localRequest=async(route,method='GET',body)=>{
+    const r=await fetch(localOrigin+route,{method,headers:{...localHeaders,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+    const value=await r.json();assert.equal(r.ok,true,JSON.stringify(value));return value;
+  };
+  await localRequest('/api/agent/history','POST',{action:'sync'});
+  const initialHistory=await localRequest('/api/agent/history');
+  assert.equal(initialHistory.sync.online,true,JSON.stringify(initialHistory.sync));
+  assert.equal(initialHistory.sync.providers.codex,true);
+  assert.ok(initialHistory.chats.some(c=>c.title==='Shared Rime history fixture'));
+  assert.equal((await localRequest('/api/store/memory/shared')).body,'server memory');
+  unavailableHarness=true;
+  await localRequest('/api/agent/history','POST',{action:'sync'});
+  assert.equal((await localRequest('/api/agent/history')).sync.online,false);
+  await localRequest('/api/store/memory/shared','PUT',{description:'Shared memory',body:'desktop offline edit'});
+  await localRequest('/api/store/memory/offline-new','PUT',{description:'Offline note',body:'created offline'});
+  const remoteEdit=await pc.request.put(origin+'/api/store/memory/shared',{data:{description:'Shared memory',body:'server concurrent edit'}});
+  assert.equal(remoteEdit.status(),200);
+  unavailableHarness=false;
+  await localRequest('/api/agent/history','POST',{action:'sync'});
+  const reconciled=await localRequest('/api/agent/history');
+  assert.equal(reconciled.sync.online,true,JSON.stringify(reconciled.sync));
+  assert.equal((await localRequest('/api/store/memory/shared')).body,'server concurrent edit');
+  const savedConflict=reconciled.sync.conflicts.find(c=>c.key==='work/memory/shared.md');assert.ok(savedConflict);
+  const copy=await localRequest('/api/agent/history?conflict='+savedConflict.id);
+  assert.match(Buffer.from(JSON.parse(copy.payload),'base64').toString(),/desktop offline edit/);
+  assert.equal((await (await pc.request.get(origin+'/api/store/memory/offline-new')).json()).body,'created offline');
   // A terminal without a project exposes the same project creation dialog.
   const isolated = await desktopPage.evaluate(async () => {
     const d = await fetch("/api/runtime").then((r) => r.json());
@@ -297,6 +354,37 @@ try {
     .click();
   await desktopPage.waitForURL(u=>u.pathname.endsWith("/dash")&&u.hash.startsWith("#p="));
   const preset = { page: new URL(desktopPage.url()).hash.slice(3) };
+  const rime=desktopPage.locator('[data-wd-type=agent]:not([data-wd-off])');
+  const rimeId=await rime.getAttribute('data-wd');
+  const rimeState=await localRequest('/api/agent/'+rimeId);
+  assert.equal(rimeState.provider,'codex','new project Rime inherits the server provider');
+  assert.equal(rimeState.configured,true,'server auth needs no second local login');
+  await rime.getByRole('button',{name:'Expand chat',exact:true}).click();
+  const expandedRime=desktopPage.locator('#agent-dialog');
+  await expandedRime.getByRole('button',{name:'Chat history',exact:true}).click();
+  const historyDialog=desktopPage.getByRole('dialog',{name:'Rime history'});
+  await historyDialog.getByRole('button',{name:/Shared Rime history fixture/}).click();
+  await historyDialog.getByRole('button',{name:'Continue here',exact:true}).click();
+  await historyDialog.waitFor({state:'hidden'});
+  await expandedRime.getByRole('button',{name:'Close chat',exact:true}).click();
+  await rime.getByRole('log',{name:'Conversation'}).getByText('Shared Rime history fixture',{exact:true}).waitFor();
+  unavailableHarness=true;
+  await localRequest('/api/agent/history','POST',{action:'sync'});
+  await desktopPage.reload();
+  await rime.getByRole('log',{name:'Conversation'}).getByText('Shared Rime history fixture',{exact:true}).waitFor();
+  assert.equal(await rime.getByRole('button',{name:'Send message',exact:true}).isEnabled(),false);
+  unavailableHarness=false;
+  await localRequest('/api/agent/history','POST',{action:'sync'});
+  const requestModel=async()=>{
+    const response=await fetch(localOrigin+'/api/agent/'+rimeId,{method:'POST',headers:{...localHeaders,'content-type':'application/json'},body:JSON.stringify({message:'Shared model transport fixture'})});
+    assert.equal(response.status,200);return response.text();
+  };
+  modelFixture={status:400,body:{error:'Fixture model is not available'}};
+  assert.match(await requestModel(),/Fixture model is not available/);
+  assert.equal((await localRequest('/api/agent/'+rimeId)).sync.online,true,'a rejected model request does not disconnect Rime');
+  modelFixture={status:200,body:{text:'Shared model transport works',calls:[],items:[]}};
+  assert.match(await requestModel(),/Shared model transport works/);
+  assert.equal(modelRequests,2,'one request per turn, no blind replay');modelFixture=null;
   const post = async (page, route, body) =>
     page.evaluate(
       async ({ route, body }) => {
@@ -350,7 +438,13 @@ try {
     data: "echo " + marker + "\r",
   });
   const base = "/runtime/" + devices[0].id;
-  await phonePage.goto(origin + base + "/dash#p=" + preset.page);
+  // Phone discovers the desktop project without knowing its URL or page ID.
+  await phonePage.getByRole("button", { name: "Workspaces", exact: true }).click();
+  await phonePage.getByRole("dialog", { name: "Your workspaces" }).getByRole("button", { name: "project", exact: true }).click();
+  await phonePage.waitForURL(origin + base + "/dash#p=" + preset.page);
+  await phonePage.getByRole("button", { name: "Workspaces", exact: true }).click();
+  await phonePage.screenshot({ path: "/tmp/rimeward-workspaces-phone.png", animations: "disabled" });
+  await phonePage.keyboard.press("Escape");
   await phonePage.waitForTimeout(1000);
   const remote = await phonePage.evaluate(
     (id) => fetch("/api/dev/sessions?id=" + id).then((r) => r.json()),
@@ -467,6 +561,21 @@ try {
     path: "/tmp/rimeward-desktop-handoff.png",
     fullPage: true,
   });
+  // Returning to the server and back keeps the exact terminal process and selected project.
+  unavailableNavigation = true;
+  const legacyNavigation = await fetch(localOrigin + "/api/dev/navigation", { headers: localHeaders }).then(r => r.json());
+  const connectedServer = legacyNavigation.workspaces.find(w => w.kind === "server");
+  assert.equal(connectedServer.online, true, "missing page-list support must not hide a connected server");
+  assert.match(connectedServer.error, /Page list unavailable/);
+  unavailableNavigation = false;
+  await desktopPage.getByRole("button", { name: "Workspaces", exact: true }).click();
+  await desktopPage.screenshot({ path: "/tmp/rimeward-workspaces-desktop.png", animations: "disabled" });
+  await desktopPage.getByRole("dialog", { name: "Your workspaces" }).getByRole("button", { name: /localhost.*Server dashboard/ }).click();
+  await desktopPage.waitForURL(origin + "/dash#p=home");
+  await desktopPage.getByRole("button", { name: "Workspaces", exact: true }).click();
+  await desktopPage.getByRole("dialog", { name: "Your workspaces" }).getByRole("button", { name: "project", exact: true }).click();
+  await desktopPage.waitForURL(localOrigin + "/dash#p=" + preset.page);
+  await desktopPage.locator("[data-wd-type=editor] .cm-content").filter({ hasText: marker + "_UI" }).waitFor();
   assert.deepEqual(errors, []);
   await phonePage.close();
   const unchanged = await desktopPage.evaluate(
@@ -480,6 +589,9 @@ try {
   const offline = await phone.newPage();
   const reply = await offline.goto(origin + base + "/dash");
   assert.equal(reply.status(), 503);
+  await offline.getByRole("heading", { name: "This computer is disconnected." }).waitFor();
+  await offline.getByRole("link", { name: "Open server dashboard" }).click();
+  await offline.waitForURL(origin + "/dash");
   assert.equal((await offline.goto(origin + "/dash")).status(), 200);
   for (const entry of fs.readdirSync(path.join(temporary, "server"))) {
     const filename = path.join(temporary, "server", entry);
@@ -491,7 +603,7 @@ try {
   }
   assert.ok(!logs.includes(marker));
   console.log(
-    "First-run browser approval, existing server dashboard, project buttons, and PC → phone → PC: same live terminal and recovery buffer; desktop offline keeps server usable; server data/logs contain no desktop marker.",
+    "Shared Rime auth availability, model relay/error handling, history, offline memory edits, conflict recovery, and reconnect passed. PC → phone → PC keeps the same terminal and recovery buffer; desktop offline keeps server usable; project marker stays off server data/logs. Model responses are fixtures; no external provider calls.",
   );
 } finally {
   if (browser) await browser.close();

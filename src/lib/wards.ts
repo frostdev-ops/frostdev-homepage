@@ -869,7 +869,7 @@ function validateConfig(type: string, raw: Record<string, unknown>): Record<stri
     case 'agent': {
       // Never null — bad values fall back to defaults (the ward always works).
       const out: Record<string, unknown> = {
-        provider: raw.provider === 'codex' ? 'codex' : 'openrouter',
+        provider: raw.provider === 'codex' || raw.provider === 'openrouter' ? raw.provider : 'default',
         tools: raw.tools === 'read-only' ? 'read-only' : 'all',
         approvals: raw.approvals === 'all' || raw.approvals === 'off' ? raw.approvals : 'outbound',
       };

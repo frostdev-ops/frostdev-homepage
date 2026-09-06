@@ -237,7 +237,7 @@ export function allowedRelayPath(value: string) {
     pathname.split("/").some((p) => p === "." || p === "..")
   )
     return false;
-  if (/^\/api\/dev\/(?:pair(?:-preview|ings)?|unpair|sign-in[^/]*|open-server|onboard|folder)(?:\/|$)/.test(pathname)||pathname.startsWith('/desktop/'))
+  if (/^\/api\/dev\/(?:pair(?:-preview|ings)?|unpair|sign-in[^/]*|open-server|onboard|folder|navigation|navigate)(?:\/|$)/.test(pathname)||pathname.startsWith('/desktop/'))
     return false;
   return !/^\/(?:runtime(?:\/|$)|api\/(?:native|devices)(?:\/|$))/.test(
     pathname,

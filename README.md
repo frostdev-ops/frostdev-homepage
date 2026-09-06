@@ -86,8 +86,8 @@ memory and skills as wards, drives the same browser you drive, and asks before a
 the building: mail, chat, and the rest of the outbound tools wait for a confirm. A **routine** is
 a timer with rounds. A **packet** is what moves between flow wards. The **home route** is the
 desktop app's tunnel: a browser ward on the server egressing from your own connection, or running
-its Chromium on your machine entirely. It remains compatible with earlier clients. An
-**environment** selects the server or a paired desktop; each owns its own pages, credentials,
+its Chromium on your machine entirely. It remains compatible with earlier clients. The
+**Workspaces** navigator brings server pages and paired computers together; each runtime owns its pages, credentials,
 and agent conversations. A **project** is an approved local folder referenced by a page's
 development wards.
 
@@ -169,6 +169,7 @@ path named by the include. `/runtime/` must have request/response buffering, dis
 caching, and payload logging disabled at the origin and edge. The application adds
 `Cache-Control: no-store`; review CDN overrides before enabling remote access. See the
 [deployment and verification steps](docs/development-workspaces.md#server-configuration-required-for-remote-access).
+
 Give the process ten seconds to stop: browser wards
 close Chromium gracefully so a fresh login's cookies are not lost.
 
@@ -192,7 +193,7 @@ proxy's — stricter than trusting a forwarded header without a trusted-proxy li
 
 ## Desktop app
 
-`desktop/` is a standalone Tauri 2 installation of the same backend and Rimeward harness. It bundles Node and Chromium, owns its projects and recovery data locally, and provides modular project, editor, terminal, and Git wards. Browser and phone clients can access a paired desktop through an independently usable remote server; desktop content is relayed without a server replica.
+`desktop/` is a standalone Tauri 2 installation of the same backend and Rimeward harness. It bundles Node and Chromium, owns its projects and recovery data locally, and provides modular project, editor, terminal, and Git wards. Browser and phone clients remotely control a paired desktop through an independently usable server. Project folders are never replicated to that server.
 
 ```sh
 npm ci  # includes the pinned Tauri CLI
@@ -200,12 +201,17 @@ npm run desktop:dev
 npm run desktop:build
 ```
 
-Pair servers in **Environments** after launch. See [development workspace setup and validation](docs/development-workspaces.md), including the required proxy privacy configuration. The desktop release workflow builds separately for Apple silicon, Intel macOS, Windows, and Linux on a `desktop-v*` tag: macOS DMGs, Windows installers, and Linux DEB/AppImage packages. Signing uses the Apple secrets listed in that workflow; publication waits for every platform to pass.
+**Workspaces** brings server pages and connected computers into one searchable navigator. This computer opens directly; phones control the same live editors, terminals, and conversations through the server. Returning restores the last page. Project files stay on their original computer.
+
+**Rime follows you.** The first connected server supplies Rime's default persona/model and provider access. Rime's own files, memories, skills, attachments, and chat history sync to a local copy. Offline edits reconcile on reconnect; conflicting local versions remain in **Chat history → Recovered version**. Model credentials stay on the server: an offline desktop needs its own configured provider to make new model calls. Chat history and its code/tool excerpts are shared Rime data; project folders, terminal processes, and pending actions are not replicated.
+
+Pair servers in **Connections** after launch. See [development workspace setup and validation](docs/development-workspaces.md), including the required proxy privacy configuration. The desktop release workflow builds separately for Apple silicon, Intel macOS, Windows, and Linux on a `desktop-v*` tag: macOS DMGs, Windows installers, and Linux DEB/AppImage packages. Signing uses the Apple secrets listed in that workflow; publication waits for every platform to pass.
 
 First launch offers **Bring your dashboard** or **Start right here**. To connect, enter your
 server address and approve the desktop in your normal browser; the remote dashboard is
-still there. **Open project** reuses an existing project page or creates Editor, Terminal,
-and Changes wards. There is no separate development page type. Integrations and CLI
+still there. **Open project** reuses an existing project page or creates Editor and Rime
+side by side, with Terminal and Changes below. Rime inherits the page's project context.
+There is no separate development page type. Integrations and CLI
 credentials remain independent on each installation; connecting does not copy them.
 
 <p align="center">

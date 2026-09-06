@@ -1539,7 +1539,7 @@ function dialogEls(): DialogEls | null {
 
 function selectCard(dialog: HTMLDialogElement, type: string): void {
   q<HTMLInputElement>('#aw-type', dialog)!.value = type;
-  dialog.querySelectorAll<HTMLButtonElement>('.aw-card').forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.type === type)));
+  dialog.querySelectorAll<HTMLButtonElement>('.aw-card').forEach((c) => { c.setAttribute('aria-pressed', String(c.dataset.type === type)); });
   showCfgSection(dialog, type);
 }
 
@@ -1558,6 +1558,11 @@ function showCfgSection(dialog: HTMLDialogElement, type: string): void {
     if (!q<HTMLInputElement>('#aw-cl-db', dialog)!.value.trim()) void loadColumns(dialog, '', []);
   }
   if (type === 'notion-page' && !q<HTMLInputElement>('#aw-np-page', dialog)!.value.trim()) resetPageProps(dialog);
+  const agentProvider = q<HTMLSelectElement>('#aw-ag-provider', dialog);
+  if (agentProvider && type === 'agent' && !agentProvider.querySelector('[value="default"]')) {
+    agentProvider.prepend(new Option('Rime default', 'default'));
+    agentProvider.value = 'default';
+  } else if (type === 'note') agentProvider?.querySelector('[value="default"]')?.remove();
   if (type === 'agent' || type === 'note') void loadAgentModels(dialog);
   if (type === 'spacer') syncFx(dialog);
   // A fresh launcher starts with one row; fillConfig rebuilds the rows for an existing ward.
@@ -1621,8 +1626,8 @@ function syncDbView(dialog: HTMLDialogElement, type: string): void {
   const isDb = type === 'notion-db';
   q('[data-cl-view]', dialog)?.classList.toggle('hidden', !isDb);
   const view = isDb ? q<HTMLSelectElement>('#aw-cl-view', dialog)!.value : 'list';
-  dialog.querySelectorAll<HTMLElement>('[data-cl-listonly]').forEach((n) => n.classList.toggle('hidden', view !== 'list'));
-  dialog.querySelectorAll<HTMLElement>('[data-cl-calonly]').forEach((n) => n.classList.toggle('hidden', view !== 'calendar'));
+  dialog.querySelectorAll<HTMLElement>('[data-cl-listonly]').forEach((n) => { n.classList.toggle('hidden', view !== 'list'); });
+  dialog.querySelectorAll<HTMLElement>('[data-cl-calonly]').forEach((n) => { n.classList.toggle('hidden', view !== 'calendar'); });
 }
 let dbsLoaded = false;
 
@@ -1845,7 +1850,7 @@ const FIELDS: Record<string, Field[]> = {
     { sel: '#aw-ag-model', key: 'model' },
   ],
   agent: [
-    { sel: '#aw-ag-provider', key: 'provider', def: 'openrouter' },
+    { sel: '#aw-ag-provider', key: 'provider', def: 'default' },
     { sel: '#aw-ag-model', key: 'model' },
     { sel: '#aw-ag-persona', key: 'persona' },
     { sel: '#aw-ag-tools', key: 'tools', def: 'all' },
@@ -1999,7 +2004,7 @@ function fillConfig(dialog: HTMLDialogElement, w: WardInstance): void {
       set('#aw-sg-group', typeof cfg.group === 'string' ? cfg.group : '');
       const multi = q<HTMLSelectElement>('#aw-sg-services', dialog)!;
       const picked = new Set(Array.isArray(cfg.services) ? (cfg.services as string[]) : []);
-      [...multi.options].forEach((o) => (o.selected = picked.has(o.value)));
+      for (const o of multi.options) o.selected = picked.has(o.value);
       multi.dispatchEvent(new Event('change', { bubbles: true })); // SearchSelect does not see option.selected writes
       set('#aw-sg-view', cfg.view ?? 'wards');
       break;
@@ -2019,7 +2024,11 @@ function fillConfig(dialog: HTMLDialogElement, w: WardInstance): void {
       const chosen = Array.isArray(cfg.props) ? (cfg.props as string[]) : [];
       void loadPageProps(dialog, String(cfg.page ?? ''), chosen);
       const show = new Set(Array.isArray(cfg.show) ? (cfg.show as string[]) : ['props', 'blocks', 'comments']);
-      [...q<HTMLSelectElement>('#aw-np-show', dialog)!.options].forEach((o) => (o.selected = show.has(o.value)));
+      const field = q<HTMLSelectElement>('#aw-np-show', dialog);
+      if (field) {
+        for (const o of field.options) o.selected = show.has(o.value);
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+      }
       set('#aw-np-depth', cfg.depth ?? 2);
       break;
     }
@@ -2155,7 +2164,7 @@ function bootPicker(dialog: HTMLDialogElement): void {
   };
   resetPicker = () => {
     box.value = '';
-    cats.querySelectorAll('.aw-cat').forEach((c) => c.setAttribute('aria-pressed', String(!c.getAttribute('data-cat'))));
+    cats.querySelectorAll('.aw-cat').forEach((c) => { c.setAttribute('aria-pressed', String(!c.getAttribute('data-cat'))); });
     apply();
   };
 
@@ -2180,7 +2189,7 @@ function bootPicker(dialog: HTMLDialogElement): void {
   cats.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.aw-cat');
     if (!b) return;
-    cats.querySelectorAll('.aw-cat').forEach((c) => c.setAttribute('aria-pressed', String(c === b)));
+    cats.querySelectorAll('.aw-cat').forEach((c) => { c.setAttribute('aria-pressed', String(c === b)); });
     apply();
   });
 }
@@ -2190,7 +2199,7 @@ function bootDialog(): void {
   if (!els) return;
   const { dialog, type, title, err } = els;
 
-  dialog.querySelectorAll('[data-aw-close]').forEach((b) => b.addEventListener('click', () => dialog.close()));
+  dialog.querySelectorAll('[data-aw-close]').forEach((b) => { b.addEventListener('click', () => dialog.close()); });
   // A stale editingId makes applyLayout refuse every push that drops that
   // ward — including an undo of its own removal.
   dialog.addEventListener('close', () => {
@@ -2241,11 +2250,11 @@ function bootDialog(): void {
     const url = q<HTMLInputElement>('[data-al-url]', sel.closest('[data-al-row]')!)!;
     if (!url.value.trim()) url.value = sel.selectedOptions[0]?.dataset.url ?? '';
   });
-  dialog.querySelectorAll<HTMLButtonElement>('.aw-card').forEach((c) =>
+  dialog.querySelectorAll<HTMLButtonElement>('.aw-card').forEach((c) => {
     c.addEventListener('click', () => {
       if (!c.disabled) selectCard(dialog, c.dataset.type!);
-    })
-  );
+    });
+  });
   bootPicker(dialog);
   q<HTMLSelectElement>('#aw-ch-source', dialog)?.addEventListener('change', () => syncChartFields(dialog));
   q<HTMLSelectElement>('#aw-ag-provider', dialog)?.addEventListener('change', () => void loadAgentModels(dialog));

@@ -11,8 +11,10 @@ import {
   beginDeviceAuth,
   pollDeviceAuth,
   deviceServerSession,
+  authenticatedDevice,
   limitDeviceAuth,
 } from "../../../lib/dev/device-auth.ts";
+import { runtimeNavigation } from "../../../lib/dev/navigation.ts";
 export const ALL: APIRoute = async ({
   params,
   request,
@@ -30,6 +32,10 @@ export const ALL: APIRoute = async ({
       value = beginDeviceAuth(body.name, body.platform, body.protocol);
     } else if (request.method === "POST" && action === "token") {
       value = pollDeviceAuth(body.device_code);
+    } else if (request.method === "GET" && action === "navigation") {
+      if (request.headers.has("origin")) throw new DevError("Native connection required.", 403);
+      const device = authenticatedDevice(request.headers.get("authorization")?.replace(/^Bearer /, ""));
+      value = { ...runtimeNavigation(device.user_id), devices: listDevices(device.user_id) };
     } else if (request.method === "POST" && action === "session") {
       if (request.headers.has("origin"))
         throw new DevError("Native connection required.", 403);

@@ -18,7 +18,7 @@ function seedUser(email: string): number {
 test('agent config rebuilds with defaults', () => {
   const out = validateLayout([{ i: 'a', type: 'agent', size: '2x2', config: {} }]);
   assert.ok(out);
-  assert.deepEqual(out[0]!.config, { provider: 'openrouter', tools: 'all', approvals: 'outbound' });
+  assert.deepEqual(out[0]!.config, { provider: 'default', tools: 'all', approvals: 'outbound' });
 });
 
 test('agent config keeps valid values and drops garbage', () => {
@@ -60,7 +60,7 @@ test('agent config clamps oversize and unknown enum values', () => {
   ]);
   assert.ok(out);
   const cfg = out[0]!.config!;
-  assert.equal(cfg.provider, 'openrouter');
+  assert.equal(cfg.provider, 'default');
   assert.equal(cfg.tools, 'all');
   assert.equal(cfg.approvals, 'outbound');
   assert.ok(!cfg.model || String(cfg.model).length <= 100);

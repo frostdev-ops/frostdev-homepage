@@ -13,6 +13,7 @@ import { CATALOG, type WardInstance } from '../../lib/wards.ts';
 import { RENDERERS, body, note } from './wards.ts';
 import { el, getJson, postJson, tapToast, toast } from './dom.ts';
 import { icon } from './icon.ts';
+import { dialog } from './workspace-dialogs.ts';
 import '../../styles/conversation.css';
 import { ensureStream, flushPendingLayout, onAgentLive, onAgentPing, reloadHolds } from './logic.ts';
 
@@ -325,6 +326,8 @@ interface State {
   uploading: number;
   draft: string;
   clearing: boolean;
+  sharedStatus?: string;
+  configured?: boolean;
   uis: Set<Ui>;
 }
 
@@ -534,7 +537,7 @@ function setDraft(st: State, value: string): void {
   for (const ui of st.uis) {
     if (ui.input.value !== value) ui.input.value = value;
     autoGrow(ui.input);
-    ui.send.disabled = st.uploading > 0 || st.clearing || (!value.trim() && !st.attachments.length);
+    ui.send.disabled = st.configured === false || st.uploading > 0 || st.clearing || (!value.trim() && !st.attachments.length);
   }
 }
 
@@ -572,13 +575,15 @@ function paint(st: State): void {
   for (const ui of st.uis) {
     buildLog(st, ui);
     // Mid-turn the composer stays open: a send steers the running turn.
-    ui.send.disabled = st.uploading > 0 || st.clearing || (!st.draft.trim() && !st.attachments.length);
+    ui.send.disabled = st.configured === false || st.uploading > 0 || st.clearing || (!st.draft.trim() && !st.attachments.length);
     const working = st.busy || st.remote;
-    const status = st.pending ? 'Approval needed' : st.clearing ? 'Starting a new chat…' : working ? 'Working · send a follow-up to steer' : 'Rimeward agent';
+    const status = st.pending ? 'Approval needed' : st.clearing ? 'Starting a new chat…' : working ? 'Working · send a follow-up to steer' : st.sharedStatus || 'Rimeward agent';
     if (ui.status.textContent !== status) ui.status.textContent = status;
     ui.root.dataset.working = String(working);
-    ui.input.placeholder = working ? 'Add a follow-up…' : 'Message Rime…';
+    ui.input.placeholder = st.configured === false ? 'Reconnect or configure a local provider in Account…' : working ? 'Add a follow-up…' : 'Message Rime…';
+    ui.root.querySelectorAll<HTMLButtonElement>('[data-ag-attach]').forEach(b => { b.disabled = st.configured === false; });
     ui.root.querySelectorAll<HTMLButtonElement>('[data-ag-clear]').forEach(b => { b.disabled = working || st.clearing || st.uploading > 0; });
+    ui.root.querySelectorAll<HTMLButtonElement>('[data-ag-history]').forEach(b => { b.disabled = working || st.clearing || st.uploading > 0; });
     ui.stop.classList.toggle('hidden', !st.busy && !st.remote); // server-side stop — any client, any turn
     ui.pendingBox.classList.toggle('hidden', !st.pending);
     ui.pendingBox.classList.toggle('flex', !!st.pending);
@@ -594,6 +599,7 @@ async function refetch(st: State, settled = false): Promise<void> {
   const { status, data } = await getJson(`/api/agent/${encodeURIComponent(st.w.i)}`).catch(() => ({ status: 0, data: null }));
   if (status !== 200 || !data) return;
   if (st.busy) return; // a local stream started mid-fetch — it owns the log
+  st.configured = data.configured;
   st.items = itemsFrom(data.transcript ?? []);
   st.pending = data.pending ?? null;
   // A turn is running elsewhere (another client, or an automation) — its live
@@ -796,6 +802,7 @@ async function post(st: State, payload: Record<string, unknown>, back: Restore =
 }
 
 function submit(st: State, ui: Ui): void {
+  if (st.configured === false) return;
   const text = ui.input.value.trim();
   if ((!text && !st.attachments.length) || st.uploading > 0 || st.clearing) return;
   for (const view of st.uis) view.follow = true;
@@ -863,6 +870,7 @@ async function clearChat(st: State): Promise<void> {
 }
 
 async function addFiles(st: State, picked: FileList | File[]): Promise<void> {
+  if (st.configured === false) return;
   const list = Array.from(picked);
   if (!list.length) return;
   const form = new FormData();
@@ -973,7 +981,7 @@ function wireCommandMenu(ui: Ui, run: () => void): void {
 
   function sync(): void {
     const next = completeCommand(ui.input.value);
-    if (!next?.length) return close();
+    if (!next?.length) { close(); return; }
     items = next;
     active = 0;
     menu.classList.remove('hidden');
@@ -1148,6 +1156,7 @@ function ensureDialog(): HTMLDialogElement | null {
   dialogUi = ui;
   const cur = () => (dialogWard ? states.get(dialogWard) : undefined);
   wireComposer(ui, cur);
+  q('[data-ag-history]').addEventListener('click', () => { const st=cur();if(st)void openHistory(st.w); });
   q('[data-ag-close]').addEventListener('click', () => dlg.close());
   dlg.addEventListener('close', () => {
     const st = cur();
@@ -1246,6 +1255,49 @@ document.addEventListener('fd:layout-saved', () => {
   }
 });
 
+function historyButton(w:WardInstance) {
+  const button=el('button','ag-icon-button');button.type='button';button.dataset.agHistory='';button.title='Chat history and sync';button.setAttribute('aria-label','Chat history');button.append(icon('history'));
+  button.onclick=()=>void openHistory(w);
+  return button;
+}
+async function openHistory(w:WardInstance) {
+  const {d,form,actions,error,submit}=dialog('Rime history');submit.hidden=true;
+  const close=actions.querySelector('button');if(close)close.textContent='Close';
+  const content=el('div','ag-history');form.insertBefore(content,actions);
+  d.addEventListener('close',()=>d.remove(),{once:true});
+  const failure=(e:unknown)=>{error.hidden=false;error.textContent=e instanceof Error?e.message:String(e);};
+  content.textContent='Loading your chats…';
+  try{
+    const {status,data}=await getJson('/api/agent/history');if(status!==200)throw Error(data?.error??'Could not load history.');
+    content.replaceChildren();
+    const state=data.sync;
+    content.append(el('p','muted',state?.server?`${new URL(state.server).host} · ${state.online?'Synced':'Using local copy'}${state.error?` · ${state.error}`:''}`:'Rime on this installation'));
+    const list=el('div','ag-history-list');content.append(list);
+    const open=async(key:string)=>{
+      const {data:chat,status}=await getJson(`/api/agent/history?key=${encodeURIComponent(key)}`);if(status!==200||!chat)throw Error('Conversation unavailable.');
+      list.replaceChildren(el('h3',undefined,chat.title));
+      for(const m of chat.messages){const msg=el('div','ag-history-message');msg.append(el('strong',undefined,m.role==='user'?'You':'Rime'),markdown(m.text));list.append(msg);}
+      submit.hidden=false;submit.textContent='Continue here';
+      list.append(el('p','muted','Continues a copy here. The original chat and any work running there are preserved.'));
+      form.onsubmit=async(e)=>{e.preventDefault();submit.disabled=true;try{const {ok,data}=await postJson('/api/agent/history',{ward:w.i,key});if(!ok)throw Error(data?.error??'Could not continue chat.');d.close();await renderAgent(w);}catch(e){failure(e);}finally{submit.disabled=false;}};
+    };
+    for(const chat of data.chats??[]){const b=el('button','btn ag-history-row');b.type='button';b.append(el('strong',undefined,chat.title),el('small','muted',chat.device));b.onclick=()=>void open(chat.key).catch(failure);list.append(b);}
+    if(!data.chats?.length)list.append(el('p','muted','Your conversations will appear here.'));
+    for(const saved of state?.conflicts??[]){
+      const b=el('button','btn ag-history-row',`Recovered version · ${saved.key}`);b.type='button';list.append(b);
+      b.onclick=()=>void(async()=>{
+        const {data:copy,status}=await getJson(`/api/agent/history?conflict=${saved.id}`);if(status!==200)throw Error('Recovery version unavailable.');
+        const value=JSON.parse(copy.payload);let text='Deleted locally';
+        if(typeof value==='string'){try{text=new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(atob(value),c=>c.charCodeAt(0)));}catch{text='Binary agent file — this version can be restored.';}}
+        else if(value)text=JSON.stringify(value,null,2);
+        list.replaceChildren(el('h3',undefined,copy.key),el('pre','ag-history-message',text));
+        submit.hidden=!copy.key.startsWith('work/');submit.textContent='Restore this version';
+        form.onsubmit=async(e)=>{e.preventDefault();submit.disabled=true;try{const {ok,data}=await postJson('/api/agent/history',{conflict:saved.id});if(!ok)throw Error(data?.error??'Could not restore.');d.close();}catch(e){failure(e);}finally{submit.disabled=false;}};
+      })().catch(failure);
+    }
+  }catch(e){failure(e);}
+}
+
 async function renderAgent(w: WardInstance): Promise<void> {
   ensureStream();
   const st = stateFor(w);
@@ -1271,14 +1323,16 @@ async function renderAgent(w: WardInstance): Promise<void> {
     b.replaceChildren(unavailable);
     return;
   }
-  if (!data.configured) {
+  st.sharedStatus=data.sync?.server?data.sync.online?`Rime · ${new URL(data.sync.server).host}`:'Rime · local fallback':undefined;
+  st.configured = data.configured;
+  if (!data.configured && !data.transcript?.length) {
     const setup = el('div', 'ag-empty ag-setup');
     const mark = el('div', 'ag-empty-mark');
     mark.append(icon('sparkle'));
     const link = el('a', 'btn', 'Set up your agent');
     link.href = '/account#agent';
     setup.append(mark, el('h3', undefined, 'Meet your workspace agent'),
-      el('p', undefined, `Connect ${data.provider === 'codex' ? 'Codex' : 'OpenRouter'} in Account to start a conversation with Rime.`), link);
+      el('p', undefined, data.sync?.server ? `Your Rime files and history are available locally. ${data.sync.error ?? 'The server is offline.'} Connect a local provider in Account to run Rime without the server.` : `Connect ${data.provider === 'codex' ? 'Codex' : 'OpenRouter'} in Account to start a conversation with Rime.`), link, historyButton(w));
     b.replaceChildren(setup);
     return;
   }
@@ -1310,7 +1364,7 @@ async function renderAgent(w: WardInstance): Promise<void> {
   expand.title = 'Expand chat';
   expand.setAttribute('aria-label', 'Expand chat');
   expand.append(icon('resize'));
-  top.append(statusLine, fresh, expand);
+  top.append(statusLine, historyButton(w), fresh, expand);
   const content = el('div', 'ag-body');
   wrap.append(top, content);
   b.append(wrap);
@@ -1349,7 +1403,7 @@ async function renderAgent(w: WardInstance): Promise<void> {
     const live = states.get(w.i);
     if (!live || live.busy || !d) return; // this client's own stream owns the log
     let running = remoteRuns.get(w.i);
-    if (!running) remoteRuns.set(w.i, (running = newRun()));
+    if (!running) { running = newRun(); remoteRuns.set(w.i, running); }
     if (d.event?.type === 'end') {
       // The turn died without settling — no ping is coming, so release here.
       remoteRuns.delete(w.i);

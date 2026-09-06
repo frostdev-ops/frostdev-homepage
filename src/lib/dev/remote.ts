@@ -1,3 +1,6 @@
+import { runtimeNavigation, workspacePath } from "./navigation.ts";
+import type { WorkspaceEntry, WorkspaceNavigation } from "./types.ts";
+import { ensureRimeSync, disconnectRime } from '../agent/sync.ts';
 import http from "node:http";
 import WebSocket from "ws";
 import fs from "node:fs";
@@ -35,6 +38,12 @@ export async function nativeDesktop(op: string, value?: unknown) {
 }
 let pairs: Pair[] = [];
 let loaded = false;
+/** The first configured Rime server is the shared profile; other pairs remain workspace connections. */
+export async function rimeConnection(user:number) {
+  await remotePairs(user);
+  return pairs[0];
+}
+const serverSessions = new Map<string, { id: string; expiresAt: string }>();
 const controls = new Map<string, WebSocket>();
 const retries = new Map<string, ReturnType<typeof setTimeout>>();
 const channels = new Map<string, Set<WebSocket>>();
@@ -57,6 +66,7 @@ export async function remotePairs(user: number) {
     pairs = JSON.parse(await vault("get"));
     loaded = true;
     pairs.forEach(connect);
+    if(pairs.length)ensureRimeSync(user);
   }
   return pairs.map(({ server, id, name }) => ({
     server,
@@ -201,6 +211,7 @@ export async function pollSignIn(user: number, id: string) {
     await vault("set", JSON.stringify(next));
     pairs = next;
     connect(p);
+    ensureRimeSync(user);
     s.result = {
       id: p.id,
       email: String(result.email ?? ""),
@@ -226,10 +237,12 @@ export async function completeOnboarding(user: number, home: string) {
   setSetting(`desktop:onboarded:${user}`, "1");
   return { ok: true };
 }
-export async function openServer(user: number, id: string) {
+export async function openServer(user: number, id: string, path = "/dash") {
   await remotePairs(user);
   const p = pairs.find((p) => p.id === id);
   if (!p) throw new DevError("Connect this server first.", 404);
+  let session = serverSessions.get(id);
+  if (!session || Date.parse(`${session.expiresAt.replace(" ", "T")}Z`) < Date.now() + 60_000) {
   const response = await fetch(`${p.server}/api/devices/session`, {
     method: "POST",
     redirect: "error",
@@ -247,9 +260,11 @@ export async function openServer(user: number, id: string) {
         : "Server unavailable. You can continue on this desktop.",
       response.status,
     );
-  const session = await response.json();
+  session = await response.json() as { id: string; expiresAt: string };
+  serverSessions.set(id, session);
+  }
   await nativeDesktop("server", {
-    url: `${p.server}/dash`,
+    url: `${p.server}${path}`,
     session: session.id,
     device: p.id,
   });
@@ -283,6 +298,7 @@ export async function pairDesktop(
   await vault("set", JSON.stringify(next));
   pairs = next;
   connect(p);
+  ensureRimeSync(user);
   return { id: p.id };
 }
 export async function unpairDesktop(user: number, id: string) {
@@ -290,6 +306,8 @@ export async function unpairDesktop(user: number, id: string) {
   const next = pairs.filter((p) => p.id !== id);
   await vault("set", JSON.stringify(next));
   pairs = next;
+  serverSessions.delete(id);
+  disconnectRime(user);
   clearTimeout(retries.get(id));
   controls.get(id)?.close();
   controls.delete(id);
@@ -440,4 +458,45 @@ export function relayHtml(html: string, base: string) {
 export function ensureRemote() {
   if (isDesktop() && (globalThis as NativeGlobal).__nativeVault)
     void remotePairs(localOwner()).catch(() => {});
+}
+
+/** Gather the connected workspace list on demand. Remote payloads are not written to disk. */
+export async function desktopNavigation(user: number): Promise<WorkspaceNavigation> {
+  const list = await remotePairs(user);
+  const workspaces: WorkspaceEntry[] = [{ id: "local", name: os.hostname(), online: true, ...runtimeNavigation(user) }];
+  const servers = await Promise.all(list.map(async pair => {
+    const entry: WorkspaceEntry = { id: `server:${pair.id}`, name: new URL(pair.server).host,
+      kind: "server", online: false, server: pair.server, device: pair.id, pages: [] };
+    try {
+      const credential = pairs.find(p => p.id === pair.id);
+      if (!credential) throw new Error("Connection removed");
+      const response = await fetch(`${pair.server}/api/devices/navigation`, {
+        headers: { authorization: `Bearer ${credential.token}` }, redirect: "error", signal: AbortSignal.timeout(4000),
+      });
+      if (!response.ok) throw new Error(response.status === 401 ? "Reconnect this server" : "Server unavailable");
+      const result = await response.json();
+      entry.online = true; entry.pages = result.pages; entry.activePage = result.activePage;
+      return [entry, ...(result.devices ?? []).filter((d: {id: string}) => d.id !== pair.id).map((d: {id: string; name: string; online: boolean}) => ({
+        id: `desktop:${pair.id}:${d.id}`, name: d.name, kind: "desktop" as const, online: d.online,
+        server: pair.server, device: d.id, pages: [],
+      }))];
+    } catch (e) {
+      // Older servers can still be connected without the page-navigation endpoint.
+      entry.online = controls.get(pair.id)?.readyState === WebSocket.OPEN;
+      entry.error = entry.online ? "Page list unavailable · open server dashboard" : e instanceof Error ? e.message : "Server unavailable";
+      return [entry];
+    }
+  }));
+  workspaces.push(...servers.flat());
+  return { current: "local", workspaces };
+}
+export async function navigateWorkspace(user: number, runtime: string, page?: string, screen?: string) {
+  await remotePairs(user);
+  const path = workspacePath(page, screen);
+  if (runtime === "local") return nativeDesktop("local", { path });
+  if (screen) throw new DevError("Open connections on this desktop.");
+  const [kind, pair, device, extra] = runtime.split(":");
+  if (!pair || extra || !pairs.some(p => p.id === pair) || !["server", "desktop"].includes(kind ?? "") ||
+    (kind === "desktop" ? !/^[\w-]{36}$/.test(device ?? "") : device !== undefined)) throw new DevError("Unknown workspace.", 404);
+  return openServer(user, pair, kind === "desktop" ? `/runtime/${device}${path}` : path);
 }

@@ -14,6 +14,7 @@ let pages: PageDef[] = DEFAULT_PAGES;
 let current = '';
 let nav: HTMLElement | null = null;
 let grid: HTMLElement | null = null;
+const pageStorageKey = () => `fd-page:${document.querySelector<HTMLMetaElement>('meta[name="rimeward-runtime-base"]')?.content ?? "server"}`;
 const subs = new Set<(id: string, prev: string) => void>();
 
 export const readPages = (): PageDef[] => pages;
@@ -134,9 +135,11 @@ export function showPage(id: string, opts: { replace?: boolean; silent?: boolean
     else history.pushState(null, '', url);
   }
   try {
-    localStorage.setItem('fd-page', id);
+    localStorage.setItem(pageStorageKey(), id);
   } catch {}
   if (prev === id) return;
+  void fetch('/api/runtime', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ page: id }), keepalive: true }).catch(() => {});
   window.dispatchEvent(new CustomEvent('fd:page', { detail: { id, prev } }));
   for (const fn of subs) fn(id, prev);
 }
@@ -319,10 +322,10 @@ export function bootPages(): void {
   const fromHash = () => new URLSearchParams(location.hash.slice(1)).get('p');
   let stored: string | null = null;
   try {
-    stored = localStorage.getItem('fd-page');
+    stored = localStorage.getItem(pageStorageKey());
   } catch {}
   renderTabs();
-  showPage(fromHash() ?? stored ?? firstPage(), { replace: true });
+  showPage(fromHash() ?? q('#pages-data')?.dataset.activePage ?? stored ?? firstPage(), { replace: true });
   addEventListener('hashchange', () => {
     const id = fromHash();
     if (id && id !== current) showPage(id, { silent: true });

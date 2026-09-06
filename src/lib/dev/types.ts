@@ -48,3 +48,20 @@ export const DEV_WARDS = [
   "terminal",
   "changes",
 ] as const;
+
+/** Navigation metadata only. A project path, buffer or conversation is never a page entry. */
+export interface WorkspaceEntry {
+  id: string;
+  name: string;
+  kind: "desktop" | "server";
+  online: boolean;
+  pages: { id: string; title: string }[];
+  activePage?: string;
+  device?: string;
+  server?: string;
+  error?: string;
+}
+export interface WorkspaceNavigation {
+  current: string;
+  workspaces: WorkspaceEntry[];
+}

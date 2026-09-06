@@ -13,6 +13,8 @@ import {
 import { validateLayout, validatePages } from "../../../lib/wards.ts";
 import {
   remotePairs,
+  desktopNavigation,
+  navigateWorkspace,
   previewPair,
   pairDesktop,
   unpairDesktop,
@@ -125,6 +127,7 @@ export const ALL: APIRoute = async ({ params, request, locals, url }) => {
       });
     }
     if (request.method === "GET") {
+      if (action === "navigation") return json(await desktopNavigation(user));
       if (action === "onboarding") return json(await onboarding(user));
       if (action === "project-defaults")
         return json({ parent: defaultProjectParent() });
@@ -161,6 +164,7 @@ export const ALL: APIRoute = async ({ params, request, locals, url }) => {
         );
     }
     if (request.method === "POST") {
+      if (action === "navigate") return json(await navigateWorkspace(user, String(body.runtime ?? ""), body.page ?? undefined, body.screen ?? undefined));
       if (action === "sign-in-start")
         return json(await beginSignIn(user, body.server));
       if (action === "sign-in-poll") return json(await pollSignIn(user, id));
@@ -204,6 +208,7 @@ export const ALL: APIRoute = async ({ params, request, locals, url }) => {
         ]);
         const types = [
           "editor",
+          "agent",
           "terminal",
           "changes",
         ];
@@ -214,7 +219,7 @@ export const ALL: APIRoute = async ({ params, request, locals, url }) => {
               i: `w${crypto.randomBytes(4).toString("hex")}`,
               type,
               page,
-              size: type === "editor" ? "6x4" : "3x2",
+              size: type === "editor" ? "4x4" : type === "agent" ? "2x4" : "3x2",
             })),
           ],
           pages ?? undefined,

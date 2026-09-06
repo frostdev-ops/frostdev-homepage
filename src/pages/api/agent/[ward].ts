@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import type { AgentEvent } from '../../../lib/agent/core.ts';
 import { agentConfigured } from '../../../lib/agent/provider.ts';
 import { parseCommand } from '../../../lib/agent/commands.ts';
+import { syncRime, syncStatus } from '../../../lib/agent/sync.ts';
 
 export const prerender = false;
 
@@ -13,18 +14,17 @@ export const prerender = false;
 export const GET: APIRoute = async ({ params, locals }) => {
   const { wardSurface } = await import('../../../lib/agent/core.ts');
   const userId = locals.user!.userId;
+  await syncRime(userId);
   const surface = wardSurface(userId, String(params.ward));
   // 400, not 404 — the ward helpers map 404 to a Connect chip.
   if (!surface) return Response.json({ error: 'not an agent ward' }, { status: 400 });
-  return Response.json(surface, { headers: { 'cache-control': 'no-store' } });
+  return Response.json({...surface,sync:syncStatus(userId)}, { headers: { 'cache-control': 'no-store' } });
 };
 
 export const POST: APIRoute = async ({ params, request, locals }) => {
   const { agentWardConfig, clearThread, interruptTurn, resolveConfirmTurn, steerTurn, runChatTurn, runCommand, wardBusy } = await import('../../../lib/agent/core.ts');
   const userId = locals.user!.userId;
   const ward = String(params.ward);
-  const cfg = agentWardConfig(userId, ward);
-  if (!cfg) return Response.json({ error: 'not an agent ward' }, { status: 400 });
 
   const body = (await request.json().catch(() => null)) as {
     message?: string;
@@ -35,6 +35,10 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
     mode?: 'steer';
   } | null;
   if (!body) return Response.json({ error: 'bad body' }, { status: 400 });
+  // Local controls must remain responsive while reconciliation is in flight.
+  if (!body.action && body.mode !== 'steer') await syncRime(userId);
+  const cfg = agentWardConfig(userId, ward);
+  if (!cfg) return Response.json({ error: 'not an agent ward' }, { status: 400 });
 
   if (body.action === 'clear') {
     clearThread(userId, ward);

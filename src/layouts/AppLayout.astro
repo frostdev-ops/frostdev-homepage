@@ -1,5 +1,6 @@
 ---
 import { isDesktop } from '../lib/dev/runtime.ts';
+import Icon from '../components/Icon.astro';
 import BaseLayout from './BaseLayout.astro';
 import { Font } from 'astro:assets';
 import { fontVar, normalizeTheme, parseTheme, type FontId } from '../lib/theme.ts';
@@ -61,8 +62,9 @@ const declared = [...new Set([brand.uiFont, brand.brandFont, ...(Astro.props.fon
         <span id="brand-text" class="app-brand-text hidden sm:inline">{brand.brandText}</span>
       </a>
 
+      {search && <button id="header-search-toggle" class="btn header-search-toggle" type="button" aria-label="Search Notion" aria-controls="header-search" aria-expanded="false"><Icon id="search" /></button>}
       {search ? (
-        <div class="app-hdr-mid relative mx-auto w-full max-w-md">
+        <div id="header-search" class="app-hdr-mid relative mx-auto w-full max-w-md">
           <input
             id="notion-search"
             type="search"
@@ -93,7 +95,7 @@ const declared = [...new Set([brand.uiFont, brand.brandFont, ...(Astro.props.fon
         <summary class="btn min-h-9 cursor-pointer list-none px-2 py-1 text-xs">{me.email.split('@')[0]}</summary>
         <div class="card absolute right-0 z-30 mt-1 flex w-44 flex-col gap-1 p-2 shadow-lg">
           <a href="/account" class="btn w-full text-xs">Account</a>
-          <button type="button" id="manage-environments" class="btn w-full text-xs">Environments</button>
+          <button type="button" id="manage-environments" class="btn w-full text-xs">Connections</button>
           {me.role === 'admin' && <a href="/admin/users" class="btn w-full text-xs">Users</a>}
           <form method="post" action="/api/logout">
             <button type="submit" class="btn w-full text-xs">Sign out</button>
@@ -117,6 +119,15 @@ const declared = [...new Set([brand.uiFont, brand.brandFont, ...(Astro.props.fon
     import '../scripts/app/runtime-picker.ts';
     import { bootNotionSearch } from '../scripts/app/notion-search.ts';
     bootNotionSearch();
+    const searchToggle = document.getElementById('header-search-toggle');
+    const searchHost = document.getElementById('header-search');
+    const closeSearch = () => { searchHost?.classList.remove('is-open'); searchToggle?.setAttribute('aria-expanded', 'false'); };
+    searchToggle?.addEventListener('click', () => {
+      const open = searchHost?.classList.toggle('is-open'); searchToggle.setAttribute('aria-expanded', String(!!open));
+      if (open) searchHost?.querySelector('input')?.focus();
+    });
+    document.addEventListener('click', e => { if (!searchHost?.contains(e.target as Node) && !searchToggle?.contains(e.target as Node)) closeSearch(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && searchHost?.classList.contains('is-open')) { closeSearch(); searchToggle?.focus(); } });
 
     // Theme toggle: html.dark + localStorage['fd-theme'] (dark is the default),
     // persisted server-side so other devices agree.

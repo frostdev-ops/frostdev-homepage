@@ -1,5 +1,7 @@
 import { getSetting, setSetting } from '../settings.ts';
 import { getAgentAccount, agentKey } from './accounts.ts';
+import { isDesktop } from '../dev/runtime.ts';
+import { sharedRime, sharedModel } from './sync.ts';
 
 // The provider contract. Two wire protocols, one interface: codex speaks the
 // OpenAI Responses API (items replayed verbatim, encrypted reasoning included),
@@ -155,14 +157,23 @@ export const DEFAULT_MODELS: Record<AgentProviderId, string> = {
 export const CODEX_MODELS = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4-mini'];
 
 export function agentConfigured(userId: number, provider: AgentProviderId): boolean {
+  const shared=sharedRime(userId);
+  if(shared?.online && shared.providers[provider])return true;
   if (provider === 'openrouter') return !!agentKey(userId, 'openrouter');
   return !!getAgentAccount(userId, 'codex');
 }
 
-export function getProvider(id: AgentProviderId): Promise<AgentProvider> {
+export function defaultAgentProvider(userId: number): AgentProviderId {
+  const preferred = sharedRime(userId)?.config.provider;
+  if (preferred === 'codex' || preferred === 'openrouter') return preferred;
+  return agentConfigured(userId, 'codex') ? 'codex' : 'openrouter';
+}
+
+export async function getProvider(id: AgentProviderId): Promise<AgentProvider> {
   // Dynamic so a request that never chats (status ticks, watchers sweeping an
   // empty table) doesn't load the SDK or the codex machinery.
-  return id === 'codex'
+  const provider = await (id === 'codex'
     ? import('./codex.ts').then((m) => m.codexProvider)
-    : import('./openrouter.ts').then((m) => m.openrouterProvider);
+    : import('./openrouter.ts').then((m) => m.openrouterProvider));
+  return isDesktop() ? {...provider,run:async(call)=>await sharedModel(call.userId,id,call) ?? provider.run(call)} : provider;
 }

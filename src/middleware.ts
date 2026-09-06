@@ -33,6 +33,8 @@ const PUBLIC_PREFIXES = [
   '/api/devices/authorize',
   '/api/devices/token',
   '/api/devices/session',
+  '/api/devices/navigation',
+  '/api/devices/harness',
   '/api/logout', // must work with a DEAD session too, or the cookie can never be cleared
   '/api/auth/google', // covers /callback too
   '/api/connect/google/callback',

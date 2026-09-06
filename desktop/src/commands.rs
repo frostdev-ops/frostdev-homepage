@@ -49,3 +49,69 @@ pub async fn ward_touch(
     chromium::touch(&shared, &ward).await;
     Ok(())
 }
+
+async fn workspace_allowed(
+    window: &tauri::WebviewWindow,
+    app: &tauri::AppHandle,
+) -> Result<(), String> {
+    use tauri::Manager;
+    let url = window.url().map_err(|_| "Window unavailable")?;
+    let local = crate::runtime::local_url(app, "/").await?;
+    if url.origin() == local.origin() || chromium::allows_origin(&app.state::<Shared>(), &url).await
+    {
+        Ok(())
+    } else {
+        Err("This server is not connected to this desktop".into())
+    }
+}
+#[tauri::command]
+pub async fn workspace_navigation(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    workspace_allowed(&window, &app).await?;
+    let mut data = crate::runtime::workspace_request(&app, None).await?;
+    // Resolve the page's server origin to its paired identity, never a server user ID.
+    let url = window.url().map_err(|_| "Window unavailable")?;
+    if let Some(entries) = data["workspaces"].as_array() {
+        let origin = url.origin().ascii_serialization();
+        let device = url
+            .path()
+            .strip_prefix("/runtime/")
+            .and_then(|path| path.split('/').next());
+        let current = entries
+            .iter()
+            .find(|entry| {
+                entry["server"].as_str() == Some(origin.as_str())
+                    && entry["kind"] == "desktop"
+                    && entry["device"].as_str() == device
+            })
+            .or_else(|| {
+                entries.iter().find(|entry| {
+                    entry["server"].as_str() == Some(origin.as_str()) && entry["kind"] == "server"
+                })
+            })
+            .and_then(|entry| entry["id"].as_str())
+            .map(str::to_string);
+        if let Some(current) = current {
+            data["current"] = current.into();
+        }
+    }
+    Ok(data)
+}
+#[tauri::command]
+pub async fn open_workspace(
+    runtime: String,
+    page: Option<String>,
+    screen: Option<String>,
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    workspace_allowed(&window, &app).await?;
+    crate::runtime::workspace_request(
+        &app,
+        Some(serde_json::json!({"runtime":runtime,"page":page,"screen":screen})),
+    )
+    .await?;
+    Ok(())
+}

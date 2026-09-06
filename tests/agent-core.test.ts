@@ -88,6 +88,28 @@ test('agentWardConfig rebuilds from the stored layout only', () => {
   assert.equal(agentWardConfig(u, 'nope'), null);
 });
 
+test('new Rime wards inherit the server profile without crossing provider model dialects', () => {
+  const u = seedUser('core-shared-default@x.dev');
+  const oldDesktop = process.env.RIMEWARD_DESKTOP, oldToken = process.env.RIMEWARD_NATIVE_TOKEN;
+  process.env.RIMEWARD_DESKTOP = '1';
+  process.env.RIMEWARD_NATIVE_TOKEN = 'test-only';
+  try {
+    setSetting(`rime:shared:${u}`, JSON.stringify({server:'https://example.com', profile:'test', providers:{codex:true,openrouter:false}, config:{provider:'codex',model:'server-model',persona:'Shared persona'}}));
+    saveDashboard(u, validateLayout([
+      {i:'default',type:'agent',size:'2x2'},
+      {i:'override',type:'agent',size:'2x2',config:{provider:'openrouter'}},
+    ])!);
+    assert.equal(agentWardConfig(u,'default')?.provider,'codex');
+    assert.equal(agentWardConfig(u,'default')?.model,'server-model');
+    assert.equal(agentWardConfig(u,'default')?.persona,'Shared persona');
+    assert.equal(agentWardConfig(u,'override')?.provider,'openrouter');
+    assert.notEqual(agentWardConfig(u,'override')?.model,'server-model');
+  } finally {
+    if(oldDesktop===undefined)delete process.env.RIMEWARD_DESKTOP;else process.env.RIMEWARD_DESKTOP=oldDesktop;
+    if(oldToken===undefined)delete process.env.RIMEWARD_NATIVE_TOKEN;else process.env.RIMEWARD_NATIVE_TOKEN=oldToken;
+  }
+});
+
 test('runLoop: missing reason is rejected and the model is told to retry', async () => {
   const u = seedUser('core-reason@x.dev');
   const provider = fakeProvider([
@@ -411,6 +433,28 @@ test('the instructions are a stable, cacheable prefix: no clock, static bulk fir
   assert.ok(spec > 0);
   assert.ok(a.indexOf('Current wards:') > spec);
   assert.ok(a.indexOf('Your notes, verbatim:') > a.indexOf('Current wards:'));
+});
+
+test('Rime inherits its own desktop project, including when nested, without adding desktop context on the server', () => {
+  const u = seedUser('core-project@x.dev');
+  const pages = [{ id: 'home', title: 'Home' }, { id: 'code', title: 'Project', project: 'project-one' }];
+  saveDashboard(u, validateLayout([
+    { i: 'group', type: 'container', size: '2x2', page: 'code' },
+    { i: 'ag1', type: 'agent', size: '2x4', in: 'group' },
+  ], pages)!, pages);
+  const cfg = agentWardConfig(u, 'ag1')!;
+  const desktop = process.env.RIMEWARD_DESKTOP, token = process.env.RIMEWARD_NATIVE_TOKEN;
+  try {
+    process.env.RIMEWARD_DESKTOP = '1'; process.env.RIMEWARD_NATIVE_TOKEN = 'test-only';
+    assert.match(buildInstructions(cfg, u, 'ag1'), /Current desktop project:.*"project":"project-one"/);
+    saveDashboard(u, getDashboard(u), [{ id: 'home', title: 'Home' }, { id: 'code', title: 'Project', project: 'project-two' }]);
+    assert.match(buildInstructions(cfg, u, 'ag1'), /Current desktop project:.*"project":"project-two"/);
+    process.env.RIMEWARD_DESKTOP = '0';
+    assert.doesNotMatch(buildInstructions(cfg, u, 'ag1'), /Current desktop project:/);
+  } finally {
+    if (desktop === undefined) delete process.env.RIMEWARD_DESKTOP; else process.env.RIMEWARD_DESKTOP = desktop;
+    if (token === undefined) delete process.env.RIMEWARD_NATIVE_TOKEN; else process.env.RIMEWARD_NATIVE_TOKEN = token;
+  }
 });
 
 // ------------------------------------------------------------ slash commands

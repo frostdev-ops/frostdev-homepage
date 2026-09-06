@@ -17,6 +17,7 @@ import { getAgentAccount } from '../lib/agent/accounts.ts';
 import { browserbaseKey } from '../lib/browser/browserbase.ts';
 import { codexOauthPending } from '../lib/agent/codex.ts';
 import { agentLastError, agentRounds } from '../lib/agent/provider.ts';
+import { sharedRime, syncRime } from '../lib/agent/sync.ts';
 
 const me = Astro.locals.user!;
 const theme = parseTheme(me.theme) ?? normalizeTheme({});
@@ -85,6 +86,8 @@ const mailboxLink = links.get('mailbox');
 const icloudLink = links.get('icloud');
 
 // Agent ward credentials (per-user; the agent ward reads these).
+await syncRime(me.userId);
+const sharedAgent = sharedRime(me.userId);
 const codexAccount = getAgentAccount(me.userId, 'codex');
 const codexPending = codexAccount ? null : codexOauthPending(me.userId);
 const AGENT_KEYS = [
@@ -962,8 +965,14 @@ const TABS = [
       <div class="card mb-6 p-4">
         <h2 class="section-title mb-3">Agent</h2>
         <p class="mb-3 text-xs text-ink-muted">
-          Credentials for Rime, the agent dashboard ward. Each user connects their own — the ward picks its provider in its ⚙ config.
+          {sharedAgent ? 'Rime uses your connected server by default. Credentials configured below are local fallbacks.' : 'Credentials for Rime. Choose a provider in the ward configuration, or let Rime use the available account.'}
         </p>
+        {sharedAgent && (
+          <p class="banner text-xs" data-rime-connection>
+            <strong>{new URL(sharedAgent.server).host}</strong> · {sharedAgent.online ? 'Connected — server provider access is active.' : 'Offline — using local Rime files and history.'}
+            {' '}Provider credentials stay on the server. Configure a local provider below to run Rime while it is unavailable.
+          </p>
+        )}
         {agentErr && (
           <p class="banner banner-warn text-xs">
             Last {agentErr.provider} failure: {agentErr.reason} <span class="text-ink-faint">({agentErr.at})</span>

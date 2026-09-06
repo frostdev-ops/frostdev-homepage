@@ -6,7 +6,7 @@
     "rules": [{
       "ref": "rimeward_relay_no_cache",
       "description": "Never cache desktop-owned content",
-      "expression": "starts_with(http.request.uri.path, \"/runtime/\") or http.request.uri.path eq \"/api/devices/connect\"",
+      "expression": "starts_with(http.request.uri.path, \"/runtime/\") or http.request.uri.path eq \"/api/devices/connect\" or starts_with(http.request.uri.path, \"/api/devices/harness\")",
       "action": "set_cache_settings",
       "action_parameters": { "cache": false }
     }]
@@ -18,7 +18,7 @@
     "rules": [{
       "ref": "rimeward_relay_no_transform",
       "description": "Stream desktop payloads without analytics or content rewriting",
-      "expression": "starts_with(http.request.uri.path, \"/runtime/\") or http.request.uri.path eq \"/api/devices/connect\"",
+      "expression": "starts_with(http.request.uri.path, \"/runtime/\") or http.request.uri.path eq \"/api/devices/connect\" or starts_with(http.request.uri.path, \"/api/devices/harness\")",
       "action": "set_config",
       "action_parameters": {
         "disable_rum": true,

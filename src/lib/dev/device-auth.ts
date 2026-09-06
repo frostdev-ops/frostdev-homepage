@@ -130,7 +130,7 @@ export function pollDeviceAuth(code: unknown, now = Date.now()) {
   })();
 }
 /** Only the native backend exchanges a paired credential for an app session. */
-export function deviceServerSession(token: unknown) {
+export function authenticatedDevice(token: unknown) {
   if (typeof token !== "string" || token.length > 200)
     throw new DevError("Reconnect this desktop.", 401);
   const db = getDb();
@@ -139,6 +139,10 @@ export function deviceServerSession(token: unknown) {
     .get(digest(token)) as { id: string; user_id: number } | undefined;
   if (!device)
     throw new DevError("This desktop was revoked. Connect again.", 401);
+  return device;
+}
+export function deviceServerSession(token: unknown) {
+  const device = authenticatedDevice(token), db = getDb();
   return db.transaction(() => {
     db.prepare(
       "DELETE FROM sessions WHERE id IN (SELECT session_id FROM device_sessions WHERE device_id=?)",

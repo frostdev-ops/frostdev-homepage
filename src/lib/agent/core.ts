@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { siteInfo } from '../site.ts';
 import { getSetting, setSetting, takeSetting, deleteSetting } from '../settings.ts';
-import { getDashboard, getPages } from '../dashboard.ts';
+import { getDashboard, getPages, saveDashboard } from '../dashboard.ts';
+import { isDesktop } from '../dev/runtime.ts';
+import { sharedRime, syncRime } from './sync.ts';
 import { createPacket } from '../flow.ts';
 import { pageOf, wardTitle, CATALOG, MAX_H, MAX_W } from '../wards.ts';
 import { NOTES_CAP, NOTES_FILE, ensureNotes } from './history.ts';
@@ -29,6 +31,7 @@ import { getAttachment, attachmentDataUrl } from './attachments.ts';
 import { shellNetworkEnabled } from './shell.ts';
 import {
   agentConfigured,
+  defaultAgentProvider,
   getProvider,
   DEFAULT_MODELS,
   AGENT_EFFORTS,
@@ -116,8 +119,9 @@ export interface AskDelivery {
 export function agentWardConfig(userId: number, ward: string): AgentWardConfig | null {
   const w = getDashboard(userId).find((x) => x.i === ward && x.type === 'agent');
   if (!w) return null;
-  const c = (w.config ?? {}) as Record<string, unknown>;
-  const provider: AgentProviderId = c.provider === 'codex' ? 'codex' : 'openrouter';
+  const shared = sharedRime(userId)?.config;
+  const provider: AgentProviderId = w.config?.provider === 'codex' || w.config?.provider === 'openrouter' ? w.config.provider : defaultAgentProvider(userId);
+  const c = { ...shared, ...(shared?.provider !== provider ? {model: undefined, effort: undefined} : {}), ...w.config } as Record<string, unknown>;
   return {
     provider,
     model: typeof c.model === 'string' && c.model.trim() ? c.model.trim() : DEFAULT_MODELS[provider],
@@ -474,6 +478,8 @@ function peersBlock(userId: number, ward: string): string {
 export function buildInstructions(cfg: AgentWardConfig, userId: number, ward: string): string {
   const dash = getDashboard(userId);
   const pages = getPages(userId);
+  const own = dash.find((w) => w.i === ward);
+  const projectPage = isDesktop() && own ? pages.find((p) => p.id === pageOf(own, pages, dash) && p.project) : undefined;
   const line = (w: (typeof dash)[number]) => `${w.i} (${w.type}${wardTitle(w) !== w.type ? `, "${wardTitle(w)}"` : ''}, ${w.size}${w.hidden ? ', hidden' : ''})`;
   // Grouped by page once there is more than one, so "the timer on Ops" resolves.
   const layout =
@@ -503,6 +509,7 @@ export function buildInstructions(cfg: AgentWardConfig, userId: number, ward: st
     `Be concise and concrete. Format with Markdown.`,
     cfg.persona ? `The user set this persona for you — follow it within the rules above:\n${cfg.persona}` : '',
     `Current wards: ${layout}.`,
+    projectPage ? `Current desktop project: ${JSON.stringify({ page: projectPage.id, title: projectPage.title, project: projectPage.project })}. This is the default project for this chat. Use runtime "desktop" and this project ID with desktop tools; desktop_projects resolves its folder. Inspect files, terminal state, and changes before acting. Native terminal input follows the session's user-selected permission mode.` : '',
     peersBlock(userId, ward),
     skillsBlock(userId),
     memoryBlock(userId),
@@ -829,6 +836,7 @@ async function settleAndRecord(
   const tail = turn.pending ? `\n\n⏸ Waiting for your confirmation: ${turn.pending.summary}` : '';
   const text = turn.reply + tail;
   addMessage(conv, { role: 'assistant', text, steps: turn.steps, source });
+  void syncRime(conv.user_id, true);
   // The client badges/toasts off this; `source` is what makes an automation
   // answer legible as one instead of looking like something the user typed.
   broadcast(conv.user_id, 'agent', {
@@ -1166,7 +1174,7 @@ export function wardSurface(userId: number, ward: string): {
   const wardCfg = agentWardConfig(userId, ward);
   if (!wardCfg) return null;
   const configured = agentConfigured(userId, wardCfg.provider);
-  const conv = configured ? activeConversation(userId, ward, wardCfg.provider) : null;
+  const conv = configured ? activeConversation(userId, ward, wardCfg.provider) : activeConversationRow(userId, ward);
   let pending: PendingConfirm | null = null;
   if (conv?.pending_confirm_id) {
     const parked = livePendingConfirm(conv);
@@ -1255,4 +1263,21 @@ export function clearThread(userId: number, ward: string): void {
   retireConversation(userId, ward);
   // Every other client is still showing the thread that just went away.
   broadcast(userId, 'agent', { ward });
+}
+
+export function continueChat(userId:number,ward:string,key:string) {
+  if(!agentWardConfig(userId,ward))throw Error('Not an agent ward.');
+  if(wardBusy(userId,ward))throw Error('Let the current turn finish before opening another chat.');
+  return onChain(userId,ward,async()=>{
+    const {continueSharedChat}=await import('./sync-store.ts');
+    const conv=await continueSharedChat(userId,ward,key);
+    const layout=getDashboard(userId),w=layout.find(w=>w.i===ward);
+    if(!w)throw Error('The agent ward was removed while opening this chat.');
+    const config={...w.config};
+    if(config.provider!==conv.provider)delete config.model;
+    w.config={...config,provider:conv.provider};
+    saveDashboard(userId,layout);
+    broadcast(userId,'agent',{ward});
+    void syncRime(userId,true);
+  });
 }

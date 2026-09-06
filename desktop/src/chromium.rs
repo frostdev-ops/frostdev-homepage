@@ -206,11 +206,11 @@ async fn fetch(shared: &Shared, spec: &Spec, dir: &Path) -> Result<(), String> {
         let chunk = chunk.map_err(|e| e.to_string())?;
         file.write_all(&chunk).await.map_err(|e| e.to_string())?;
         got += chunk.len() as u64;
-        let pct = if total > 0 {
-            (got * 100 / total) as u8
-        } else {
-            0
-        };
+        let pct = got
+            .saturating_mul(100)
+            .checked_div(total)
+            .unwrap_or(0)
+            .min(100) as u8;
         if pct >= shown + 2 {
             shown = pct;
             let mut c = shared.lock().await;

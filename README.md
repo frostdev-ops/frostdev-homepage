@@ -195,7 +195,7 @@ proxy's — stricter than trusting a forwarded header without a trusted-proxy li
 `desktop/` is a standalone Tauri 2 installation of the same backend and Rimeward harness. It bundles Node and Chromium, owns its projects and recovery data locally, and provides modular project, editor, terminal, and Git wards. Browser and phone clients can access a paired desktop through an independently usable remote server; desktop content is relayed without a server replica.
 
 ```sh
-cargo install tauri-cli --locked
+npm ci  # includes the pinned Tauri CLI
 npm run desktop:dev
 npm run desktop:build
 ```

@@ -40,11 +40,14 @@ owns `workspaces.db`, recovery, PTYs, and agent tasks. The ordinary server must 
 execution and persist only device pairing metadata. Keep relay paths free of payload logging
 and persistent caching. See [the runtime contract and checks](docs/development-workspaces.md).
 
-After staging, run `npm run desktop:check`: Biome, Rust formatting, Clippy with warnings
+Rust 1.98.0 is pinned in `rust-toolchain.toml` and the release workflow so local and CI
+diagnostics agree. The Tauri CLI is a pinned development dependency, excluded from the
+bundled backend. After staging, run `npm run desktop:check`: Biome, Rust formatting, Clippy with warnings
 as errors, and native unit tests. Desktop release Actions run this on each target; the release remains a draft until every platform succeeds. On macOS,
 `desktop/sign-runtime.mjs` signs and verifies bundled Chromium and native binaries before
 Tauri signs/notarizes the outer app. Build intermediates and other platforms' PTY prebuilds
-are excluded. `desktop/entitlements.plist` supplies the Node/Chromium JIT entitlements.
+are excluded. Linux RPMs use Zstandard level 3 to keep packaging time bounded for the
+bundled runtime. `desktop/entitlements.plist` supplies the Node/Chromium JIT entitlements.
 
 Install-script permissions are pinned in `package.json` for native dependencies. The SDK's
 network-based model-type freshness check is disabled; models are discovered at runtime.

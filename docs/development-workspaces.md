@@ -4,7 +4,7 @@ The Tauri app runs the existing Astro 7 backend and Rimeward harness locally. No
 
 ## Use
 
-1. Build with `npm run desktop:build` (Tauri CLI and platform build prerequisites required). No separate Node installation is required on the installed user's machine.
+1. Build with `npm run desktop:build` (Rust and platform build prerequisites required; `npm ci` installs the pinned Tauri CLI). No separate Node installation is required on the installed user's machine.
 2. On first launch, choose **Bring your dashboard** or **Start right here**. Connecting needs just the server address: approve the request in your browser using the server's normal login, then choose **Open server dashboard**. The app remembers that starting environment. If the server is unavailable, local work remains accessible; the tray also has **Open this desktop**.
 3. Choose **Open project**, then select an existing folder or create a named project. Opening a project reuses its existing page, or creates a page with Editor, Terminal, and Changes. The Editor includes its own file explorer; Project files remains available as an optional ward. All other wards can still be added.
 4. Open a file from the Editor’s left-hand explorer. Use Cmd/Ctrl+P for quick open, Cmd/Ctrl+S to save, and the **…** menu for find/replace, go to line, word wrap, formatting, and recovery history. File tabs preserve undo history; closing a dirty tab keeps its desktop recovery for the next time it opens. **Take over** transfers editing control. External changes to a dirty file show **Compare changes**, with a code diff and explicit version selection.

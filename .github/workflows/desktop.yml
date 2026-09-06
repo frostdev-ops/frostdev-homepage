@@ -43,16 +43,13 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.98.0
           components: rustfmt, clippy
           targets: ${{ startsWith(matrix.platform, 'macos-') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: desktop
-
-      # The Tauri CLI is installed separately from the bundled backend.
-      - uses: cargo-bins/cargo-binstall@main
-      - run: cargo binstall -y --locked tauri-cli@^2
 
       - name: Linux build deps
         if: matrix.platform == 'ubuntu-22.04'
@@ -107,7 +104,7 @@ jobs:
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
         with:
           projectPath: desktop
-          tauriScript: cargo tauri
+          tauriScript: npx tauri
           tagName: desktop-v__VERSION__
           releaseName: Rimeward desktop-v__VERSION__
           releaseBody: Download the build for your platform below.

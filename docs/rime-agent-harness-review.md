@@ -69,6 +69,14 @@ Changed: `bankFailure` (`core.ts`) records what the turn said and did, plus the 
 assistant's message on all three turn paths (chat, confirm resume, headless). The transcript, the
 disk mirror and the next compaction see the same record a successful turn would leave.
 
+## F7 — Compaction fired several times per task (seen, fixed)
+
+One threshold (150k chars, ~37k tokens) served every provider. Every codex model takes 272k+ input
+tokens and the fixed part of a turn (instructions, tool schemas) is ~60k on its own, so a codex
+thread was folded after roughly a third of the room it had, each fold a model round-trip and a
+lossy brief. The budget is per provider now: codex folds at 400k chars and cuts at 480k, OpenRouter
+keeps 150k/200k for its 128k-context models.
+
 ## F6 — The relay dropped long model rounds (seen, fixed)
 
 The desktop relays each model call to the server's `/api/devices/harness/model` and waits for one
@@ -92,9 +100,9 @@ would read an error body as a result.
   and status hash the reviewer saw — would make "done" verifiable later.
 - **S2 Search results have the same shape problem.** `searchFiles` caps at 200 matches × 300 chars,
   which is 60k. It did not overflow in this review; it will.
-- **S3 Progress the user can see.** The UI shows thinking and steps live, and a
-  `says` mid-turn message. Once a turn fails, only F5's record remains; a per-round token/usage line
-  would let the user judge whether a long round is thinking or stuck.
+- **S3 Progress the user can see** (done). The ward now carries a context indicator: the thread's
+  size against its compaction threshold, filled as a pill, with the last round's billed tokens and
+  cache rate in its tooltip. It repaints from a `usage` event after every model round.
 - **S4 Desktop runtime stderr is discarded** (`desktop/src/runtime.rs`: `Stdio::null()`). The
   relay failure above left no trace on the desktop either. Not the agent's finding, but the reason
   this incident had to be reconstructed from the database.

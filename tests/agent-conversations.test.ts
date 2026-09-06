@@ -9,8 +9,10 @@ import {
   addMessage,
   appendItems,
   compactIfNeeded,
+  contextBudget,
   conversationSize,
   loadItems,
+  needsCompaction,
   transcript,
 } from '../src/lib/agent/conversations.ts';
 import { codexProvider } from '../src/lib/agent/codex.ts';
@@ -52,7 +54,7 @@ test('loadItems cuts on a user-message boundary and repairs pairs', () => {
   const u = seedUser('conv-budget@x.dev');
   const conv = activeConversation(u, 'ag1', 'codex');
   // A huge old item that must fall off, then a call/output pair, then a turn.
-  const big = userMsg('x'.repeat(250_000));
+  const big = userMsg('x'.repeat(500_000)); // past codex's 480k replay cut
   appendItems(conv.id, [
     big,
     asstMsg('old reply'),
@@ -65,7 +67,7 @@ test('loadItems cuts on a user-message boundary and repairs pairs', () => {
   // The oversized head is gone; what survives starts at a user message.
   assert.ok(items.length >= 4);
   assert.equal(items[0].role, 'user');
-  assert.notEqual(items[0].content[0].text.length, 250_000);
+  assert.notEqual(items[0].content[0].text.length, 500_000);
   // The pair survived intact.
   assert.ok(items.some((it) => it.type === 'function_call' && it.call_id === 'c1'));
   assert.ok(items.some((it) => it.type === 'function_call_output' && it.call_id === 'c1'));
@@ -143,6 +145,25 @@ function summarizer(text: string, dialect: 'codex' | 'openrouter' = 'codex') {
 }
 
 const filler = (n: number) => 'x'.repeat(n);
+
+// The threshold was one number for every provider, sized for a 128k model:
+// codex threads (272k+ input) folded after ~37k tokens, several times per task.
+test('the compaction threshold is per provider and a codex thread is not folded early', async () => {
+  const u = seedUser('compact-budget@x.dev');
+  assert.ok(contextBudget('codex').compactAt > contextBudget('openrouter').compactAt);
+  assert.ok(contextBudget('codex').context > contextBudget('codex').compactAt, 'the hard cut stays past the fold');
+  const conv = activeConversation(u, 'ag1', 'codex');
+  // 160k chars in ten items: over the old 150k threshold, under codex's.
+  appendItems(conv.id, Array.from({ length: 10 }, (_, i) => (i % 2 ? asstMsg(filler(16_000)) : userMsg(filler(16_000)))));
+  assert.equal(needsCompaction(conv), false);
+  const { provider, seen } = summarizer('BRIEF');
+  assert.equal(await compactIfNeeded(conv, provider, 'm'), false, 'not forced, under threshold: no fold');
+  assert.equal(seen.length, 0, 'and no summariser call');
+  // Same thread on openrouter would fold.
+  const o = activeConversation(seedUser('compact-budget-or@x.dev'), 'ag1', 'openrouter');
+  appendItems(o.id, Array.from({ length: 10 }, (_, i) => (i % 2 ? { role: 'assistant', content: filler(16_000) } : { role: 'user', content: filler(16_000) })));
+  assert.equal(needsCompaction(o), true);
+});
 
 test('compaction never leaves a tool result in neither the summary nor the tail', async () => {
   const u = seedUser('compact-pair@x.dev');

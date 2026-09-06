@@ -54,7 +54,7 @@ try {
     });
     await ctx.route('**/api/agent/**',async route=>{
       const req=route.request();
-      if(req.method()==='GET')return route.fulfill({json:{configured:true,provider:'codex',transcript:new URL(req.url()).pathname.endsWith('reviewer')?[]:transcript,pending:null,busy:false}});
+      if(req.method()==='GET')return route.fulfill({json:{configured:true,provider:'codex',context:{chars:120000,compactAt:400000},transcript:new URL(req.url()).pathname.endsWith('reviewer')?[]:transcript,pending:null,busy:false}});
       if(new URL(req.url()).pathname.endsWith('/files'))return route.fulfill({json:{files:[{ok:true,id:'12',name:'example.txt'}]}});
       const body=req.postDataJSON(); requests.push(body);
       if(body.action==='clear')return route.fulfill({status:failClear?503:200,json:failClear?{error:'Try again shortly'}:{ok:true}});
@@ -69,6 +69,7 @@ try {
   await page.goto(origin+'/dash');
   const ward=page.locator('[data-wd="rime"]');
   await ward.getByRole('textbox',{name:'Message Rime'}).waitFor();
+  assert.equal(await ward.locator('.ag-context').textContent(),'30%');
   const comms=page.locator('[data-wd="messages"]');
   const commsInput=comms.getByRole('textbox',{name:'Message as the bot'});
   await commsInput.fill('Keep this unsent message');

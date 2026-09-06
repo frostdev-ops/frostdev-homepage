@@ -334,6 +334,25 @@ test('summarize is DB-derived for confirm tools and generic otherwise', () => {
   assert.match(summarize('mystery_tool', { reason: 'do the thing' }, u), /do the thing — go ahead\?/);
 });
 
+// The ward's context indicator: every round says how full the thread is
+// against the fold threshold, and what the provider billed.
+test('runLoop emits a usage event per round with the thread size and the threshold', async () => {
+  const u = seedUser('core-usage@x.dev');
+  const provider = fakeProvider([
+    { text: '', calls: [call('c1', 'get_layout', { reason: 'r' })], items: [{ type: 'message', role: 'assistant', content: 'x'.repeat(1000) }], usage: { input: 50_000, cached: 40_000 } },
+    { text: 'done', calls: [], items: [] },
+  ]);
+  const usage: Extract<AgentEvent, { type: 'usage' }>[] = [];
+  await runLoop(cfgFor(u, provider), [], (e) => { if (e.type === 'usage') usage.push(e); });
+  assert.equal(usage.length, 2, 'one per model round');
+  assert.equal(usage[0]!.input, 50_000);
+  assert.equal(usage[0]!.cached, 40_000);
+  assert.equal(usage[0]!.compactAt, 400_000);
+  assert.ok(usage[0]!.chars > 1000, 'counts the items the model would replay');
+  assert.ok(usage[1]!.chars > usage[0]!.chars, 'grows with the tool result');
+  assert.equal(usage[1]!.input, undefined, 'a round without billing still reports the size');
+});
+
 test('runLoop banks work every round, not only at the end of the turn', async () => {
   const u = seedUser('core-flush@x.dev');
   let flushes = 0;

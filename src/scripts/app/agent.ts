@@ -307,6 +307,8 @@ interface Ui {
   pendingBox: HTMLElement;
   pendingText: HTMLElement;
   status: HTMLElement;
+  /** How full the thread is, next to the status line. */
+  context: HTMLElement;
   jump: HTMLButtonElement;
   follow: boolean;
   rendered: { signature: string; node: HTMLElement }[];
@@ -328,7 +330,22 @@ interface State {
   clearing: boolean;
   sharedStatus?: string;
   configured?: boolean;
+  /** Thread size vs its compaction threshold (chars), plus the last round's billing. */
+  context?: { chars: number; compactAt: number; input?: number; cached?: number };
   uis: Set<Ui>;
+}
+
+const kTokens = (chars: number) => { const t = chars / 4; return t < 1000 ? `${Math.round(t)}` : `${Math.round(t / 1000)}k`; };
+function paintContext(el: HTMLElement, c: State['context']): void {
+  el.hidden = !c;
+  if (!c) return;
+  const pct = Math.min(100, Math.round((100 * c.chars) / c.compactAt));
+  el.textContent = `${pct}%`;
+  el.style.setProperty('--ag-ctx', `${pct}%`);
+  el.dataset.hot = String(pct >= 80);
+  const billed = c.input ? ` · last round ${kTokens(c.input * 4)} tokens in, ${Math.round((100 * (c.cached ?? 0)) / c.input)}% cached` : '';
+  el.title = `Context: ~${kTokens(c.chars)} tokens of thread, compacts at ~${kTokens(c.compactAt)}${billed}`;
+  el.setAttribute('aria-label', `Context ${pct}% full`);
 }
 
 const states = new Map<string, State>();
@@ -579,6 +596,7 @@ function paint(st: State): void {
     const working = st.busy || st.remote;
     const status = st.pending ? 'Approval needed' : st.clearing ? 'Starting a new chat…' : working ? 'Working · send a follow-up to steer' : st.sharedStatus || 'Rimeward agent';
     if (ui.status.textContent !== status) ui.status.textContent = status;
+    paintContext(ui.context, st.context);
     ui.root.dataset.working = String(working);
     ui.input.placeholder = st.configured === false ? 'Reconnect or configure a local provider in Account…' : working ? 'Add a follow-up…' : 'Message Rime…';
     ui.root.querySelectorAll<HTMLButtonElement>('[data-ag-attach]').forEach(b => { b.disabled = st.configured === false; });
@@ -600,6 +618,7 @@ async function refetch(st: State, settled = false): Promise<void> {
   if (status !== 200 || !data) return;
   if (st.busy) return; // a local stream started mid-fetch — it owns the log
   st.configured = data.configured;
+  st.context = data.context ?? undefined;
   st.items = itemsFrom(data.transcript ?? []);
   st.pending = data.pending ?? null;
   // A turn is running elsewhere (another client, or an automation) — its live
@@ -686,6 +705,9 @@ function applyEvent(st: State, run: Run, e: any, src?: TurnSource): boolean {
     }
     case 'pending':
       st.pending = e.pending ?? null;
+      return true;
+    case 'usage':
+      if (typeof e.chars === 'number' && typeof e.compactAt === 'number') st.context = { chars: e.chars, compactAt: e.compactAt, input: e.input, cached: e.cached };
       return true;
     case 'reply':
       // 'reply' is the final text ('says' are mid-turn interjections);
@@ -1088,6 +1110,9 @@ function wireComposer(ui: Ui, cur: () => State | undefined): void {
 
 /** Compact and expanded chat share the same controls and behavior. */
 function createUi(root: HTMLElement, host: HTMLElement, status: HTMLElement): Ui {
+  const context = el('span', 'ag-context');
+  context.hidden = true;
+  status.after(context);
   const stage = el('div', 'ag-stage');
   const log = el('div', 'ag-log');
   log.dataset.agLog = '';
@@ -1137,7 +1162,7 @@ function createUi(root: HTMLElement, host: HTMLElement, status: HTMLElement): Ui
   const help = el('p', 'ag-composer-help', matchMedia('(pointer: coarse)').matches ? 'Tap send when you’re ready' : 'Enter to send · Shift + Enter for a new line');
   footer.append(pendingBox, form, help);
   host.append(stage, footer);
-  return { root, log, input, send, stop, chips, pendingBox, pendingText, status, jump, follow: true, rendered: [] };
+  return { root, log, input, send, stop, chips, pendingBox, pendingText, status, context, jump, follow: true, rendered: [] };
 }
 
 // ------------------------------------------------------------ shared dialog
@@ -1325,6 +1350,7 @@ async function renderAgent(w: WardInstance): Promise<void> {
   }
   st.sharedStatus=data.sync?.server?data.sync.online?'Rime':'Rime · working offline':undefined;
   st.configured = data.configured;
+  st.context = data.context ?? undefined;
   if (!data.configured && !data.transcript?.length) {
     const setup = el('div', 'ag-empty ag-setup');
     const mark = el('div', 'ag-empty-mark');

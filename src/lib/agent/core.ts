@@ -17,6 +17,7 @@ import {
   addMessage,
   appendItems,
   compactIfNeeded,
+  contextBudget,
   needsCompaction,
   conversationSize,
   loadItems,
@@ -89,7 +90,11 @@ export type AgentEvent =
   | { type: 'pending'; pending: PendingConfirm }
   | { type: 'reply'; text: string }
   /** A message steered into the turn while it ran (the user's, or a peer agent's). */
-  | { type: 'user'; text: string; source?: TurnSource };
+  | { type: 'user'; text: string; source?: TurnSource }
+  /** After each model round: the thread's size against its compaction
+   *  threshold, and what the provider billed for the round. The ward's
+   *  context indicator. */
+  | { type: 'usage'; chars: number; compactAt: number; input?: number; cached?: number };
 
 export interface AgentTurn {
   reply: string;
@@ -638,6 +643,12 @@ export async function runLoop(
       aborts.delete(key);
     }
     items.push(...result.items);
+    emit?.({
+      type: 'usage',
+      chars: items.reduce((n: number, it) => n + JSON.stringify(it).length, 0),
+      compactAt: contextBudget(cfg.provider.id).compactAt,
+      ...result.usage,
+    });
 
     if (!result.calls.length) {
       // A steer that arrived during the final call is not lost: the answer
@@ -935,7 +946,7 @@ export function runChatTurn(userId: number, ward: string, body: ChatBody, emit: 
     const conv = activeConversation(userId, ward, wardCfg.provider);
     // Compaction is a whole model round-trip before the turn's first token:
     // say so, or the ward sits silent for it and never says it happened.
-    if (needsCompaction(conv.id)) {
+    if (needsCompaction(conv)) {
       emit({ type: 'thinking', round: -1, label: 'compacting the older part of this thread…' });
       const before = conversationSize(conv.id);
       try {
@@ -1200,6 +1211,8 @@ export function wardSurface(userId: number, ward: string): {
   transcript: ReturnType<typeof transcript>;
   pending: PendingConfirm | null;
   busy: boolean;
+  /** The thread's stored size against its compaction threshold. */
+  context: { chars: number; compactAt: number } | null;
 } | null {
   const wardCfg = agentWardConfig(userId, ward);
   if (!wardCfg) return null;
@@ -1218,6 +1231,7 @@ export function wardSurface(userId: number, ward: string): {
     transcript: conv ? transcript(conv.id) : [],
     pending,
     busy: wardBusy(userId, ward),
+    context: conv ? { chars: conversationSize(conv.id).chars, compactAt: contextBudget(conv.provider).compactAt } : null,
   };
 }
 

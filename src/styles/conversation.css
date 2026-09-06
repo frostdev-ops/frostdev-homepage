@@ -3,6 +3,10 @@
 .ag-shell { container-type:inline-size; }
 .ag-toolbar { display:flex; align-items:center; gap:.25rem; padding:0 0 .45rem; flex-shrink:0; }
 .ag-status { flex:1; min-width:0; color:var(--color-ink-muted); font-size:.72rem; line-height:1.5; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Context indicator: a pill filled to --ag-ctx, next to the status line. */
+.ag-context { flex-shrink:0; font-size:.66rem; line-height:1.4; padding:0 .45rem; border-radius:999px; border:1px solid var(--color-line); color:var(--color-ink-muted); font-variant-numeric:tabular-nums; cursor:help;
+  background:linear-gradient(90deg, var(--color-surface-2) var(--ag-ctx, 0%), transparent 0); }
+.ag-context[data-hot="true"] { border-color:var(--color-accent, currentColor); color:var(--color-accent, inherit); }
 .ag-stage { position:relative; flex:1; min-height:0; display:flex; }
 .ag-log { flex:1; min-height:0; min-width:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin; padding:.5rem .3rem 1rem; overflow-wrap:anywhere; scroll-padding:1rem; }
 .ag-log > * { margin:0 auto 1rem; max-width:46rem; }

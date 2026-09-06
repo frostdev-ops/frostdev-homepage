@@ -12,8 +12,17 @@ import type { AgentProvider, AgentProviderId } from './provider.ts';
 // config names a different one, the thread is retired and a fresh one starts —
 // the two dialects' stored items are mutually unreadable.
 
-const CONTEXT_BUDGET_CHARS = 200_000; // ~4 chars/token; bounds runaway growth
-const COMPACT_AT_CHARS = 150_000; // compact before the budget bites
+// ~4 chars/token. The fixed part of a turn (instructions + tool schemas) is
+// ~60k tokens on its own, and every codex model takes 272k+ of input — the old
+// 150k-char threshold folded a thread after ~37k tokens of it, several times
+// per long task. OpenRouter models start at 128k, so they keep the tight pair.
+const BUDGET: Record<AgentProviderId, { compactAt: number; context: number }> = {
+  codex: { compactAt: 400_000, context: 480_000 },
+  openrouter: { compactAt: 150_000, context: 200_000 },
+};
+/** The thread's char budget for this provider: `compactAt` folds the older
+ *  part, `context` is the hard replay cut. What the ward's indicator is against. */
+export const contextBudget = (provider: AgentProviderId) => BUDGET[provider] ?? BUDGET.openrouter;
 const COMPACT_FRACTION = 0.6;
 const IMAGE_TURNS = 2; // images are re-sent every round; only recent ones ride along
 
@@ -217,7 +226,7 @@ export function loadItems(conv: ConvRow, provider: AgentProvider, keepOpen: Set<
   let cut = 0;
   for (let i = rows.length - 1; i >= 0; i--) {
     total += rows[i]!.chars;
-    if (total > CONTEXT_BUDGET_CHARS) {
+    if (total > contextBudget(conv.provider).context) {
       cut = i + 1;
       break;
     }
@@ -257,12 +266,13 @@ export function loadItems(conv: ConvRow, provider: AgentProvider, keepOpen: Set<
 /** `force` is the /compact command: same fold, thresholds skipped. It still
  *  needs enough items to have an older half worth folding. `focus` is that
  *  command's optional hint about what the brief must not lose. */
-const overBudget = (items: number, chars: number): boolean => chars >= COMPACT_AT_CHARS && items >= 8;
+const overBudget = (provider: AgentProviderId, items: number, chars: number): boolean =>
+  chars >= contextBudget(provider).compactAt && items >= 8;
 
 /** Would the next turn compact this thread? So a turn can say so before it does. */
-export function needsCompaction(conversationId: number): boolean {
-  const s = conversationSize(conversationId);
-  return overBudget(s.items, s.chars);
+export function needsCompaction(conv: ConvRow): boolean {
+  const s = conversationSize(conv.id);
+  return overBudget(conv.provider, s.items, s.chars);
 }
 
 export async function compactIfNeeded(
@@ -277,7 +287,7 @@ export async function compactIfNeeded(
     .prepare('SELECT id, json, chars FROM agent_items WHERE conversation_id = ? ORDER BY id')
     .all(conv.id) as { id: number; json: string; chars: number }[];
   const total = rows.reduce((n, r) => n + r.chars, 0);
-  if (force ? rows.length < 4 : !overBudget(rows.length, total)) return false;
+  if (force ? rows.length < 4 : !overBudget(conv.provider, rows.length, total)) return false;
 
   let acc = 0;
   let end = 0;

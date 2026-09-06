@@ -60,7 +60,10 @@ The current `just-bash` dependency emits Node's experimental `stripTypeScriptTyp
 when its JavaScript worker starts under Node 22. Its optional compression dependency also
 uses the deprecated `prebuild-install` package. Node 22 also marks the built-in mock timers
 used by Discord tests as experimental. macOS 27 also reports deprecated `hdiutil` commands
-in Tauri's DMG packager; those commands still work. These upstream/tooling notices are not
+in Tauri's DMG packager; those commands still work. Verbose AppImage builds report
+linuxdeploy's library copyright-discovery and optional AppStream metadata warnings,
+alongside skipped stripping/rpath changes and existing AppRun notices. These come from
+the upstream packagers, outside the application's lint and compiler checks, and are not
 suppressed.
 
 After a web build, run `npm run test:ui` with the staged Chromium available. These checks

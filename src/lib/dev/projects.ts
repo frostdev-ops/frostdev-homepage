@@ -428,6 +428,46 @@ export function readBuffer(
     owner: leaseOwner(bufferKey(user, project, file)),
   };
 }
+/** A tool result is capped at 12k chars (core.ts OUTPUT_CAP): a whole file
+ *  over that is an error the model can do nothing with. So a read is a page —
+ *  `from` (1-based line) and `lines`, defaulting to as many lines as fit — and
+ *  says where the next page starts. */
+export const FILE_PAGE_CHARS = 9_000;
+export function readPage(
+  user: number,
+  project: string,
+  file: string,
+  from?: unknown,
+  lines?: unknown,
+  column?: unknown,
+  version: unknown = "buffer",
+): BufferView & { from: number; to: number; lines: number; next?: number; nextColumn?: number; version: string } {
+  const { diskText, ...view } = readBuffer(user, project, file);
+  const all = (version === "disk" ? diskText ?? view.text : view.text).split("\n");
+  const start = Math.min(all.length, Math.max(1, Math.floor(Number(from)) || 1));
+  const offset = Math.min((all[start - 1]?.length ?? 0), Math.max(0, Math.floor(Number(column)) || 0));
+  const want = Math.floor(Number(lines)) > 0 ? Math.floor(Number(lines)) : all.length;
+  const out: string[] = [];
+  let nextColumn: number | undefined;
+  for (let i = start - 1; i < all.length && out.length < want; i++) {
+    const line = (all[i] ?? "").slice(i === start - 1 ? offset : 0);
+    if (JSON.stringify([...out, line].join("\n")).length > FILE_PAGE_CHARS) {
+      if (out.length) break;
+      let part = line;
+      while (JSON.stringify(part).length > FILE_PAGE_CHARS)
+        part = part.slice(0, Math.max(1, Math.floor(part.length * FILE_PAGE_CHARS / JSON.stringify(part).length) - 16));
+      out.push(part);
+      nextColumn = offset + part.length;
+      break;
+    }
+    out.push(line);
+  }
+  const to = start - 1 + out.length;
+  return { ...view, text: out.join("\n"), from: start, to, lines: all.length,
+    version: version === "disk" ? "disk" : "buffer",
+    ...(nextColumn !== undefined ? { next: start, nextColumn } : to < all.length ? { next: to + 1 } : {}),
+  };
+}
 export function editBuffer(
   user: number,
   project: string,
@@ -556,19 +596,35 @@ export async function git(
   });
   return stdout;
 }
-export async function gitView(user: number, project: string) {
-  return {
+/** Tool reads have a serialized budget; the Changes ward receives the full diff. */
+export const DIFF_CAP = 9_000;
+export async function gitView(user: number, project: string, file?: string, limit = Number.POSITIVE_INFINITY) {
+  // Validated like every other path, then handed to git relative and after
+  // `--`, so it can neither leave the tree nor read as an option.
+  const scope = file
+    ? [
+        path
+          .relative(projectOf(user, project).root, projectPath(user, project, file))
+          .split(path.sep)
+          .join("/"),
+      ]
+    : [];
+  const diff = await git(user, project, ["--literal-pathspecs", "diff", "--no-ext-diff", "HEAD", "--", ...scope]).catch(() =>
+    git(user, project, ["--literal-pathspecs", "diff", "--no-ext-diff", "--cached", "--", ...scope]),
+  );
+  const result = {
     status: await git(user, project, ["status", "--short"]),
-    diff: await git(user, project, [
-      "diff",
-      "--no-ext-diff",
-      "HEAD",
-      "--",
-    ]).catch(() =>
-      git(user, project, ["diff", "--no-ext-diff", "--cached", "--"]),
-    ),
+    diff,
     worktrees: await git(user, project, ["worktree", "list", "--porcelain"]),
   };
+  let truncated = false;
+  const budget = Math.max(512, limit);
+  while (JSON.stringify(result).length > budget) {
+    const field = (["diff", "status", "worktrees"] as const).reduce((a, b) => result[a].length >= result[b].length ? a : b);
+    result[field] = result[field].slice(0, Math.max(0, Math.floor(result[field].length * budget / JSON.stringify(result).length) - 128));
+    truncated = true;
+  }
+  return { ...result, ...(truncated ? { truncated: true, hint: "scope the diff with path" } : {}) };
 }
 export async function worktreeOp(
   user: number,

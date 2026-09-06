@@ -6,7 +6,7 @@ import { getDb } from '../src/lib/db.ts';
 import { saveDashboard } from '../src/lib/dashboard.ts';
 import { validateLayout } from '../src/lib/wards.ts';
 import { getSetting } from '../src/lib/settings.ts';
-import { runShell, vettedFetch } from '../src/lib/agent/shell.ts';
+import { fitOutput, runShell, vettedFetch } from '../src/lib/agent/shell.ts';
 import { storeAttachment, listAttachments, getAttachment } from '../src/lib/agent/attachments.ts';
 import { activeConversation } from '../src/lib/agent/conversations.ts';
 import { storeAgentAccount } from '../src/lib/agent/accounts.ts';
@@ -81,6 +81,22 @@ test('an unattended run refuses to decide a confirm the user is still holding', 
   assert.ok(getSetting(`agent_confirm:${pending.confirmId}`), 'the live confirm survived the automation');
 });
 
+// The sandbox allowed 40k of output while the tool result cap is 12k: every
+// big command came back as "result too large" and the model saw none of it.
+test('shell output fits the tool result cap as JSON, and says it was cut', async () => {
+  const uid = seedUser('shell-fit@test.io');
+  const big = await runShell(uid, 'seq 1 20000');
+  assert.equal(big.exitCode, 0, big.stderr);
+  assert.ok(big.truncated);
+  assert.ok(JSON.stringify(big).length < 12_000, `${JSON.stringify(big).length} chars`);
+  assert.match(big.stdout, /^1\n2\n3\n/);
+  // Quotes escape to two chars each — the cut is by serialized size, not raw.
+  const quoted = await runShell(uid, `yes 'a"b"c"d"e"f"g"h"' | head -n 3000`);
+  assert.ok(JSON.stringify(quoted).length < 12_000, `${JSON.stringify(quoted).length} chars`);
+  const small = await runShell(uid, 'echo fits');
+  assert.equal(small.truncated, false);
+});
+
 test('the shell survives its second command — the sandbox singleton must not conflict', async () => {
   // DefenseInDepthBox compares options by reference across Bash instances; a
   // per-call callback made every shell command after the first fail before running.
@@ -90,4 +106,10 @@ test('the shell survives its second command — the sandbox singleton must not c
   const second = await runShell(uid, 'printf "# notes\\n" > /work/AGENTS.md && cat /work/AGENTS.md');
   assert.equal(second.exitCode, 0, second.stderr);
   assert.equal(second.stdout.trim(), '# notes');
+});
+
+test("shell output bounds escaped stderr without looping", () => {
+  const output = fitOutput("", "\u0000".repeat(4000));
+  assert.ok(output.truncated);
+  assert.ok(JSON.stringify(output).length < 12000);
 });

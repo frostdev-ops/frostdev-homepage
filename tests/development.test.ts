@@ -4,10 +4,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DEV_TOOLS } from "../src/lib/dev/tools.ts";
 import {
   addProject,
   projectPath,
   readBuffer,
+  readPage,
+  gitView,
+  DIFF_CAP,
   editBuffer,
   bufferCopies,
   renameFile,
@@ -233,4 +237,62 @@ test("new projects create a folder without replacing existing or private data", 
     fs.existsSync(path.join(process.env.HOMEPAGE_DATA_DIR!, "private")),
     false,
   );
+});
+
+// Firsthand friction from the agent's own review of this repo: README, AGENTS.md
+// and the git diff all came back "result too large" — file and git reads had no
+// way to ask for less. A read is a page now, and a diff can be scoped.
+test("file reads page under the tool cap and the diff scopes to a path", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rimeward-pages-"));
+  after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const p = addProject(1, dir);
+  const lines = Array.from({ length: 3000 }, (_, i) => `line ${i + 1} ${"x".repeat(40)}`);
+  fs.writeFileSync(path.join(dir, "big.txt"), lines.join("\n") + "\n");
+  fs.writeFileSync(path.join(dir, "small.txt"), "hello\n");
+  const first = readPage(1, p.id, "big.txt");
+  assert.equal(first.from, 1);
+  assert.equal(first.lines, 3001);
+  assert.ok(first.to < 3001 && first.next === first.to + 1);
+  assert.ok(first.text.length <= 10_000);
+  assert.ok(first.text.startsWith("line 1 "));
+  const second = readPage(1, p.id, "big.txt", first.next, 5);
+  assert.equal(second.from, first.next);
+  assert.equal(second.to, first.next! + 4);
+  assert.equal(second.text.split("\n").length, 5);
+  assert.equal(second.revision, first.revision, "a page carries the buffer's revision for the edit that follows");
+  assert.equal(readPage(1, p.id, "small.txt").next, undefined);
+  const edit = (file: string, revision: number) => DEV_TOOLS.project_edit!.run({ runtime: 'desktop', project: p.id, path: file, text: 'created by Rime\n', revision, save: true }, { userId: 1, ward: 'rime', conv: 0 });
+  await edit('created.txt', 0);
+  assert.equal(fs.readFileSync(path.join(dir, 'created.txt'), 'utf8'), 'created by Rime\n');
+  assert.throws(() => edit('small.txt', 0), { status: 409 });
+  assert.equal(fs.readFileSync(path.join(dir, 'small.txt'), 'utf8'), 'hello\n');
+
+  const longLine = '\u0000'.repeat(5000) + 'tail';
+  fs.writeFileSync(path.join(dir, "long.json"), JSON.stringify(longLine));
+  let cursor: number | undefined, column = 0, recovered = '';
+  do {
+    const page = readPage(1, p.id, "long.json", cursor, undefined, column);
+    assert.ok(JSON.stringify(page).length < 12_000);
+    recovered += page.text;
+    cursor = page.next; column = page.nextColumn ?? 0;
+  } while (cursor !== undefined);
+  assert.equal(recovered, JSON.stringify(longLine), "a long escaped line remains fully readable");
+
+
+  await git(1, p.id, ["init", "-q", "-b", "main"]);
+  await git(1, p.id, ["add", "big.txt"]);
+  await git(1, p.id, ["-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "-m", "big"]);
+  fs.writeFileSync(path.join(dir, "big.txt"), lines.map((l) => l + "!").join("\n") + "\n");
+  await git(1, p.id, ["add", "small.txt"]);
+  assert.ok((await gitView(1, p.id)).diff.length > DIFF_CAP, "the Changes ward still receives the full diff");
+  const all = await gitView(1, p.id, undefined, DIFF_CAP);
+  assert.equal(all.truncated, true);
+  assert.ok(all.diff.length <= DIFF_CAP);
+  assert.ok(JSON.stringify(all).length < 12_000);
+  assert.match(all.status, /big\.txt/);
+  const scoped = await gitView(1, p.id, "small.txt");
+  assert.equal(scoped.truncated, undefined);
+  assert.match(scoped.diff, /\+hello/);
+  assert.doesNotMatch(scoped.diff, /big\.txt/);
+  await assert.rejects(gitView(1, p.id, "../escape"));
 });

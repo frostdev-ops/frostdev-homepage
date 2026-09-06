@@ -250,7 +250,24 @@ export interface ShellResult {
   truncated: boolean;
 }
 
-const MAX_OUTPUT = 40_000;
+// As JSON, under core.ts OUTPUT_CAP (12k) with room for the bash tool's
+// fields. A bigger allowance is not more output: past the cap the whole result
+// is replaced by an error, so 40k was 0 useful chars.
+const MAX_OUTPUT = 11_000;
+const STDERR_KEEP = 2_000;
+/** Cut by serialized size — escapes inflate a text by 5–20% (the agent's
+ *  `head -c 10100` came back as 12,291 JSON chars and was refused). */
+export function fitOutput(stdout: string, stderr: string): { stdout: string; stderr: string; truncated: boolean } {
+  let err = stderr.slice(0, STDERR_KEEP);
+  let out = stdout;
+  for (;;) {
+    const json = JSON.stringify({ stdout: out, stderr: err });
+    if (json.length <= MAX_OUTPUT) break;
+    if (out.length) out = out.slice(0, Math.max(0, Math.floor((out.length * MAX_OUTPUT) / json.length) - 64));
+    else err = err.slice(0, Math.max(0, Math.floor((err.length * MAX_OUTPUT) / json.length) - 64));
+  }
+  return { stdout: out, stderr: err, truncated: out.length < stdout.length || err.length < stderr.length };
+}
 
 /** Run one command line. Each call is a fresh shell over the same mounts —
  *  /work persists between calls because it is a real directory. */
@@ -281,14 +298,7 @@ export async function runShell(userId: number, command: string, invoke?: InvokeT
   } finally {
     clearTimeout(timer);
   }
-  const stdout = String(result.stdout ?? '');
-  const stderr = String(result.stderr ?? '');
-  return {
-    stdout: stdout.slice(0, MAX_OUTPUT),
-    stderr: stderr.slice(0, MAX_OUTPUT),
-    exitCode: result.exitCode ?? 0,
-    truncated: stdout.length > MAX_OUTPUT || stderr.length > MAX_OUTPUT,
-  };
+  return { ...fitOutput(String(result.stdout ?? ''), String(result.stderr ?? '')), exitCode: result.exitCode ?? 0 };
 }
 
 /** Files the agent produced, for the user to look at. */

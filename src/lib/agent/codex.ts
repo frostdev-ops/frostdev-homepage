@@ -26,7 +26,7 @@ import {
 export const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'; // codex CLI public client
 const CODEX_REDIRECT = 'http://localhost:1455/auth/callback';
 const OAUTH_TTL_MS = 15 * 60 * 1000;
-const TIMEOUT_MS = 120_000;
+const TIMEOUT_MS = 300_000; // a long reasoning round thinks for minutes; the relay client waits 330s, nginx 360s
 
 class CodexError extends Error {}
 

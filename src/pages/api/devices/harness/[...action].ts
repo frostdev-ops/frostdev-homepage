@@ -138,6 +138,10 @@ export const ALL: APIRoute = async ({
         );
       const provider = await getProvider(body.provider);
       // Exactly one model call. The desktop owns the loop and executes its tools.
+      // Answered as a stream: Cloudflare returns 524 to the desktop when the
+      // origin is silent for 100s, and a long reasoning round is silent for
+      // longer — so whitespace heartbeats go out until the JSON does. The
+      // status line is already sent by then, so an error rides the body too.
       const call: ProviderCall = {
         userId: user,
         model: body.model,
@@ -151,7 +155,49 @@ export const ALL: APIRoute = async ({
             : undefined,
         signal: request.signal,
       };
-      value = await provider.run(call);
+      const pending = provider.run(call);
+      const owner = user;
+      modelUser = undefined; // the stream releases the slot when the call settles
+      const enc = new TextEncoder();
+      return new Response(
+        new ReadableStream({
+          async start(ctrl) {
+            const push = (s: string) => {
+              try {
+                ctrl.enqueue(enc.encode(s));
+              } catch {
+                /* the desktop went away; the slot is still released below */
+              }
+            };
+            const beat = setInterval(() => push("\n"), 15_000);
+            try {
+              push(JSON.stringify(await pending));
+            } catch (e) {
+              push(
+                JSON.stringify({
+                  error: e instanceof Error ? e.message : "Rime request failed.",
+                  status: (e as { status?: number }).status ?? 400,
+                }),
+              );
+            } finally {
+              clearInterval(beat);
+              active.set(owner, Math.max(0, (active.get(owner) ?? 1) - 1));
+              try {
+                ctrl.close();
+              } catch {
+                /* already cancelled */
+              }
+            }
+          },
+        }),
+        {
+          headers: {
+            "content-type": "application/json",
+            "cache-control": "no-store",
+            "x-accel-buffering": "no",
+          },
+        },
+      );
     } else
       return Response.json(
         { error: "Unknown Rime operation." },

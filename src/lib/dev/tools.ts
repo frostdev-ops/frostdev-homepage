@@ -4,6 +4,9 @@ import {
   listProjects,
   tree,
   readBuffer,
+  readPage,
+  DIFF_CAP,
+  createFile,
   editBuffer,
   searchFiles,
   gitView,
@@ -60,13 +63,17 @@ export const DEV_TOOLS: Record<string, ToolDef> = {
   ),
   project_read: wrap(
     "read",
-    "Read project files, directories, search results, or Git changes. Inspect existing modifications before assigning shared-tree tasks.",
+    "Read project files, directories, search results, or Git changes. A result is capped at 12k chars: a file comes back one page at a time (`from`/`lines`, follow `next` and `nextColumn` with `from` and `column`), a big diff is cut unless scoped with `path`. Inspect existing modifications before assigning shared-tree tasks.",
     schema(
       {
         ...context,
         operation: { type: "string", enum: ["files", "file", "search", "git"] },
-        path: str("Project-relative path"),
+        path: str("Project-relative path (file: the file; files: the directory; git: scope the diff to this path)"),
         query: str("Search text"),
+        from: { type: "number", description: "file: first line to return, 1-based (default 1)" },
+        lines: { type: "number", description: "file: how many lines (default: as many as fit the page)" },
+        column: { type: "number", description: "file: zero-based character offset on the first line, from nextColumn" },
+        version: { type: "string", enum: ["buffer", "disk"], description: "file: inspect the recovery buffer or conflicting on-disk version" },
       },
       ["runtime", "project", "operation"],
     ),
@@ -74,30 +81,41 @@ export const DEV_TOOLS: Record<string, ToolDef> = {
       a.operation === "files"
         ? tree(c.userId, a.project, a.path ?? "")
         : a.operation === "file"
-          ? readBuffer(c.userId, a.project, a.path)
+          ? readPage(c.userId, a.project, a.path, a.from, a.lines, a.column, a.version)
           : a.operation === "git"
-            ? gitView(c.userId, a.project)
+            ? gitView(c.userId, a.project, a.path || undefined, DIFF_CAP)
             : searchFiles(c.userId, a.project, a.query ?? ""),
   ),
   project_edit: wrap(
     "write",
-    "Edit a versioned recovery buffer. Explicit save writes the file. On conflict inspect both versions and ask the user; never take over a human buffer.",
+    "Edit a versioned recovery buffer. Explicit save writes the file. `text` is the WHOLE file — read every page first. revision 0 on a path that does not exist creates the file. On conflict inspect both versions and ask the user; never take over a human buffer.",
     schema(
       {
         ...context,
         path: str("Project-relative file"),
         text: str("Complete new file text"),
-        revision: { type: "number" },
+        revision: { type: "number", description: "The buffer revision project_read returned; 0 to create a new file" },
         save: { type: "boolean" },
       },
       ["runtime", "project", "path", "text", "revision"],
     ),
-    (a, c) =>
-      editBuffer(c.userId, a.project, a.path, owner(c), {
+    (a, c) => {
+      let revision = a.revision;
+      if (revision === 0) {
+        try {
+          readBuffer(c.userId, a.project, a.path);
+        } catch (e) {
+          if ((e as { status?: number }).status !== 404) throw e;
+          createFile(c.userId, a.project, a.path);
+          revision = readBuffer(c.userId, a.project, a.path).revision;
+        }
+      }
+      return editBuffer(c.userId, a.project, a.path, owner(c), {
         text: a.text,
-        revision: a.revision,
+        revision,
         save: a.save === true,
-      }),
+      });
+    },
   ),
   terminal_list: wrap(
     "read",

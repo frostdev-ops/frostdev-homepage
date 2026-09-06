@@ -248,6 +248,20 @@ test("paired harness authorization scopes both sync and model credentials to the
     });
     assert.equal((await response.json()).text, "server credential used");
     assert.equal(called, 1);
+    let finish: (result: { text: string; calls: []; items: [] }) => void = () => {};
+    codexProvider.run = () => new Promise(resolve => { finish = resolve; });
+    const waiting = await invoke("model", { provider: "codex", model: "test", instructions: "test", items: [], tools: [] });
+    const reader = waiting.body!.getReader();
+    try {
+      assert.equal(new TextDecoder().decode((await reader.read()).value), "\n", "long requests send a heartbeat before the model finishes");
+    } finally { finish({ text: "completed", calls: [], items: [] }); }
+    const result = await reader.read();
+    assert.equal(JSON.parse(new TextDecoder().decode(result.value)).text, "completed");
+    assert.equal((await reader.read()).done, true);
+    codexProvider.run = async () => { throw Object.assign(Error("fixture provider error"), { status: 422 }); };
+    const failed = await invoke("model", { provider: "codex", model: "test", instructions: "test", items: [], tools: [] });
+    assert.deepEqual(await failed.json(), { error: "fixture provider error", status: 422 });
+
     assert.equal(
       (await invoke("", undefined, "https://example.com")).status,
       403,

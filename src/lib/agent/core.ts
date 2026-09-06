@@ -413,8 +413,8 @@ function confirmList(policy: ApprovalsPolicy): string {
 function notesBlock(userId: number): string {
   const notes = ensureNotes(userId);
   const how =
-    `/work/${NOTES_FILE} is YOUR long-term memory — the only thing that survives across wards, conversations and restarts (/history is per-thread, and a long thread gets compacted). ` +
-    `Keep durable facts there: who the user is, how their setup works, decisions and standing preferences. Not a diary. Edit it with the bash tool as soon as you learn something worth keeping, without being asked. ` +
+    `/work/${NOTES_FILE} is YOUR standing notes, read into every turn. It survives across wards, conversations and restarts — so do your memory documents (remember/forget) and skills (save_skill); /history is per-thread, and a long thread gets compacted into a brief that points back at it. ` +
+    `Keep the short durable facts here: who the user is, how their setup works, decisions and standing preferences; one document per fact goes to memory instead. Not a diary. Edit it with the bash tool as soon as you learn something worth keeping, without being asked. ` +
     `Hard cap ${NOTES_CAP} characters (anything past that is CUT before you ever see it) — stay well under it by rewriting and pruning, never by appending.`;
   return notes ? `${how}\n\nYour notes, verbatim:\n${notes}` : `${how} Your notes file is currently empty.`;
 }
@@ -885,6 +885,21 @@ async function settleAndRecord(
   });
 }
 
+/** What a turn that threw still did. Persisted as the assistant's message so
+ *  the transcript, /history and the next compaction see the work and the error
+ *  instead of a gap: the tools already ran, and a thread that forgot them
+ *  redoes the work — or, compacted, loses it for good. */
+export function bankFailure(conv: ConvRow, seen: AgentEvent[], err: unknown, source: TurnSource = 'chat'): void {
+  const steps = seen.flatMap((e) => (e.type === 'step' ? [e.step] : []));
+  const said = seen.flatMap((e) => (e.type === 'says' ? [e.text] : []));
+  const message = err instanceof Error ? err.message : 'turn failed';
+  try {
+    addMessage(conv, { role: 'assistant', text: [...said, `⚠️ ${message}`].join('\n\n'), steps, source });
+  } catch (e) {
+    console.error('[agent] could not record the failed turn:', e);
+  }
+}
+
 /** Mirror a turn's events over the per-user logic stream so EVERY open client
  *  watches it happen, not just the one that started it. The originating tab
  *  renders its own POST stream and ignores the mirror; every other tab (and
@@ -945,7 +960,9 @@ export function runChatTurn(userId: number, ward: string, body: ChatBody, emit: 
 
     const live = liveMirror(userId, ward, 'chat');
     live({ type: 'user', text: shown });
+    const seen: AgentEvent[] = [];
     const both = (e: AgentEvent) => {
+      seen.push(e);
       emit(e);
       live(e);
     };
@@ -967,6 +984,7 @@ export function runChatTurn(userId: number, ward: string, body: ChatBody, emit: 
       return turn;
     } catch (err) {
       flush();
+      bankFailure(conv, seen, err);
       live({ type: 'end', error: err instanceof Error ? err.message : 'turn failed' });
       throw err;
     }
@@ -1049,14 +1067,20 @@ export function resolveConfirmTurn(
       }
     };
     flush(); // the approved tool already ran — persist its output before looping
+    const seen: AgentEvent[] = steps.map((step) => ({ type: 'step', step }));
+    const tap = (e: AgentEvent) => {
+      seen.push(e);
+      both(e);
+    };
     try {
-      const turn = await runLoop(cfg, items, both, flush);
+      const turn = await runLoop(cfg, items, tap, flush);
       turn.steps = [...steps, ...turn.steps];
       flush();
       await settleAndRecord(conv, turn, 'chat');
       return turn;
     } catch (err) {
       flush();
+      bankFailure(conv, seen, err);
       live({ type: 'end', error: err instanceof Error ? err.message : 'turn failed' });
       throw err;
     }
@@ -1131,13 +1155,19 @@ export function runHeadlessTurn(
         persisted = items.length;
       }
     };
+    const seen: AgentEvent[] = [];
+    const tap = (e: AgentEvent) => {
+      seen.push(e);
+      live(e);
+    };
     try {
-      const turn = await runLoop(cfg, items, live, flush);
+      const turn = await runLoop(cfg, items, tap, flush);
       flush();
       await settleAndRecord(conv, turn, turnSource, source.delivery);
       return turn.reply;
     } catch (err) {
       flush();
+      bankFailure(conv, seen, err, turnSource);
       live({ type: 'end', error: err instanceof Error ? err.message : 'turn failed' });
       throw err;
     }

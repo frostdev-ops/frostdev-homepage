@@ -17,6 +17,7 @@ import {
   transcript,
 } from '../src/lib/agent/conversations.ts';
 import {
+  bankFailure,
   specSheet,
   agentWardConfig,
   buildInstructions,
@@ -345,6 +346,32 @@ test('runLoop banks work every round, not only at the end of the turn', async ()
   // tools that already ran, and the next load tells the model "nothing was done".
   await runLoop(cfgFor(u, provider), [], undefined, () => void flushes++);
   assert.equal(flushes, 2, 'one bank per round that executed tools');
+});
+
+// A turn that threw (the relay dropped mid-request) used to leave nothing in the
+// transcript: a dozen tool calls' work vanished from the UI on reload, /history
+// never saw them, and the next compaction folded the items into a brief that
+// pointed at a "verbatim transcript" missing the whole turn.
+test('bankFailure records what a thrown turn said and did', () => {
+  const u = seedUser('core-bank@x.dev');
+  const conv = activeConversation(u, 'ag1', 'codex');
+  bankFailure(
+    conv,
+    [
+      { type: 'thinking', round: 0 },
+      { type: 'step', step: { tool: 'get_layout', kind: 'read', args: {}, reason: 'r' } },
+      { type: 'says', text: 'Half way: two findings so far.' },
+      { type: 'step', step: { tool: 'bash', kind: 'write', args: { command: 'ls' }, reason: 'r' } },
+    ],
+    new Error('The Rime server disconnected during the model request. Retry when ready.')
+  );
+  const last = transcript(conv.id).at(-1)!;
+  assert.equal(last.role, 'assistant');
+  assert.match(last.text, /Half way: two findings so far\./);
+  assert.match(last.text, /⚠️ The Rime server disconnected/);
+  assert.deepEqual(last.steps?.map((s) => s.tool), ['get_layout', 'bash']);
+  const mirror = fs.readFileSync(path.join(workDir(u), '..', 'history', `${conv.id}.md`), 'utf8');
+  assert.match(mirror, /tool bash\(\{"command":"ls"\}\)/, 'the disk mirror carries the steps too');
 });
 
 // The other half of the prod failure: the agent was told `notify.flash [global]

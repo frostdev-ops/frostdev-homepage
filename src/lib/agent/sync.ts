@@ -273,6 +273,10 @@ export function ensureRimeSync(user: number) {
   timer = setInterval(() => void syncRime(user), 15000);
   timer.unref();
 }
+/** Longer than the server's own provider timeout (codex TIMEOUT_MS) and under
+ *  nginx's 360s read timeout on the harness location — the desktop must be the
+ *  last to give up, or the server finishes a call nobody is listening to. */
+const MODEL_TIMEOUT_MS = 330_000;
 export async function sharedModel(
   user: number,
   provider: AgentProviderId,
@@ -300,11 +304,20 @@ export async function sharedModel(
           cacheKey: call.cacheKey,
         }),
         signal: call.signal
-          ? AbortSignal.any([call.signal, AbortSignal.timeout(300000)])
-          : AbortSignal.timeout(300000),
+          ? AbortSignal.any([call.signal, AbortSignal.timeout(MODEL_TIMEOUT_MS)])
+          : AbortSignal.timeout(MODEL_TIMEOUT_MS),
       },
     );
-    return (await response.json()) as ProviderResult;
+    // Whitespace heartbeats, then one JSON document: the result, or the
+    // server's error with its status (the status line was long gone by then).
+    const parsed = JSON.parse(await response.text()) as
+      | ProviderResult
+      | { error: string; status?: number };
+    if ("error" in parsed)
+      throw Object.assign(new Error(typeof parsed.error === "string" ? parsed.error : "Invalid model response."), {
+        status: parsed.status ?? 400,
+      });
+    return parsed as ProviderResult;
   } catch (e) {
     const status = (e as { status?: number }).status;
     if (

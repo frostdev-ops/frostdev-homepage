@@ -1,3 +1,4 @@
+import type { ContextUsage } from '../../lib/agent/context.ts';
 // Agent wards: a chat client over the streamed POST /api/agent/<ward>
 // protocol. One per-ward State drives every attached view — the compact ward
 // and the shared #agent-dialog. Unchanged message nodes stay mounted while
@@ -330,22 +331,22 @@ interface State {
   clearing: boolean;
   sharedStatus?: string;
   configured?: boolean;
-  /** Thread size vs its compaction threshold (chars), plus the last round's billing. */
-  context?: { chars: number; compactAt: number; input?: number; cached?: number };
+  context?: ContextUsage;
   uis: Set<Ui>;
 }
 
-const kTokens = (chars: number) => { const t = chars / 4; return t < 1000 ? `${Math.round(t)}` : `${Math.round(t / 1000)}k`; };
+const kTokens = (t: number) => t < 1000 ? `${Math.round(t)}` : `${Math.round(t / 1000)}k`;
 function paintContext(el: HTMLElement, c: State['context']): void {
   el.hidden = !c;
   if (!c) return;
-  const pct = Math.min(100, Math.round((100 * c.chars) / c.compactAt));
-  el.textContent = `${pct}%`;
-  el.style.setProperty('--ag-ctx', `${pct}%`);
-  el.dataset.hot = String(pct >= 80);
-  const billed = c.input ? ` · last round ${kTokens(c.input * 4)} tokens in, ${Math.round((100 * (c.cached ?? 0)) / c.input)}% cached` : '';
-  el.title = `Context: ~${kTokens(c.chars)} tokens of thread, compacts at ~${kTokens(c.compactAt)}${billed}`;
-  el.setAttribute('aria-label', `Context ${pct}% full`);
+  const pct = c.window ? Math.round(100 * c.tokens / c.window) : null;
+  el.textContent = pct === null ? `~${kTokens(c.tokens)}` : `~${pct}%`;
+  el.style.setProperty('--ag-ctx', `${Math.min(100, pct ?? 0)}%`);
+  el.dataset.hot = String(c.compactAt !== null && c.tokens >= c.compactAt * .9);
+  const billed = c.input ? ` · last request ${kTokens(c.input)} input tokens, ${Math.round(100 * (c.cached ?? 0) / c.input)}% cached` : '';
+  const capacity = c.window ? `${kTokens(c.window)} token window; compacts near ${kTokens(c.compactAt!)}${c.source === 'cache' ? ' (cached model limits)' : ''}` : 'model capacity unavailable';
+  el.title = `${c.model}: approximately ${kTokens(c.tokens)} tokens including instructions, tools and conversation · ${capacity}${billed}. Unseen text and media are estimates.`;
+  el.setAttribute('aria-label', pct === null ? `Approximately ${kTokens(c.tokens)} context tokens; capacity unknown` : `Context approximately ${pct}% full`);
 }
 
 const states = new Map<string, State>();
@@ -707,7 +708,7 @@ function applyEvent(st: State, run: Run, e: any, src?: TurnSource): boolean {
       st.pending = e.pending ?? null;
       return true;
     case 'usage':
-      if (typeof e.chars === 'number' && typeof e.compactAt === 'number') st.context = { chars: e.chars, compactAt: e.compactAt, input: e.input, cached: e.cached };
+      if (typeof e.tokens === 'number' && typeof e.model === 'string') st.context = e;
       return true;
     case 'reply':
       // 'reply' is the final text ('says' are mid-turn interjections);

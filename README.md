@@ -30,7 +30,8 @@ agent may do on its own.
   packets, a bash sandbox, the web, and a browser you both drive. It keeps its memory and skills
   as wards, speaks to MCP servers, wakes on a schedule or on a message, and asks before anything
   leaves the building. Several Rime wards can run side by side, each with its own model,
-  approvals and caps.
+  approvals and caps. The chat context meter uses live model limits from Codex/OpenRouter,
+  includes instructions and tools, and labels estimated usage and cached or unavailable capacity.
 - **Leylines, the automations.** A routine finishing, a button pressed, a service going down,
   mail arriving, a chat message, the weather turning, a time of day; then a timer starts, a
   Notion task is checked, a message is sent, a packet moves, Rime is asked. Conditions,

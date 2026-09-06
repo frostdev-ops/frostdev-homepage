@@ -1,7 +1,8 @@
 import { getSetting, setSetting } from '../settings.ts';
 import { getAgentAccount, agentKey } from './accounts.ts';
 import { isDesktop } from '../dev/runtime.ts';
-import { sharedRime, sharedModel } from './sync.ts';
+import { sharedRime, sharedModel, sharedCodexModels } from './sync.ts';
+import type { ModelContext } from './context.ts';
 
 // The provider contract. Two wire protocols, one interface: codex speaks the
 // OpenAI Responses API (items replayed verbatim, encrypted reasoning included),
@@ -44,7 +45,7 @@ export interface ProviderResult {
   /** Raw wire items — appended verbatim to the stored conversation. */
   items: unknown[];
   /** Prompt tokens billed, and how many of them the provider served from cache. */
-  usage?: { input: number; cached: number };
+  usage?: { input: number; cached: number; output?: number };
 }
 
 /** The status line for a successful call — the cache hit rate is the one
@@ -57,6 +58,7 @@ export function usageLine(usage?: { input: number; cached: number }): string {
 
 export interface AgentProvider {
   id: AgentProviderId;
+  context?(userId: number, model: string): Promise<ModelContext | undefined>;
   run(call: ProviderCall): Promise<ProviderResult>;
   /** Wire-shape user message / tool result for this protocol. */
   userItem(text: string): unknown;
@@ -175,5 +177,15 @@ export async function getProvider(id: AgentProviderId): Promise<AgentProvider> {
   const provider = await (id === 'codex'
     ? import('./codex.ts').then((m) => m.codexProvider)
     : import('./openrouter.ts').then((m) => m.openrouterProvider));
-  return isDesktop() ? {...provider,run:async(call)=>await sharedModel(call.userId,id,call) ?? provider.run(call)} : provider;
+  return isDesktop() ? {
+    ...provider,
+    run: async(call) => await sharedModel(call.userId,id,call) ?? provider.run(call),
+    context: async(user, model) => {
+      if (id === 'codex') {
+        const shared = await sharedCodexModels(user);
+        if (shared) return shared.find((m) => m.id === model)?.context;
+      }
+      return provider.context?.(user, model);
+    },
+  } : provider;
 }

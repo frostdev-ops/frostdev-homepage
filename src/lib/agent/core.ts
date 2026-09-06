@@ -17,7 +17,6 @@ import {
   addMessage,
   appendItems,
   compactIfNeeded,
-  contextBudget,
   needsCompaction,
   conversationSize,
   loadItems,
@@ -28,6 +27,7 @@ import {
   type ConvRow,
   type TurnSource,
 } from './conversations.ts';
+import { contextUsage, recordContextUsage, type ContextUsage } from './context.ts';
 import { getAttachment, attachmentDataUrl } from './attachments.ts';
 import { shellNetworkEnabled } from './shell.ts';
 import {
@@ -91,10 +91,8 @@ export type AgentEvent =
   | { type: 'reply'; text: string }
   /** A message steered into the turn while it ran (the user's, or a peer agent's). */
   | { type: 'user'; text: string; source?: TurnSource }
-  /** After each model round: the thread's size against its compaction
-   *  threshold, and what the provider billed for the round. The ward's
-   *  context indicator. */
-  | { type: 'usage'; chars: number; compactAt: number; input?: number; cached?: number };
+  /** Full-request token estimate and selected-model capacity for the context meter. */
+  | ({ type: 'usage' } & ContextUsage);
 
 export interface AgentTurn {
   reply: string;
@@ -568,7 +566,7 @@ export async function runLoop(
   items: unknown[],
   emit?: (e: AgentEvent) => void,
   /** Called after every round so executed work survives a mid-turn restart. */
-  flush?: () => void
+  flush?: (reset?: boolean) => void
 ): Promise<AgentTurn> {
   const steps: AgentStep[] = [];
   const ctx: ToolCtx = { userId: cfg.conv.user_id, ward: cfg.conv.ward, conv: cfg.conv.id, via: cfg.via };
@@ -615,9 +613,33 @@ export async function runLoop(
   // The MCP servers' tools, once per turn (sessions are cached; a dead server
   // costs one request a minute and contributes nothing).
   const extra = await mcpToolDefs(ctx.userId);
+  const tools = aiTools(cfg.wardCfg.tools, extra);
+  const limits = await cfg.provider.context?.(ctx.userId, cfg.wardCfg.model).catch(() => undefined);
+  const usage = () => contextUsage(cfg.conv.id, cfg.provider.id, cfg.wardCfg.model, items, instructions, tools, limits);
 
   for (let round = 0; cap === 0 || round < cap; round++) {
     drain();
+    let context = usage();
+    if (needsCompaction(context)) {
+      flush?.();
+      emit?.({ type: 'thinking', round: -1, label: 'compacting the older part of this thread…' });
+      const before = conversationSize(cfg.conv.id);
+      // A failed summary leaves the original items intact. Never hide a failure by
+      // trimming the beginning of the replay (which used to lose user instructions).
+      try {
+        if (await compactIfNeeded(cfg.conv, cfg.provider, cfg.wardCfg.model, false, '', context)) {
+          items.splice(0, items.length, ...loadItems(cfg.conv, cfg.provider, new Set()));
+          flush?.(true);
+          emit?.({ type: 'note', text: `Compacted the older part of this thread: ${sizeArrow(before, conversationSize(cfg.conv.id))}` });
+          context = usage();
+        }
+      } catch (err) {
+        emit?.({ type: 'note', text: `Context compaction failed; history preserved. ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+    if (limits && context.tokens >= limits.inputLimit) {
+      throw Error('This request exceeds the selected model’s input budget. History was preserved. Use /compact, reduce attached content, or select a larger-context model.');
+    }
     emit?.({ type: 'thinking', round });
     const ac = new AbortController();
     aborts.set(key, ac);
@@ -629,7 +651,7 @@ export async function runLoop(
         effort: cfg.wardCfg.effort,
         instructions,
         items,
-        tools: aiTools(cfg.wardCfg.tools, extra),
+        tools,
         cacheKey: `conv:${cfg.conv.id}`,
         signal: ac.signal,
       });
@@ -642,13 +664,9 @@ export async function runLoop(
     } finally {
       aborts.delete(key);
     }
+    recordContextUsage(cfg.conv.id, cfg.provider.id, cfg.wardCfg.model, items, instructions, tools, result.usage, result.items);
     items.push(...result.items);
-    emit?.({
-      type: 'usage',
-      chars: items.reduce((n: number, it) => n + JSON.stringify(it).length, 0),
-      compactAt: contextBudget(cfg.provider.id).compactAt,
-      ...result.usage,
-    });
+    emit?.({ type: 'usage', ...usage() });
 
     if (!result.calls.length) {
       // A steer that arrived during the final call is not lost: the answer
@@ -944,20 +962,6 @@ export function runChatTurn(userId: number, ward: string, body: ChatBody, emit: 
     takeSlot(turnWindow, userId, TURNS_PER_HOUR, 'agent turn');
     const provider = await getProvider(wardCfg.provider);
     const conv = activeConversation(userId, ward, wardCfg.provider);
-    // Compaction is a whole model round-trip before the turn's first token:
-    // say so, or the ward sits silent for it and never says it happened.
-    if (needsCompaction(conv)) {
-      emit({ type: 'thinking', round: -1, label: 'compacting the older part of this thread…' });
-      const before = conversationSize(conv.id);
-      try {
-        if (await compactIfNeeded(conv, provider, wardCfg.model)) {
-          const after = conversationSize(conv.id);
-          emit({ type: 'note', text: `Compacted the older part of this thread: ${sizeArrow(before, after)}` });
-        }
-      } catch {
-        /* loadItems still bounds it */
-      }
-    }
     expireStaleConfirm(conv, provider);
 
     const items = loadItems(conv, provider, new Set());
@@ -982,7 +986,8 @@ export function runChatTurn(userId: number, ward: string, body: ChatBody, emit: 
     // Round-by-round, not just at the end: a pm2 reload mid-turn would
     // otherwise lose the outputs of tools that already ran, and the next load's
     // repair would tell the model "nothing was done" about work that WAS done.
-    const flush = () => {
+    const flush = (reset = false) => {
+      if (reset) { persisted = items.length; return; }
       if (items.length > persisted) {
         appendItems(conv.id, items.slice(persisted));
         persisted = items.length;
@@ -1071,7 +1076,8 @@ export function resolveConfirmTurn(
     }
 
     const cfg: LoopCfg = { provider, wardCfg, conv, headless: false };
-    const flush = () => {
+    const flush = (reset = false) => {
+      if (reset) { persisted = items.length; return; }
       if (items.length > persisted) {
         appendItems(conv.id, items.slice(persisted));
         persisted = items.length;
@@ -1129,9 +1135,6 @@ export function runHeadlessTurn(
     }
     takeSlot(turnWindow, userId, TURNS_PER_HOUR, 'agent turn');
     const provider = await getProvider(wardCfg.provider);
-    try {
-      await compactIfNeeded(conv, provider, wardCfg.model);
-    } catch {}
     expireStaleConfirm(conv, provider); // only an already-dead row survives to here
 
     const fromTitle = source.from ? peerTitle(userId, source.from) : '';
@@ -1160,7 +1163,8 @@ export function runHeadlessTurn(
     live({ type: 'user', text: shown });
 
     const cfg: LoopCfg = { provider, wardCfg, conv, headless: true, via: source.via };
-    const flush = () => {
+    const flush = (reset = false) => {
+      if (reset) { persisted = items.length; return; }
       if (items.length > persisted) {
         appendItems(conv.id, items.slice(persisted));
         persisted = items.length;
@@ -1205,15 +1209,14 @@ export function queueHeadlessAsk(userId: number, ward: string, prompt: string, d
 
 // ---------------------------------------------------------------- surface for the route
 
-export function wardSurface(userId: number, ward: string): {
+export async function wardSurface(userId: number, ward: string): Promise<{
   configured: boolean;
   provider: AgentProviderId;
   transcript: ReturnType<typeof transcript>;
   pending: PendingConfirm | null;
   busy: boolean;
-  /** The thread's stored size against its compaction threshold. */
-  context: { chars: number; compactAt: number } | null;
-} | null {
+  context: ContextUsage | null;
+} | null> {
   const wardCfg = agentWardConfig(userId, ward);
   if (!wardCfg) return null;
   const configured = agentConfigured(userId, wardCfg.provider);
@@ -1225,13 +1228,16 @@ export function wardSurface(userId: number, ward: string): {
     // Expired while parked: decline it now so the thread isn't stuck.
     else void getProvider(wardCfg.provider).then((p) => expireStaleConfirm(conv, p));
   }
+  const provider = await getProvider(wardCfg.provider);
+  const limits = configured ? await provider.context?.(userId, wardCfg.model).catch(() => undefined) : undefined;
   return {
     configured,
     provider: wardCfg.provider,
     transcript: conv ? transcript(conv.id) : [],
     pending,
     busy: wardBusy(userId, ward),
-    context: conv ? { chars: conversationSize(conv.id).chars, compactAt: contextBudget(conv.provider).compactAt } : null,
+    context: conv ? contextUsage(conv.id, conv.provider, wardCfg.model, loadItems(conv, provider, new Set()),
+      buildInstructions(wardCfg, userId, ward), aiTools(wardCfg.tools, mcpToolDefsSync(userId)), limits) : null,
   };
 }
 

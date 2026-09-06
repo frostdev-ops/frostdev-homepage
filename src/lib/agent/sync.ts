@@ -1,4 +1,6 @@
 import { getDb } from "../db.ts";
+import { cached } from '../cache.ts';
+import type { CodexModel } from './codex.ts';
 import { getSetting, setSetting } from "../settings.ts";
 import { isDesktop } from "../dev/runtime.ts";
 import { rimeConnection } from "../dev/remote.ts";
@@ -337,17 +339,24 @@ export async function sharedModel(
 
 export async function sharedCodexModels(
   user: number,
-): Promise<{ id: string; name?: string }[] | null> {
+): Promise<CodexModel[] | null> {
   if (!isDesktop()) return null;
   await syncRime(user);
   const connection = await rimeConnection(user);
-  if (!connection || !sharedRime(user)?.online) return null;
-  const response = await request(
-    connection.server,
-    connection.token,
-    "/models",
-  );
-  return await response.json();
+  if (!connection) return null;
+  const key = `agent_models:shared:${user}:${connection.server}`;
+  try {
+    if (!sharedRime(user)?.online) throw Error('offline');
+    return await cached(key, 3600_000, async () => {
+      const response = await request(connection.server, connection.token, '/models');
+      const models = await response.json() as CodexModel[];
+      setSetting(key, JSON.stringify(models));
+      return models;
+    });
+  } catch {
+    const stored = JSON.parse(getSetting(key) ?? '[]') as CodexModel[];
+    return stored.length ? stored.map((m) => ({ ...m, ...(m.context ? { context: { ...m.context, source: 'cache' as const } } : {}) })) : null;
+  }
 }
 
 /** Integration authority remains with the connected account; tool approvals remain in core. */

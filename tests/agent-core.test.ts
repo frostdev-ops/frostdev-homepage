@@ -14,6 +14,7 @@ import {
   addMessage,
   appendItems,
   getConversation,
+  loadItems,
   transcript,
 } from '../src/lib/agent/conversations.ts';
 import {
@@ -336,7 +337,7 @@ test('summarize is DB-derived for confirm tools and generic otherwise', () => {
 
 // The ward's context indicator: every round says how full the thread is
 // against the fold threshold, and what the provider billed.
-test('runLoop emits a usage event per round with the thread size and the threshold', async () => {
+test('runLoop emits full-request token estimates anchored to usage, without invented capacity', async () => {
   const u = seedUser('core-usage@x.dev');
   const provider = fakeProvider([
     { text: '', calls: [call('c1', 'get_layout', { reason: 'r' })], items: [{ type: 'message', role: 'assistant', content: 'x'.repeat(1000) }], usage: { input: 50_000, cached: 40_000 } },
@@ -347,10 +348,11 @@ test('runLoop emits a usage event per round with the thread size and the thresho
   assert.equal(usage.length, 2, 'one per model round');
   assert.equal(usage[0]!.input, 50_000);
   assert.equal(usage[0]!.cached, 40_000);
-  assert.equal(usage[0]!.compactAt, 400_000);
-  assert.ok(usage[0]!.chars > 1000, 'counts the items the model would replay');
-  assert.ok(usage[1]!.chars > usage[0]!.chars, 'grows with the tool result');
-  assert.equal(usage[1]!.input, undefined, 'a round without billing still reports the size');
+  assert.equal(usage[0]!.compactAt, null);
+  assert.equal(usage[0]!.source, 'unknown');
+  assert.ok(usage[0]!.tokens > 50_000, 'includes measured instructions/tools and the new reply');
+  assert.ok(usage[1]!.tokens > usage[0]!.tokens, 'grows with the tool result');
+  assert.equal(usage[1]!.input, 50_000, 'keeps the last measured input when billing is absent');
 });
 
 test('runLoop banks work every round, not only at the end of the turn', async () => {
@@ -713,4 +715,35 @@ test('interrupt: aborts the call in flight, else ends the turn after the round i
   const t3 = await runLoop(cfgFor(u, p3), [p3.userItem('next')]);
   assert.equal(t3.reply, 'ok');
   assert.match(JSON.stringify(seen[0]!.at(-1)), /late note/);
+});
+
+
+test('model usage triggers mid-turn compaction and persistence resumes without duplicated or missing items', async () => {
+  const u = seedUser('core-dynamic-context@x.dev');
+  const provider = fakeProvider([]);
+  provider.context = async () => ({ window: 1_000_000, inputLimit: 950_000, compactAt: 900_000, source: 'catalog' });
+  let rounds = 0, folds = 0;
+  provider.run = async (request) => {
+    if (request.instructions.startsWith('You are compacting')) {
+      folds++;
+      return { text: 'Earlier task details preserved in this brief.', calls: [], items: [] };
+    }
+    if (++rounds === 1) return { text: '', calls: [call('check', 'get_layout', { reason: 'Inspect layout' })],
+      items: [{ type: 'function_call', call_id: 'check', name: 'get_layout', arguments: '{}' }], usage: { input: 910_000, cached: 0 } };
+    assert.ok(request.items.some((it: any) => it.call_id === 'check' && it.type === 'function_call_output'));
+    return { text: 'Finished', calls: [], items: [{ type: 'message', role: 'assistant', content: 'Finished' }] };
+  };
+  const cfg = cfgFor(u, provider);
+  const items = Array.from({ length: 10 }, () => provider.userItem('Earlier instructions '.repeat(200)));
+  appendItems(cfg.conv.id, items);
+  let persisted = items.length;
+  const flush = (reset = false) => {
+    if (!reset) appendItems(cfg.conv.id, items.slice(persisted));
+    persisted = items.length;
+  };
+  await runLoop(cfg, items, undefined, flush);
+  flush();
+  assert.equal(folds, 1);
+  assert.equal(rounds, 2);
+  assert.deepEqual(loadItems(cfg.conv, provider, new Set()), items);
 });

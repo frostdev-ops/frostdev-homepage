@@ -1,7 +1,10 @@
 import { getDb } from '../db.ts';
+import fs from 'node:fs';
+import path from 'node:path';
 import { getAttachment, attachmentDataUrl } from './attachments.ts';
-import { appendTurn } from './history.ts';
+import { appendTurn, historyDir } from './history.ts';
 import type { AgentProvider, AgentProviderId } from './provider.ts';
+import { estimateTokens, type ContextUsage } from './context.ts';
 
 // The agent's memory, per (user, ward). Two views of one conversation:
 //   agent_messages — what the ward renders
@@ -12,17 +15,6 @@ import type { AgentProvider, AgentProviderId } from './provider.ts';
 // config names a different one, the thread is retired and a fresh one starts —
 // the two dialects' stored items are mutually unreadable.
 
-// ~4 chars/token. The fixed part of a turn (instructions + tool schemas) is
-// ~60k tokens on its own, and every codex model takes 272k+ of input — the old
-// 150k-char threshold folded a thread after ~37k tokens of it, several times
-// per long task. OpenRouter models start at 128k, so they keep the tight pair.
-const BUDGET: Record<AgentProviderId, { compactAt: number; context: number }> = {
-  codex: { compactAt: 400_000, context: 480_000 },
-  openrouter: { compactAt: 150_000, context: 200_000 },
-};
-/** The thread's char budget for this provider: `compactAt` folds the older
- *  part, `context` is the hard replay cut. What the ward's indicator is against. */
-export const contextBudget = (provider: AgentProviderId) => BUDGET[provider] ?? BUDGET.openrouter;
 const COMPACT_FRACTION = 0.6;
 const IMAGE_TURNS = 2; // images are re-sent every round; only recent ones ride along
 
@@ -211,40 +203,15 @@ export function appendItems(conversationId: number, items: unknown[]): void {
 }
 
 /**
- * The conversation to replay: newest-first up to the budget, cut on a user
- * message so no tool result is orphaned from its call, images rehydrated for
- * the last IMAGE_TURNS turns only, then the provider's pair repair — applied
- * LAST so its inserts can't shift the image-budget indices. `keepOpen` names
- * call_ids that are unanswered on purpose (a parked confirm).
+ * Replay the whole retained conversation, rehydrate recent images, then repair
+ * tool pairs. Compaction happens with the complete request's token budget in
+ * runLoop; loading must never silently discard the user's instructions.
  */
 export function loadItems(conv: ConvRow, provider: AgentProvider, keepOpen: Set<string>): unknown[] {
   const rows = getDb()
-    .prepare('SELECT id, json, chars FROM agent_items WHERE conversation_id = ? ORDER BY id')
-    .all(conv.id) as { id: number; json: string; chars: number }[];
-
-  let total = 0;
-  let cut = 0;
-  for (let i = rows.length - 1; i >= 0; i--) {
-    total += rows[i]!.chars;
-    if (total > contextBudget(conv.provider).context) {
-      cut = i + 1;
-      break;
-    }
-  }
-  const parsed = rows.slice(cut).map((r) => {
-    try {
-      return JSON.parse(r.json);
-    } catch {
-      return null;
-    }
-  });
-  let start = 0;
-  if (cut > 0) {
-    const idx = parsed.findIndex(isUserMsg);
-    start = idx >= 0 ? idx : parsed.length;
-  }
-
-  const kept = parsed.slice(start).filter(Boolean);
+    .prepare('SELECT json FROM agent_items WHERE conversation_id = ? ORDER BY id')
+    .all(conv.id) as { json: string }[];
+  const kept = rows.map((r) => safeParse(r.json)).filter(Boolean);
   const userTurns: number[] = [];
   kept.forEach((it, i) => {
     if (isUserMsg(it)) userTurns.push(i);
@@ -266,13 +233,8 @@ export function loadItems(conv: ConvRow, provider: AgentProvider, keepOpen: Set<
 /** `force` is the /compact command: same fold, thresholds skipped. It still
  *  needs enough items to have an older half worth folding. `focus` is that
  *  command's optional hint about what the brief must not lose. */
-const overBudget = (provider: AgentProviderId, items: number, chars: number): boolean =>
-  chars >= contextBudget(provider).compactAt && items >= 8;
-
-/** Would the next turn compact this thread? So a turn can say so before it does. */
-export function needsCompaction(conv: ConvRow): boolean {
-  const s = conversationSize(conv.id);
-  return overBudget(conv.provider, s.items, s.chars);
+export function needsCompaction(usage: ContextUsage): boolean {
+  return usage.compactAt !== null && usage.tokens >= usage.compactAt;
 }
 
 export async function compactIfNeeded(
@@ -280,14 +242,15 @@ export async function compactIfNeeded(
   provider: AgentProvider,
   model: string,
   force = false,
-  focus = ''
+  focus = '',
+  usage?: ContextUsage
 ): Promise<boolean> {
   const db = getDb();
   const rows = db
     .prepare('SELECT id, json, chars FROM agent_items WHERE conversation_id = ? ORDER BY id')
     .all(conv.id) as { id: number; json: string; chars: number }[];
   const total = rows.reduce((n, r) => n + r.chars, 0);
-  if (force ? rows.length < 4 : !overBudget(conv.provider, rows.length, total)) return false;
+  if (force ? rows.length < 4 : rows.length < 2 || !usage || !needsCompaction(usage)) return false;
 
   let acc = 0;
   let end = 0;
@@ -315,11 +278,17 @@ export async function compactIfNeeded(
 
   const older = rows.slice(0, end);
   const olderChars = older.reduce((n, r) => n + r.chars, 0);
-  const plain = older
+  const limits = await provider.context?.(conv.user_id, model).catch(() => undefined);
+  let plain = older
     .map((r) => summarisable(safeParse(r.json)))
     .filter(Boolean)
     .join('\n')
     .slice(0, 120_000);
+  const summaryBudget = Math.max(0, (limits?.inputLimit ?? 31_000) - 1000);
+  while (plain && estimateTokens(plain) > summaryBudget) {
+    plain = plain.slice(0, Math.floor(plain.length * summaryBudget / estimateTokens(plain) * .95));
+  }
+  if (!plain.trim()) return false;
 
   const result = await provider.run({
     userId: conv.user_id,
@@ -347,7 +316,8 @@ export async function compactIfNeeded(
   }
 
   const summary = provider.userItem(
-    `[Earlier in this conversation, compacted. The verbatim transcript is on disk at /history/${conv.id}.md — ` +
+    `[Earlier in this conversation, compacted. The transcript is at /history/${conv.id}.md; ` +
+      `the full original items removed by compaction are at /history/${conv.id}.compacted.jsonl — ` +
       `search it with the bash tool if you need a detail that is not here.]\n\n${result.text}`
   );
   const json = JSON.stringify(summary);
@@ -360,6 +330,10 @@ export async function compactIfNeeded(
     return false;
   }
 
+  // Mid-turn tool results may not have reached the final assistant message yet.
+  // Archive before deleting; a failed archive must leave the replay untouched.
+  fs.appendFileSync(path.join(historyDir(conv.user_id), `${conv.id}.compacted.jsonl`),
+    older.map((r) => JSON.stringify({ id: r.id, item: safeParse(r.json) })).join('\n') + '\n', { flush: true });
   db.transaction(() => {
     db.prepare('DELETE FROM agent_items WHERE id IN (' + older.map(() => '?').join(',') + ')').run(...older.map((r) => r.id));
     // The oldest row's id, so ordering survives without renumbering.

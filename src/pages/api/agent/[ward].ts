@@ -15,7 +15,7 @@ export const GET: APIRoute = async ({ params, locals }) => {
   const { wardSurface } = await import('../../../lib/agent/core.ts');
   const userId = locals.user!.userId;
   await syncRime(userId);
-  const surface = wardSurface(userId, String(params.ward));
+  const surface = await wardSurface(userId, String(params.ward));
   // 400, not 404 — the ward helpers map 404 to a Connect chip.
   if (!surface) return Response.json({ error: 'not an agent ward' }, { status: 400 });
   return Response.json({...surface,sync:syncStatus(userId)}, { headers: { 'cache-control': 'no-store' } });

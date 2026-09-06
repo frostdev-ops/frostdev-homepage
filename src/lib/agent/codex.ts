@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { getSetting, setSetting, deleteSetting } from '../settings.ts';
 import { openToken } from '../crypto.ts';
 import { cached } from '../cache.ts';
+import { codexContext, type ModelContext } from './context.ts';
 import { getDb } from '../db.ts';
 import { getAgentAccount, storeAgentAccount, deleteAgentAccount, accountMeta } from './accounts.ts';
 import {
@@ -381,7 +382,7 @@ async function callCodex(call: ProviderCall, retriedAuth = false, retriedTransie
     }
     throw e;
   }
-  type Completed = { output?: OutputItem[]; usage?: { input_tokens?: number; input_tokens_details?: { cached_tokens?: number } } };
+  type Completed = { output?: OutputItem[]; usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } } };
   const streamed: OutputItem[] = [];
   let completed: Completed | null = null;
   let failure: string | null = null;
@@ -413,7 +414,7 @@ async function callCodex(call: ProviderCall, retriedAuth = false, retriedTransie
   const { text, calls } = readItems(items);
   if (!text && !calls.length) throw new CodexError('codex: empty response');
   const u = completed?.usage;
-  return { text, calls, items, ...(u?.input_tokens ? { usage: { input: u.input_tokens, cached: u.input_tokens_details?.cached_tokens ?? 0 } } : {}) };
+  return { text, calls, items, ...(u?.input_tokens ? { usage: { input: u.input_tokens, cached: u.input_tokens_details?.cached_tokens ?? 0, output: u.output_tokens } } : {}) };
 }
 
 /** The backend's model list. It is gated on the CLI version it thinks it is
@@ -429,42 +430,56 @@ export interface CodexModel {
   description?: string;
   /** Reasoning efforts the model accepts, in the backend's order. */
   efforts: string[];
+  context?: ModelContext;
 }
 
 export function listCodexModels(userId: number): Promise<CodexModel[]> {
   return cached(`codex:models:${userId}`, 60 * 60_000, async () => {
-    const tokens = await ensureFreshTokens(userId);
-    const res = await fetch(`https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_CLIENT_VERSION}`, {
-      headers: { Authorization: `Bearer ${tokens.access_token}`, 'chatgpt-account-id': tokens.account_id, originator: 'codex_cli_rs' },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) throw new Error(`codex models ${res.status}`);
-    const data = (await res.json()) as {
-      models?: {
-        slug: string;
-        display_name?: string;
-        description?: string;
-        visibility?: string;
-        priority?: number;
-        supported_reasoning_levels?: { effort: string }[];
-      }[];
-    };
-    const list = (data.models ?? [])
-      .filter((m) => m.slug && m.visibility !== 'hide')
-      .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
-      .map((m) => ({
-        id: m.slug,
-        name: m.display_name || m.slug,
-        ...(m.description ? { description: m.description } : {}),
-        efforts: (m.supported_reasoning_levels ?? []).map((l) => l.effort),
-      }));
-    if (!list.length) throw new Error('codex models: empty list');
-    return list;
+    try {
+      const tokens = await ensureFreshTokens(userId);
+      const res = await fetch(`https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_CLIENT_VERSION}`, {
+        headers: { Authorization: `Bearer ${tokens.access_token}`, 'chatgpt-account-id': tokens.account_id, originator: 'codex_cli_rs' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error(`codex models ${res.status}`);
+      const data = (await res.json()) as {
+        models?: {
+          slug: string;
+          display_name?: string;
+          description?: string;
+          visibility?: string;
+          priority?: number;
+          supported_reasoning_levels?: { effort: string }[];
+          context_window?: number;
+          max_context_window?: number;
+          effective_context_window_percent?: number;
+          auto_compact_token_limit?: number;
+        }[];
+      };
+      const list = (data.models ?? [])
+        .filter((m) => m.slug && m.visibility !== 'hide')
+        .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
+        .map((m) => ({
+          id: m.slug,
+          name: m.display_name || m.slug,
+          ...(m.description ? { description: m.description } : {}),
+          efforts: (m.supported_reasoning_levels ?? []).map((l) => l.effort),
+          context: codexContext(m),
+        }));
+      if (!list.length) throw new Error('codex models: empty list');
+      setSetting(`agent_models:codex:${userId}`, JSON.stringify(list));
+      return list;
+    } catch (err) {
+      const stored = JSON.parse(getSetting(`agent_models:codex:${userId}`) ?? '[]') as CodexModel[];
+      if (!stored.length) throw err;
+      return stored.map((m) => ({ ...m, ...(m.context ? { context: { ...m.context, source: 'cache' as const } } : {}) }));
+    }
   });
 }
 
 export const codexProvider: AgentProvider = {
   id: 'codex',
+  context: async(user, model) => (await listCodexModels(user)).find((m) => m.id === model)?.context,
   async run(call) {
     try {
       const result = await callCodex(call);

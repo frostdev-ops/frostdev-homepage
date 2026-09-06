@@ -1,5 +1,6 @@
 import { OpenRouter } from '@openrouter/sdk';
 import { cached } from '../cache.ts';
+import { openrouterContext, type ModelContext } from './context.ts';
 import { getSetting, setSetting } from '../settings.ts';
 import { agentKey } from './accounts.ts';
 import {
@@ -157,11 +158,12 @@ async function callOpenRouter(call: ProviderCall, retried = false): Promise<Prov
   // next request replays exactly what the model said.
   const input = Number(result?.usage?.promptTokens) || 0;
   const cached = Number(result?.usage?.promptTokensDetails?.cachedTokens) || 0;
-  return { text, calls, items: [{ ...msg, role: 'assistant' }], ...(input ? { usage: { input, cached } } : {}) };
+  return { text, calls, items: [{ ...msg, role: 'assistant' }], ...(input ? { usage: { input, cached, output: result?.usage?.completionTokens } } : {}) };
 }
 
 export const openrouterProvider: AgentProvider = {
   id: 'openrouter',
+  context: async(_user, model) => (await listOpenRouterModels()).find((m) => m.id === model)?.context,
   async run(call) {
     try {
       const result = await callOpenRouter(call);
@@ -181,6 +183,7 @@ export const openrouterProvider: AgentProvider = {
 export interface ModelChoice {
   id: string;
   name: string;
+  context?: ModelContext;
 }
 
 const MODELS_TTL_MS = 3600_000;
@@ -204,7 +207,7 @@ export function listOpenRouterModels(): Promise<ModelChoice[]> {
       const models: ModelChoice[] = [];
       for await (const page of pages) {
         for (const m of page.result?.data ?? []) {
-          if (typeof m.id === 'string') models.push({ id: m.id, name: String(m.name || m.id) });
+          if (typeof m.id === 'string') models.push({ id: m.id, name: String(m.name || m.id), context: openrouterContext(m) });
         }
       }
       if (!models.length) throw new Error('empty model list');
@@ -215,7 +218,7 @@ export function listOpenRouterModels(): Promise<ModelChoice[]> {
       const stale = readStoredModels();
       if (stale.length) {
         console.error('[agent models] live list failed, serving the stored one:', err);
-        return stale;
+        return stale.map((m) => ({ ...m, ...(m.context ? { context: { ...m.context, source: 'cache' as const } } : {}) }));
       }
       throw err;
     }

@@ -1,6 +1,9 @@
 import './_setup.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { historyDir } from '../src/lib/agent/history.ts';
 import { getDb } from '../src/lib/db.ts';
 import { saveDashboard } from '../src/lib/dashboard.ts';
 import { validateLayout } from '../src/lib/wards.ts';
@@ -9,10 +12,8 @@ import {
   addMessage,
   appendItems,
   compactIfNeeded,
-  contextBudget,
   conversationSize,
   loadItems,
-  needsCompaction,
   transcript,
 } from '../src/lib/agent/conversations.ts';
 import { codexProvider } from '../src/lib/agent/codex.ts';
@@ -50,11 +51,11 @@ test('conversations are per (user, ward)', () => {
   assert.notEqual(activeConversation(u, 'ag1', 'codex').id, activeConversation(u, 'ag2', 'codex').id);
 });
 
-test('loadItems cuts on a user-message boundary and repairs pairs', () => {
+test('loadItems preserves oversized history for budgeted compaction and repairs pairs', () => {
   const u = seedUser('conv-budget@x.dev');
   const conv = activeConversation(u, 'ag1', 'codex');
-  // A huge old item that must fall off, then a call/output pair, then a turn.
-  const big = userMsg('x'.repeat(500_000)); // past codex's 480k replay cut
+  // Loading alone must not delete the original request from model context.
+  const big = userMsg('x'.repeat(500_000));
   appendItems(conv.id, [
     big,
     asstMsg('old reply'),
@@ -64,10 +65,10 @@ test('loadItems cuts on a user-message boundary and repairs pairs', () => {
     asstMsg('recent reply'),
   ]);
   const items = loadItems(conv, codexProvider, new Set()) as any[];
-  // The oversized head is gone; what survives starts at a user message.
+  // Oversized instructions survive loading; runLoop handles the model budget.
   assert.ok(items.length >= 4);
   assert.equal(items[0].role, 'user');
-  assert.notEqual(items[0].content[0].text.length, 500_000);
+  assert.equal(items[0].content[0].text.length, 500_000);
   // The pair survived intact.
   assert.ok(items.some((it) => it.type === 'function_call' && it.call_id === 'c1'));
   assert.ok(items.some((it) => it.type === 'function_call_output' && it.call_id === 'c1'));
@@ -146,23 +147,12 @@ function summarizer(text: string, dialect: 'codex' | 'openrouter' = 'codex') {
 
 const filler = (n: number) => 'x'.repeat(n);
 
-// The threshold was one number for every provider, sized for a 128k model:
-// codex threads (272k+ input) folded after ~37k tokens, several times per task.
-test('the compaction threshold is per provider and a codex thread is not folded early', async () => {
-  const u = seedUser('compact-budget@x.dev');
-  assert.ok(contextBudget('codex').compactAt > contextBudget('openrouter').compactAt);
-  assert.ok(contextBudget('codex').context > contextBudget('codex').compactAt, 'the hard cut stays past the fold');
-  const conv = activeConversation(u, 'ag1', 'codex');
-  // 160k chars in ten items: over the old 150k threshold, under codex's.
-  appendItems(conv.id, Array.from({ length: 10 }, (_, i) => (i % 2 ? asstMsg(filler(16_000)) : userMsg(filler(16_000)))));
-  assert.equal(needsCompaction(conv), false);
+test('without model capacity automatic compaction does not invent a limit', async () => {
+  const conv = activeConversation(seedUser('compact-budget@x.dev'), 'ag1', 'codex');
+  appendItems(conv.id, Array.from({ length: 10 }, (_, i) => (i % 2 ? asstMsg(filler(60_000)) : userMsg(filler(60_000)))));
   const { provider, seen } = summarizer('BRIEF');
-  assert.equal(await compactIfNeeded(conv, provider, 'm'), false, 'not forced, under threshold: no fold');
-  assert.equal(seen.length, 0, 'and no summariser call');
-  // Same thread on openrouter would fold.
-  const o = activeConversation(seedUser('compact-budget-or@x.dev'), 'ag1', 'openrouter');
-  appendItems(o.id, Array.from({ length: 10 }, (_, i) => (i % 2 ? { role: 'assistant', content: filler(16_000) } : { role: 'user', content: filler(16_000) })));
-  assert.equal(needsCompaction(o), true);
+  assert.equal(await compactIfNeeded(conv, provider, 'unknown'), false);
+  assert.equal(seen.length, 0);
 });
 
 test('compaction never leaves a tool result in neither the summary nor the tail', async () => {
@@ -179,6 +169,8 @@ test('compaction never leaves a tool result in neither the summary nor the tail'
   ]);
   const { provider } = summarizer('BRIEF');
   assert.equal(await compactIfNeeded(conv, provider, 'm', true), true);
+  const archive = fs.readFileSync(path.join(historyDir(u), `${conv.id}.compacted.jsonl`), 'utf8');
+  assert.ok(archive.split('\n').filter(Boolean).every(line => JSON.parse(line).item));
 
   const kept = (getDb().prepare('SELECT json FROM agent_items WHERE conversation_id = ? ORDER BY id').all(conv.id) as { json: string }[])
     .map((r) => JSON.parse(r.json));
@@ -187,6 +179,18 @@ test('compaction never leaves a tool result in neither the summary nor the tail'
   // Every surviving output still has its call: an orphan would be deleted by
   // repairItems on the next load, losing the result entirely.
   assert.equal(calls.length, outs.length, 'no half-pair survived the fold');
+});
+
+test('compaction preserves original rows if its archive cannot be written', async () => {
+  const u = seedUser('compact-archive@x.dev');
+  const conv = activeConversation(u, 'ag1', 'codex');
+  appendItems(conv.id, Array.from({ length: 8 }, () => userMsg(filler(4000))));
+  const before = conversationSize(conv.id);
+  const archive = path.join(historyDir(u), `${conv.id}.compacted.jsonl`);
+  fs.mkdirSync(archive);
+  const { provider } = summarizer('BRIEF');
+  await assert.rejects(compactIfNeeded(conv, provider, 'm', true));
+  assert.deepEqual(conversationSize(conv.id), before);
 });
 
 test('compaction refuses to replace real context with an empty summary', async () => {

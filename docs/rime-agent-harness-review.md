@@ -71,11 +71,30 @@ disk mirror and the next compaction see the same record a successful turn would 
 
 ## F7 — Compaction fired several times per task (seen, fixed)
 
-One threshold (150k chars, ~37k tokens) served every provider. Every codex model takes 272k+ input
-tokens and the fixed part of a turn (instructions, tool schemas) is ~60k on its own, so a codex
-thread was folded after roughly a third of the room it had, each fold a model round-trip and a
-lossy brief. The budget is per provider now: codex folds at 400k chars and cuts at 480k, OpenRouter
-keeps 150k/200k for its 128k-context models.
+The original 150k-character threshold and its later provider-wide replacement both guessed
+capacity. Codex and OpenRouter already return model-specific metadata; Rimeward now retains it.
+Codex uses `context_window` (falling back to `max_context_window` only when absent), its effective
+input percentage, and its compaction limit capped at 90% of the window, matching Codex's
+[ModelInfo contract](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/openai_models.rs).
+OpenRouter uses the smaller advertised model/top-provider context and reserves 10% for output,
+bounded by its output ceiling. Its compaction policy is 90% of that model's window.
+
+Catalogs refresh hourly and retain their last successful values across restart or disconnection.
+Cached limits are labelled. Unknown models show capacity unavailable and do not acquire an
+invented provider-wide limit. OpenAI's ordinary `/v1/models` response does not expose context
+capacity; the ChatGPT-connected provider uses Codex's own catalog.
+
+The whole request (instructions, tools and conversation) is estimated before every model round,
+including resumed and unattended turns. Actual provider input usage anchors subsequent estimates;
+model changes or replaced history invalidate that measurement. Unseen text uses a four-byte/token
+estimate; encrypted reasoning and inline image bytes are not mistaken for text tokens. Media and
+unseen reasoning costs remain approximate until provider usage is available. The indicator is
+explicitly approximate, divides by the model window, and survives reload with its last measured usage.
+Compaction happens between rounds, banks completed tool work, and resets the persistence cursor.
+Loading no longer silently drops older instructions. If compaction fails to fit a known input budget,
+the turn reports that history was preserved instead of sending a silently truncated conversation.
+Before a successful fold, original items are flushed to `/history/<id>.compacted.jsonl`, including
+mid-turn results that have not reached the final assistant message. Archive failure prevents deletion.
 
 ## F6 — The relay dropped long model rounds (seen, fixed)
 
@@ -101,7 +120,7 @@ would read an error body as a result.
 - **S2 Search results have the same shape problem.** `searchFiles` caps at 200 matches × 300 chars,
   which is 60k. It did not overflow in this review; it will.
 - **S3 Progress the user can see** (done). The ward now carries a context indicator: the thread's
-  size against its compaction threshold, filled as a pill, with the last round's billed tokens and
+  estimated full-request tokens against the selected model's catalog window, filled as a pill, with the compaction threshold, last measured input tokens and
   cache rate in its tooltip. It repaints from a `usage` event after every model round.
 - **S4 Desktop runtime stderr is discarded** (`desktop/src/runtime.rs`: `Stdio::null()`). The
   relay failure above left no trace on the desktop either. Not the agent's finding, but the reason

@@ -54,7 +54,7 @@ try {
     });
     await ctx.route('**/api/agent/**',async route=>{
       const req=route.request();
-      if(req.method()==='GET')return route.fulfill({json:{configured:true,provider:'codex',context:{chars:120000,compactAt:400000},transcript:new URL(req.url()).pathname.endsWith('reviewer')?[]:transcript,pending:null,busy:false}});
+      if(req.method()==='GET')return route.fulfill({json:{configured:true,provider:'codex',context:{model:'catalog-model',tokens:30000,window:100000,compactAt:90000,source:'catalog'},transcript:new URL(req.url()).pathname.endsWith('reviewer')?[]:transcript,pending:null,busy:false}});
       if(new URL(req.url()).pathname.endsWith('/files'))return route.fulfill({json:{files:[{ok:true,id:'12',name:'example.txt'}]}});
       const body=req.postDataJSON(); requests.push(body);
       if(body.action==='clear')return route.fulfill({status:failClear?503:200,json:failClear?{error:'Try again shortly'}:{ok:true}});
@@ -69,7 +69,7 @@ try {
   await page.goto(origin+'/dash');
   const ward=page.locator('[data-wd="rime"]');
   await ward.getByRole('textbox',{name:'Message Rime'}).waitFor();
-  assert.equal(await ward.locator('.ag-context').textContent(),'30%');
+  assert.equal(await ward.locator('.ag-context').textContent(),'~30%');
   const comms=page.locator('[data-wd="messages"]');
   const commsInput=comms.getByRole('textbox',{name:'Message as the bot'});
   await commsInput.fill('Keep this unsent message');
@@ -137,10 +137,16 @@ try {
   assert.equal(await input.inputValue(),'/size ');
   await input.fill('');
   const emit=event=>page.evaluate(event=>window.__streams.find(s=>s.url==='/api/logic/stream').dispatchEvent(new MessageEvent('agent-live',{data:JSON.stringify({ward:'rime',source:'chat',event})})),event);
+  await emit({type:'usage',model:'unknown-model',tokens:30000,window:null,compactAt:null,source:'unknown'});
+  assert.equal(await ward.locator('.ag-context').textContent(),'~30k');
+  assert.match(await ward.locator('.ag-context').getAttribute('title'),/capacity unavailable/);
+  await emit({type:'usage',model:'catalog-model',tokens:30000,window:100000,compactAt:90000,source:'cache'});
+  assert.equal(await ward.locator('.ag-context').textContent(),'~30%');
+  assert.match(await ward.locator('.ag-context').getAttribute('title'),/cached model limits/);
   await emit({type:'user',text:'Help me connect a desktop without losing my dashboard.'});
   await emit({type:'step_start',id:'one',tool:'read_file',kind:'read',reason:'Checking the connection flow'});
   await emit({type:'step',step:{id:'one',tool:'read_file',kind:'read',reason:'Checked the connection flow',result:'The browser approval route is ready.',ms:182}});
-  await emit({type:'reply',text:'## Your dashboard stays right where it is\n\nConnect once in your browser, then switch between **This desktop** and your server from the header.\n\n1. Enter your server address.\n2. Sign in and approve this desktop.\n3. Open your existing dashboard.\n\n```ts\nconst workspace = await connectDesktop(server);\nawait workspace.open();\n```\n\nYour local projects remain available when the server is offline.'});
+  await emit({type:'reply',text:'## Your dashboard stays right where it is\n\nConnect once in your browser. Your pages, appearance, and Rime stay in sync automatically.\n\n1. Enter your server address.\n2. Sign in and approve this desktop.\n3. Continue in your existing dashboard.\n\n```ts\nconst workspace = await connectDesktop(server);\nawait workspace.open();\n```\n\nYour local projects remain available when the server is offline.'});
   await emit({type:'end'});
   await dialog.locator('.ag-code').getByRole('button',{name:'Copy code'}).click();
   assert.match(await page.evaluate(()=>navigator.clipboard.readText()),/connectDesktop/);

@@ -90,6 +90,10 @@ try {
   browser = await chromium.launch({ headless: true, channel: 'chromium', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1.5, colorScheme: 'dark' });
   await ctx.addCookies([{ name: 'rimeward_session', value: cookie, url: BASE }]);
+  await ctx.route('**/api/agent/rime', route => route.request().method() === 'GET'
+    ? route.fulfill({ json: { configured: true, provider: 'codex', transcript: [], pending: null, busy: false,
+      context: { model: 'catalog-model', tokens: 30000, window: 100000, compactAt: 90000, source: 'catalog' } } })
+    : route.continue());
   const page = await ctx.newPage();
   const shot = async (url, name, wait = 2500) => {
     await page.goto(`${BASE}${url}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });

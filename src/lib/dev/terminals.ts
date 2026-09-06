@@ -55,12 +55,18 @@ interface Live {
   pendingBytes: number;
   queuedBytes: number;
   paused: boolean;
+  closing?: boolean;
   outputTimer?: ReturnType<typeof setTimeout>;
   flush?: ReturnType<typeof setTimeout>;
   user: number;
   id: string;
 }
 const live = new Map<string, Live>();
+function stopPty(s: Live) {
+  if (s.closing) return;
+  s.closing = true;
+  s.pty.kill();
+}
 const ownerKey = (id: string) => `terminal:${id}`;
 export function executable(name: string): string | null {
   const extensions =
@@ -365,6 +371,8 @@ export async function startSession(
       releaseLease(ownerKey(id), leaseOwner(ownerKey(id)) ?? "");
       emitDev(user, "session", id, view(rowOf(user, id)));
       term.dispose();
+      // ConPTY's worker can outlive a naturally exited shell; release its handles too.
+      if (process.platform === "win32") try { stopPty(s); } catch { /* already closed */ }
     });
   });
   if (!cleanupInstalled) {
@@ -477,7 +485,7 @@ export function interruptSession(user: number, id: string, owner: string) {
 export function closeSession(user: number, id: string) {
   const s = running(user, id);
   persist(s);
-  s.pty.kill();
+  stopPty(s);
 }
 export function configureSession(
   user: number,
@@ -550,7 +558,7 @@ export function shutdownTerminals(): Promise<void> {
       try { persist(s); }
       catch (error) { console.error("[terminal] Failed to save shutdown snapshot", error); }
       finally {
-        try { s.pty.kill(); } catch { /* already exited */ }
+        try { stopPty(s); } catch { /* already exited */ }
         resolve();
       }
     });

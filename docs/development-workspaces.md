@@ -17,6 +17,8 @@ Terminal output uses one shared event stream per desktop rather than polling. In
 
 Transient snapshot failures retry independently of terminal activity; input is enabled only after both snapshot reconciliation and the live stream are ready. Explicit Quit drains pending output through xterm before saving its screen and stopping the process. Screen recovery does not resume a terminated process.
 
+Windows also releases the PTY after a shell exits naturally, so ConPTY's worker does not keep the runtime alive. Cleanup is applied once per session, including explicit termination and Quit.
+
 Only canonical `NNN_lowercase_name.sql` migrations are loaded. Finder/cloud conflict copies such as `001_init 2.sql` are ignored instead of being treated as new database migrations.
 
 ## One interface and automatic routing

@@ -63,8 +63,9 @@ used by Discord tests as experimental. macOS 27 also reports deprecated `hdiutil
 in Tauri's DMG packager; those commands still work. Verbose AppImage builds report
 linuxdeploy's library copyright-discovery and optional AppStream metadata warnings,
 alongside skipped stripping/rpath changes and existing AppRun notices. These come from
-the upstream packagers, outside the application's lint and compiler checks, and are not
-suppressed.
+the upstream packagers. WiX also emits ICE03/40/57/60/61 validation warnings from its
+generated MSI template and bundled binary metadata. These remain outside the
+application's lint and compiler checks and are not suppressed.
 
 After a web build, run `npm run test:ui` with the staged Chromium available. These checks
 exercise real editor/PTY behavior, shared-client control, recovery, and isolated HTTPS

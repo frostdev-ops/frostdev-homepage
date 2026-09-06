@@ -201,7 +201,7 @@ npm run desktop:dev
 npm run desktop:build
 ```
 
-**Workspaces** brings server pages and connected computers into one searchable navigator. This computer opens directly; phones control the same live editors, terminals, and conversations through the server. Returning restores the last page. Project files stay on their original computer.
+One shared dashboard brings server pages and desktop projects together. The app routes each ward automatically, without a local/server selector; phones control the same live editors and terminals through the server. Returning restores the last page. Project files stay on their original computer.
 
 **Rime follows you.** The first connected server supplies Rime's default persona/model and provider access. Rime's own files, memories, skills, attachments, and chat history sync to a local copy. Offline edits reconcile on reconnect; conflicting local versions remain in **Chat history → Recovered version**. Model credentials stay on the server: an offline desktop needs its own configured provider to make new model calls. Chat history and its code/tool excerpts are shared Rime data; project folders, terminal processes, and pending actions are not replicated.
 
@@ -226,8 +226,10 @@ credentials remain independent on each installation; connecting does not copy th
 </p>
 
 All interface icons follow the selected icon or emoji pack, style, tint, size, opacity, and
-stroke settings. New terminal sessions use Human permission mode; changing launch policy is
-an explicit user action and takes effect on the next start. Language servers, cross-file
+stroke settings. Terminals stream output over a shared connection, preserve Unicode widths,
+and recover missed output without replaying input. **Allow Rime to type** takes effect
+immediately and remains separate from **Standard / Unrestricted** CLI launch permissions,
+which change on the next start. New sessions keep Rime input off. Language servers, cross-file
 type checking, debugging, and VS Code extensions remain outside this release. The published
 installer link may lag the source; build this checkout for the new workspace experience
 until a corresponding desktop release is published.

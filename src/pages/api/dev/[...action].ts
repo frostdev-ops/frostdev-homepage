@@ -102,6 +102,10 @@ export const ALL: APIRoute = async ({ params, request, locals, url }) => {
             } catch {}
           };
           const send = (text: string) => {
+            if (ended) return;
+            // A slow/offline reader reconnects to a snapshot instead of growing
+            // an unbounded queue or blocking every other terminal.
+            if ((controller.desiredSize ?? 0) <= 0) { end(); return; }
             try {
               controller.enqueue(enc.encode(text));
             } catch {
@@ -113,12 +117,13 @@ export const ALL: APIRoute = async ({ params, request, locals, url }) => {
           );
           timer = setInterval(() => send(": heartbeat\n\n"), 15_000);
           request.signal.addEventListener("abort", end, { once: true });
+          if (request.signal.aborted) end();
         },
         cancel() {
           stop();
           clearInterval(timer);
         },
-      });
+      }, new ByteLengthQueuingStrategy({ highWaterMark: 512 * 1024 }));
       return new Response(stream, {
         headers: {
           "content-type": "text/event-stream",
@@ -275,7 +280,7 @@ export const ALL: APIRoute = async ({ params, request, locals, url }) => {
       if (action === "control")
         return json(controlSession(user, id, owner, body.takeover === true));
       if (action === "input") {
-        writeSession(user, id, owner, String(body.data ?? ""));
+        writeSession(user, id, owner, String(body.data ?? ""), body.binary === true);
         return json({ ok: true });
       }
       if (action === "resize") {

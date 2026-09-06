@@ -55,6 +55,9 @@ export function workDb(): Database.Database {
     );
     UPDATE terminal_sessions SET state='interrupted' WHERE state='running';
   `);
+  if (!(db.pragma("table_info(terminal_sessions)") as { name: string }[]).some(c => c.name === "agent_input")) {
+    db.transaction(() => db.exec("ALTER TABLE terminal_sessions ADD COLUMN agent_input INTEGER NOT NULL DEFAULT 0; UPDATE terminal_sessions SET agent_input=(mode != 'human')"))();
+  }
   database = db;
   return db;
 }
@@ -100,7 +103,7 @@ export function leaseOwner(key: string): string | null {
   leases.delete(key);
   return null;
 }
-export function claimLease(key: string, owner: string, takeover = false): void {
+export function claimLease(key: string, owner: string, takeover = false, duration = 30_000): void {
   if (!/^[\w:-]{1,120}$/.test(owner))
     throw new DevError("Invalid input owner.");
   const current = leaseOwner(key);
@@ -109,7 +112,7 @@ export function claimLease(key: string, owner: string, takeover = false): void {
       "Another client controls this session. Take over to edit.",
       409,
     );
-  leases.set(key, { owner, until: Date.now() + 30_000 });
+  leases.set(key, { owner, until: Date.now() + duration });
 }
 export function releaseLease(key: string, owner: string): void {
   if (leaseOwner(key) === owner) leases.delete(key);

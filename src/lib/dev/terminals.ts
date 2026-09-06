@@ -16,6 +16,7 @@ import {
   claimLease,
   leaseOwner,
   releaseLease,
+  subscribeDev,
 } from "./runtime.ts";
 import { projectOf, projectPath } from "./projects.ts";
 import type { SessionView, PermissionMode, TerminalKind } from "./types.ts";
@@ -29,6 +30,7 @@ type Row = {
   kind: TerminalKind;
   mode: PermissionMode;
   next_mode: PermissionMode | null;
+  agent_input: number;
   shell: string;
   title: string;
   state: SessionView["state"];
@@ -46,8 +48,14 @@ interface Live {
   term: Headless;
   serializer: SerializeAddon;
   sequence: number;
-  chunks: { sequence: number; data: string }[];
+  chunks: { sequence: number; data: string; bytes: number }[];
+  head: number;
   bytes: number;
+  pending: string[];
+  pendingBytes: number;
+  queuedBytes: number;
+  paused: boolean;
+  outputTimer?: ReturnType<typeof setTimeout>;
   flush?: ReturnType<typeof setTimeout>;
   user: number;
   id: string;
@@ -126,12 +134,13 @@ function view(r: Row): SessionView {
     kind: r.kind,
     mode: r.mode,
     nextMode: r.next_mode ?? r.mode,
+    agentInput: !!r.agent_input,
     title: r.title,
     state: r.state,
     exitCode: r.exit_code,
     owner: leaseOwner(ownerKey(r.id)),
-    cols: r.cols,
-    rows: r.rows,
+    cols: live.get(r.id)?.term.cols ?? r.cols,
+    rows: live.get(r.id)?.term.rows ?? r.rows,
     sequence: live.get(r.id)?.sequence ?? r.sequence,
     task: r.task,
     assignment: r.assignment,
@@ -156,13 +165,42 @@ function persist(s: Live) {
       "UPDATE terminal_sessions SET snapshot=?,sequence=?,cols=?,rows=? WHERE id=? AND user_id=?",
     )
     .run(
-      s.serializer.serialize({ scrollback: 1000 }),
+      s.serializer.serialize({ scrollback: 10000 }),
       s.sequence,
       s.term.cols,
       s.term.rows,
       s.id,
       s.user,
     );
+}
+function checkpoint(s: Live) {
+  if (s.flush) return;
+  s.flush = setTimeout(() => persist(s), 5000);
+  s.flush.unref();
+}
+function flushOutput(s: Live) {
+  clearTimeout(s.outputTimer);
+  s.outputTimer = undefined;
+  if (!s.pending.length) return;
+  const data = s.pending.join(""), bytes = s.pendingBytes;
+  s.pending = [];
+  s.pendingBytes = 0;
+  s.term.write(data, () => {
+    const sequence = ++s.sequence;
+    s.chunks.push({ sequence, data, bytes });
+    s.bytes += bytes;
+    // Cap metadata too: slow, single-character output must not retain millions of objects.
+    while ((s.bytes > MAX_HISTORY || s.chunks.length - s.head > 4096) && s.head < s.chunks.length - 1)
+      s.bytes -= s.chunks[s.head++]?.bytes ?? 0;
+    if (s.head > 128) { s.chunks = s.chunks.slice(s.head); s.head = 0; }
+    emitDev(s.user, "output", s.id, { sequence, data });
+    checkpoint(s);
+    s.queuedBytes -= bytes;
+    if (s.paused && s.queuedBytes < 64 * 1024) {
+      s.paused = false;
+      s.pty.resume();
+    }
+  });
 }
 let cleanupInstalled = false;
 export async function startSession(
@@ -171,6 +209,9 @@ export async function startSession(
     project: string;
     kind?: TerminalKind;
     mode?: PermissionMode;
+    agentInput?: boolean;
+    cols?: number;
+    rows?: number;
     shell?: string;
     task?: string;
     assignment?: string;
@@ -183,7 +224,8 @@ export async function startSession(
     mode = opts.mode ?? "human";
   if (
     !["shell", "codex", "claude"].includes(kind) ||
-    !["human", "rimeward", "yolo"].includes(mode)
+    !["human", "rimeward", "yolo"].includes(mode) ||
+    (opts.agentInput !== undefined && typeof opts.agentInput !== "boolean")
   )
     throw new DevError("Invalid terminal configuration.");
   if (listSessions(user).filter((s) => s.state === "running").length >= 24)
@@ -208,14 +250,18 @@ export async function startSession(
   const { SerializeAddon } =
     require("@xterm/addon-serialize") as typeof import("@xterm/addon-serialize");
   const id = crypto.randomUUID();
+  const { cols, rows } = dimensions(opts.cols ?? 100, opts.rows ?? 30);
   const term = new Terminal({
-    cols: 100,
-    rows: 30,
-    scrollback: 1000,
+    cols,
+    rows,
+    scrollback: 10000,
     allowProposedApi: true,
   });
   const serializer = new SerializeAddon();
   term.loadAddon(serializer);
+  const { Unicode11Addon } = require("@xterm/addon-unicode11") as typeof import("@xterm/addon-unicode11");
+  term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = "11";
   const task = (opts.task ?? "").slice(0, 8000),
     assignment = (opts.assignment ?? "").slice(0, 2000);
   // argv is passed directly to the executable, never concatenated into a shell command.
@@ -247,17 +293,20 @@ export async function startSession(
     program = process.execPath;
     args = [script, ...args];
   }
-  const pty = spawn(program, args, {
-    name: "xterm-256color",
-    cwd: projectPath(user, p.id),
-    cols: 100,
-    rows: 30,
-    env: terminalEnv(),
-  });
+  let pty: IPty;
+  try {
+    pty = spawn(program, args, {
+      name: "xterm-256color",
+      cwd: projectPath(user, p.id),
+      cols,
+      rows,
+      env: terminalEnv(),
+    });
+  } catch (error) { term.dispose(); throw error; }
   try {
     workDb()
       .prepare(
-        "INSERT INTO terminal_sessions(id,user_id,project,kind,mode,title,state,task,assignment,shell) VALUES(?,?,?,?,?,?,'running',?,?,?)",
+        "INSERT INTO terminal_sessions(id,user_id,project,kind,mode,title,state,task,assignment,shell,agent_input,cols,rows) VALUES(?,?,?,?,?,?,'running',?,?,?,?,?,?)",
       )
       .run(
         id,
@@ -269,6 +318,9 @@ export async function startSession(
         task,
         assignment,
         kind === "shell" ? shell : "",
+        Number(opts.agentInput ?? mode !== "human"),
+        cols,
+        rows,
       );
   } catch (error) {
     pty.kill();
@@ -281,28 +333,27 @@ export async function startSession(
     serializer,
     sequence: 0,
     chunks: [],
+    head: 0,
     bytes: 0,
+    pending: [],
+    pendingBytes: 0,
+    queuedBytes: 0,
+    paused: false,
     user,
     id,
   };
   live.set(id, s);
   pty.onData((data) => {
-    term.write(data, () => {
-      const sequence = ++s.sequence;
-      s.chunks.push({ sequence, data });
-      s.bytes += Buffer.byteLength(data);
-      while (s.bytes > MAX_HISTORY && s.chunks.length > 1) {
-        const oldest = s.chunks.shift();
-        if (oldest) s.bytes -= Buffer.byteLength(oldest.data);
-      }
-      emitDev(user, "output", id, { sequence, data });
-      if (!s.flush) {
-        s.flush = setTimeout(() => persist(s), 2000);
-        s.flush.unref();
-      }
-    });
+    const bytes = Buffer.byteLength(data);
+    s.pending.push(data);
+    s.pendingBytes += bytes;
+    s.queuedBytes += bytes;
+    if (!s.paused && s.queuedBytes >= 256 * 1024) { s.paused = true; pty.pause(); }
+    if (s.pendingBytes >= 64 * 1024) flushOutput(s);
+    else s.outputTimer ??= setTimeout(() => flushOutput(s), 8);
   });
   pty.onExit(({ exitCode }) => {
+    flushOutput(s);
     term.write("", () => {
       persist(s);
       workDb()
@@ -339,19 +390,20 @@ export function readSession(user: number, id: string, after?: number) {
   const incremental =
     s &&
     after !== undefined &&
-    after >= (s.chunks[0]?.sequence ?? 1) - 1 &&
+    Number.isInteger(after) &&
+    after >= (s.chunks[s.head]?.sequence ?? 1) - 1 &&
     after <= s.sequence;
   return {
     session: view(row),
     screen,
     reset: !incremental,
     data: incremental
-      ? s.chunks
+      ? s.chunks.slice(s.head)
           .filter((c) => c.sequence > (after ?? -1))
           .map((c) => c.data)
           .join("")
       : s
-        ? s.serializer.serialize({ scrollback: 1000 })
+        ? s.serializer.serialize({ scrollback: 10000 })
         : row.snapshot,
   };
 }
@@ -361,14 +413,19 @@ export function controlSession(
   owner: string,
   takeover = false,
 ) {
+  running(user, id);
   const row = rowOf(user, id);
-  if (owner.startsWith("client:") && takeover)
-    workDb()
-      .prepare("UPDATE terminal_sessions SET human_control=1 WHERE id=?")
-      .run(id);
-  claimLease(ownerKey(id), owner, takeover);
-  emitDev(user, "session", id, view(row));
+  claimInput(row, owner, takeover);
   return view(row);
+}
+// Viewing never claims input. Human ownership survives idle time and reconnects;
+// another client can explicitly take it, and agents can never take it from a human.
+function claimInput(row: Row, owner: string, takeover = false, interrupt = false) {
+  if (owner.startsWith("agent:") && (!row.agent_input && !interrupt))
+    throw new DevError("Rime input is off. Enable it in this terminal's session settings.", 409);
+  const before = leaseOwner(ownerKey(row.id));
+  claimLease(ownerKey(row.id), owner, takeover && owner.startsWith("client:"), owner.startsWith("client:") ? Infinity : 30_000);
+  if (before !== owner) emitDev(row.user_id, "session", row.id, view(row));
 }
 function running(user: number, id: string): Live {
   rowOf(user, id);
@@ -382,32 +439,19 @@ export function writeSession(
   id: string,
   owner: string,
   data: string,
+  binary = false,
 ) {
   const s = running(user, id),
     row = rowOf(user, id);
   if (Buffer.byteLength(data) > 64 * 1024)
     throw new DevError("Input is too large.");
-  claimLease(ownerKey(id), owner);
-  // Interactive CLIs expose no reliable universal permission-prompt detector.
-  // Human sessions accept human keystrokes only; tools may inspect and interrupt.
-  if (owner.startsWith("agent:") && row.mode === "human")
-    throw new DevError(
-      "Human mode requires the user to send interactive input. Use the session task at launch or ask the user to configure delegated control.",
-      409,
-    );
-  if (
-    owner.startsWith("agent:") &&
-    (
-      workDb()
-        .prepare("SELECT human_control FROM terminal_sessions WHERE id=?")
-        .get(id) as { human_control: number }
-    ).human_control
-  )
-    throw new DevError(
-      "Human takeover paused agent input. Ask the user to release control.",
-      409,
-    );
-  s.pty.write(data);
+  claimInput(row, owner);
+  s.pty.write(binary ? Buffer.from(data, "latin1") : data);
+}
+function dimensions(cols: number, rows: number) {
+  if (!Number.isFinite(cols) || !Number.isFinite(rows))
+    throw new DevError("Invalid terminal dimensions.");
+  return { cols: Math.max(20, Math.min(400, Math.floor(cols))), rows: Math.max(5, Math.min(150, Math.floor(rows))) };
 }
 export function resizeSession(
   user: number,
@@ -417,20 +461,17 @@ export function resizeSession(
   rows: number,
 ) {
   const s = running(user, id);
-  claimLease(ownerKey(id), owner);
-  cols = Math.max(20, Math.min(400, Math.floor(cols)));
-  rows = Math.max(5, Math.min(150, Math.floor(rows)));
-  if (!Number.isFinite(cols) || !Number.isFinite(rows))
-    throw new DevError("Invalid terminal dimensions.");
+  ({ cols, rows } = dimensions(cols, rows));
+  claimInput(rowOf(user, id), owner);
   if (s.term.cols === cols && s.term.rows === rows) return;
   s.pty.resize(cols, rows);
   s.term.resize(cols, rows);
-  persist(s);
+  checkpoint(s);
   emitDev(user, "session", id, view(rowOf(user, id)));
 }
 export function interruptSession(user: number, id: string, owner: string) {
   const s = running(user, id);
-  claimLease(ownerKey(id), owner);
+  claimInput(rowOf(user, id), owner, false, true);
   s.pty.write("\x03");
 }
 export function closeSession(user: number, id: string) {
@@ -443,26 +484,34 @@ export function configureSession(
   id: string,
   opts: {
     mode?: PermissionMode;
+    agentInput?: boolean;
+    title?: string;
     taskState?: SessionView["taskState"];
     assignment?: string;
     review?: string;
   },
 ) {
   rowOf(user, id);
+  if (opts.mode && !["human", "rimeward", "yolo"].includes(opts.mode)) throw new DevError("Invalid permission mode.");
+  if (opts.taskState && !["active", "needs-attention", "done", "cancelled"].includes(opts.taskState)) throw new DevError("Invalid task state.");
+  if (opts.title !== undefined && (typeof opts.title !== "string" || !opts.title.trim() || opts.title.length > 100)) throw new DevError("Enter a session name (up to 100 characters).");
+  if (opts.assignment !== undefined && typeof opts.assignment !== "string") throw new DevError("Invalid assignment.");
+  if (opts.review !== undefined && typeof opts.review !== "string") throw new DevError("Invalid review.");
+  if (opts.agentInput !== undefined) {
+    if (typeof opts.agentInput !== "boolean") throw new DevError("Invalid Rime input setting.");
+    workDb().prepare("UPDATE terminal_sessions SET agent_input=? WHERE id=?").run(Number(opts.agentInput), id);
+    const current = leaseOwner(ownerKey(id));
+    if (!opts.agentInput && current?.startsWith("agent:")) releaseLease(ownerKey(id), current);
+  }
+  if (opts.title !== undefined) {
+    workDb().prepare("UPDATE terminal_sessions SET title=? WHERE id=?").run(opts.title.trim(), id);
+  }
   if (opts.mode) {
-    if (!["human", "rimeward", "yolo"].includes(opts.mode))
-      throw new DevError("Invalid permission mode.");
     workDb()
       .prepare("UPDATE terminal_sessions SET next_mode=? WHERE id=?")
       .run(opts.mode, id);
   }
   if (opts.taskState) {
-    if (
-      !["active", "needs-attention", "done", "cancelled"].includes(
-        opts.taskState,
-      )
-    )
-      throw new DevError("Invalid task state.");
     workDb()
       .prepare("UPDATE terminal_sessions SET task_state=? WHERE id=?")
       .run(opts.taskState, id);
@@ -485,18 +534,28 @@ export async function waitSession(
   ms = 20_000,
 ) {
   rowOf(user, id);
-  const deadline = Date.now() + Math.min(30_000, Math.max(0, ms));
-  while (Date.now() < deadline && live.get(id)?.sequence === after)
-    await new Promise((r) => setTimeout(r, 250));
+  if (live.get(id)?.sequence === after) await new Promise<void>(resolve => {
+    const done = () => { clearTimeout(timer); stop(); resolve(); };
+    const timer = setTimeout(done, Math.min(30_000, Math.max(0, ms)));
+    const stop = subscribeDev(user, event => { if (event.id === id) done(); });
+  });
   return readSession(user, id, after);
 }
-export function shutdownTerminals() {
-  for (const s of live.values()) {
-    try {
-      persist(s);
-      s.pty.kill();
-    } catch {}
-  }
+let stopping: Promise<void> | undefined;
+export function shutdownTerminals(): Promise<void> {
+  stopping ??= Promise.all([...live.values()].map(s => new Promise<void>(resolve => {
+    flushOutput(s);
+    // xterm parses asynchronously: snapshot only after every queued write.
+    s.term.write("", () => {
+      try { persist(s); }
+      catch (error) { console.error("[terminal] Failed to save shutdown snapshot", error); }
+      finally {
+        try { s.pty.kill(); } catch { /* already exited */ }
+        resolve();
+      }
+    });
+  }))).then(() => {});
+  return stopping;
 }
 
 export function releaseControl(user: number, id: string, owner: string) {
@@ -504,10 +563,9 @@ export function releaseControl(user: number, id: string, owner: string) {
   if (leaseOwner(ownerKey(id)) !== owner)
     throw new DevError("Take control before releasing it.", 409);
   releaseLease(ownerKey(id), owner);
-  workDb()
-    .prepare("UPDATE terminal_sessions SET human_control=0 WHERE id=?")
-    .run(id);
-  return view(rowOf(user, id));
+  const result = view(rowOf(user, id));
+  emitDev(user, "session", id, result);
+  return result;
 }
 
 export function restartSession(user: number, id: string) {
@@ -522,6 +580,9 @@ export function restartSession(user: number, id: string) {
     project: row.project,
     kind: row.kind,
     mode: row.next_mode ?? row.mode,
+    agentInput: !!row.agent_input,
+    cols: row.cols,
+    rows: row.rows,
     shell: row.shell || undefined,
     title: row.title,
   });

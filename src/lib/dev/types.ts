@@ -25,6 +25,7 @@ export interface SessionView {
   kind: TerminalKind;
   mode: PermissionMode;
   nextMode: PermissionMode;
+  agentInput: boolean;
   title: string;
   state: "running" | "exited" | "interrupted";
   exitCode: number | null;

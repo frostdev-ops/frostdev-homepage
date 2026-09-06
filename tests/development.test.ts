@@ -29,7 +29,11 @@ import {
   closeSession,
   controlSession,
   releaseControl,
+  configureSession,
+  resizeSession,
+  restartSession,
 } from "../src/lib/dev/terminals.ts";
+import { subscribeDev } from "../src/lib/dev/runtime.ts";
 process.env.RIMEWARD_DESKTOP = "1";
 process.env.RIMEWARD_NATIVE_TOKEN = "test-only";
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "rimeward-project-"));
@@ -134,6 +138,71 @@ test("real terminal attachment, no replay, human control and explicit terminatio
   } finally {
     closeSession(1, s.id);
   }
+});
+
+test("terminal permissions change live, denied input cannot claim ownership, and human control survives idle time", async t => {
+  const p = addProject(1, root);
+  const s = await startSession(1, { project: p.id, kind: "shell", shell: process.platform === "win32" ? undefined : "/bin/sh" });
+  try {
+    assert.throws(() => writeSession(1, s.id, "agent:rime", "denied\r"), /Rime input is off/);
+    assert.equal(readSession(1, s.id).session.owner, null);
+    configureSession(1, s.id, { agentInput: true });
+    assert.equal(readSession(1, s.id).session.mode, "human", "native CLI launch permissions are independent");
+    writeSession(1, s.id, "agent:rime", "");
+    controlSession(1, s.id, "client:one", true);
+    t.mock.timers.enable({ apis: ["Date"] });
+    t.mock.timers.tick(60_000);
+    assert.equal(readSession(1, s.id).session.owner, "client:one");
+    assert.throws(() => writeSession(1, s.id, "agent:rime", "denied\r"));
+    assert.throws(() => controlSession(1, s.id, "agent:rime", true));
+    assert.throws(() => resizeSession(1, s.id, "client:two", 90, 25));
+    resizeSession(1, s.id, "client:one", 91, 26);
+    assert.equal(readSession(1, s.id).session.cols, 91);
+    t.mock.timers.reset();
+    releaseControl(1, s.id, "client:one");
+    writeSession(1, s.id, "agent:rime", "");
+    configureSession(1, s.id, { agentInput: false });
+    assert.equal(readSession(1, s.id).session.owner, null);
+    assert.throws(() => writeSession(1, s.id, "agent:rime", "denied\r"));
+    assert.throws(() => configureSession(1, s.id, { agentInput: true, mode: "invalid" as never }));
+    assert.equal(readSession(1, s.id).session.agentInput, false);
+  } finally { t.mock.timers.reset(); closeSession(1, s.id); }
+});
+
+test("streamed terminal output is ordered, bounded and drains before exit; restart keeps settings without replaying tasks", async () => {
+  const p = addProject(1, root);
+  const s = await startSession(1, { project: p.id, shell: process.platform === "win32" ? undefined : "/bin/sh", agentInput: true, task: "do not replay", cols: 100, rows: 30 });
+  let bytes = 0, sequence = 0;
+  const stop = subscribeDev(1, event => {
+    if (event.type !== "output" || event.id !== s.id) return;
+    const chunk = event.data as { sequence: number; data: string };
+    assert.equal(chunk.sequence, ++sequence);
+    bytes += Buffer.byteLength(chunk.data);
+  });
+  try {
+    const producer = path.join(root, "terminal-output.cjs");
+    fs.writeFileSync(producer, 'process.stdout.write("0123456789abcdef".repeat(131072) + "\\r\\nSTREAM_DONE\\r\\n")');
+    const command = `"${process.execPath}" "${producer}"\r`;
+    writeSession(1, s.id, "agent:rime", command);
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline && !readSession(1, s.id).screen.includes("STREAM_DONE"))
+      await waitSession(1, s.id, readSession(1, s.id).session.sequence, 1000);
+    const result = readSession(1, s.id);
+    assert.match(result.screen, /STREAM_DONE/);
+    assert.ok(bytes >= 2 * 1024 * 1024);
+    assert.equal(readSession(1, s.id, 0).reset, true, "old output recovers from a snapshot after history rolls over");
+    assert.equal(readSession(1, s.id, result.session.sequence).data, "");
+    writeSession(1, s.id, "agent:rime", "exit\r");
+    while (Date.now() < deadline && readSession(1, s.id).session.state === "running")
+      await waitSession(1, s.id, readSession(1, s.id).session.sequence, 1000);
+    const ended = readSession(1, s.id);
+    assert.equal(ended.session.state, "exited");
+    assert.match(ended.data, /STREAM_DONE/);
+    const next = await restartSession(1, s.id);
+    assert.equal(next.agentInput, true);
+    assert.equal(next.task, "");
+    closeSession(1, next.id);
+  } finally { stop(); if (readSession(1, s.id).session.state === "running") closeSession(1, s.id); }
 });
 
 test("worktrees preserve disk changes, dirty recovery buffers, and unrelated shared-tree changes", async () => {
@@ -266,6 +335,11 @@ test("file reads page under the tool cap and the diff scopes to a path", async (
   assert.equal(fs.readFileSync(path.join(dir, 'created.txt'), 'utf8'), 'created by Rime\n');
   assert.throws(() => edit('small.txt', 0), { status: 409 });
   assert.equal(fs.readFileSync(path.join(dir, 'small.txt'), 'utf8'), 'hello\n');
+  const text = 'Large write receipt\n'.repeat(2000);
+  const receipt = await DEV_TOOLS.project_edit!.run({ runtime: 'desktop', project: p.id, path: 'large-edit.txt', text, revision: 0, save: true }, { userId: 1, ward: 'rime', conv: 0 });
+  assert.equal((receipt as { saved: boolean }).saved, true);
+  assert.ok(JSON.stringify(receipt).length < 1000, 'successful writes acknowledge the revision without echoing the whole file');
+  assert.equal(fs.readFileSync(path.join(dir, 'large-edit.txt'), 'utf8'), text);
 
   const longLine = '\u0000'.repeat(5000) + 'tail';
   fs.writeFileSync(path.join(dir, "long.json"), JSON.stringify(longLine));

@@ -12,8 +12,9 @@ address ranges before it is connected to; browser wards run Chromium sandboxed u
 is root without `BROWSER_EXECUTABLE`; stored credentials are sealed with `TOKEN_ENC_KEY`.
 
 The standalone desktop binds to loopback with authenticated bootstrap/native actions; being
-on loopback is not authorization. Its database, project files, recovery buffers, terminal
-screens, conversations, and integrations remain local. Encryption keys and pairing
+on loopback is not authorization. Its native workspace database, project files, recovery
+buffers, and terminal screens remain local. Rime conversations and agent files can sync
+with the paired account as described below. Encryption keys and pairing
 credentials live in the OS credential store. Terminal environments exclude backend secrets.
 Approved project roots constrain file operations, including symlinks. Biome runs with a
 bundled configuration in a private temporary directory and never loads project plugins.
@@ -34,7 +35,9 @@ on the server; its model endpoint resolves the user from the pairing credential 
 executes desktop tools. No remote mutation, pending approval, or terminal input is
 automatically replayed after an uncertain acknowledgement.
 
-Native terminal agents run with the local user's filesystem access. Human is the default
-permission mode. Only the user can configure delegated Rimeward control or a CLI's explicit
-YOLO mode; the next start applies that policy. Shared-tree coordination is advisory, not a
+Native terminal agents run with the local user's filesystem access. Rime input is off by
+default. Only the user can enable **Allow Rime to type**, including native prompt responses;
+that change applies immediately, while human ownership still blocks agent input until
+released. Standard CLI permissions remain enabled unless the user selects **Unrestricted**
+(YOLO), which applies on the next start. Shells use OS account permissions. Shared-tree coordination is advisory, not a
 filesystem sandbox. Dirty worktrees and unrelated edits must be preserved.

@@ -57,7 +57,7 @@ const session = {
 export const DEV_TOOLS: Record<string, ToolDef> = {
   desktop_projects: wrap(
     "read",
-    "List projects on this desktop. Files and tool results stay in this local Rimeward conversation.",
+    "List projects on this desktop. Project folders are not replicated to the server. Selected file excerpts and tool results enter model requests and may sync with conversation history.",
     schema({ runtime: context.runtime }, ["runtime"]),
     (_, c) => listProjects(c.userId),
   ),
@@ -110,11 +110,14 @@ export const DEV_TOOLS: Record<string, ToolDef> = {
           revision = readBuffer(c.userId, a.project, a.path).revision;
         }
       }
-      return editBuffer(c.userId, a.project, a.path, owner(c), {
+      const result = editBuffer(c.userId, a.project, a.path, owner(c), {
         text: a.text,
         revision,
         save: a.save === true,
       });
+      return { project: result.project, path: result.path, revision: result.revision,
+        saved: a.save === true && !result.dirty && !result.conflict,
+        dirty: result.dirty, conflict: result.conflict, readonly: result.readonly };
     },
   ),
   terminal_list: wrap(
@@ -166,7 +169,7 @@ export const DEV_TOOLS: Record<string, ToolDef> = {
   ),
   terminal_input: wrap(
     "write",
-    "Send exact input to a delegated Rimeward/YOLO session. Human sessions require human input. Read the latest screen first. Never blindly replay uncertain input or guess approval keys; user takeover pauses agent input.",
+    "Send exact input to a session with agentInput enabled. The user can enable Rime input in Session settings without restarting, then release human control. Read the latest screen first. Never blindly replay uncertain input or guess approval keys; user takeover pauses agent input.",
     schema(
       {
         ...session,

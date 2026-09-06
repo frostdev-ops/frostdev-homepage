@@ -80,6 +80,12 @@ Register the ID in every icon set. Keep user-authored emoji as content. CodeMirr
 folding and diagnostic controls use the same theme contract. Preserve keyboard access,
 reduced motion, editor recovery, and explicit terminal input ownership.
 
+Terminal input and event sharing live in `terminal-input.ts` and `terminal-stream.ts` and
+are included in desktop lint. Keep snapshot recovery independent of output activity, never
+retry uncertain input, and drain xterm's parser before persisting a shutdown snapshot.
+`terminal-input.test.ts`, `terminal-shutdown.test.ts`, and the terminal UI smoke cover these
+contracts. Rime input authority is separate from the CLI's next-launch permission policy.
+
 ## Screenshots and release documentation
 
 `npm run goldens` regenerates every image in `docs/goldens` from disposable users, projects,

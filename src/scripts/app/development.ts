@@ -15,10 +15,15 @@ import {
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { terminalEvents } from "./terminal-stream.ts";
+import { TerminalInput } from "./terminal-input.ts";
 import "@xterm/xterm/css/xterm.css";
 import "../../styles/development.css";
 
-const owner = `client:${crypto.randomUUID()}`;
+const owner = sessionStorage.getItem("rimeward-input-owner") ?? `client:${crypto.randomUUID()}`;
+sessionStorage.setItem("rimeward-input-owner", owner);
 async function request<T = unknown>(
   action: string,
   data: Record<string, unknown> = {},
@@ -32,6 +37,7 @@ async function request<T = unknown>(
     {
       method,
       cache: "no-store",
+      signal: action === "input" || (action === "sessions" && method === "GET") ? AbortSignal.timeout(15000) : undefined,
       ...(method === "GET"
         ? {}
         : {
@@ -86,6 +92,9 @@ function expand(host: HTMLElement) {
   dlg.onclose = () => {
     placeholder.replaceWith(host);
     dlg.remove();
+  };
+  dlg.oncancel = event => {
+    if (host.dataset.kind === "terminal" && document.activeElement?.closest(".xterm")) event.preventDefault();
   };
   dlg.showModal();
 }
@@ -168,6 +177,7 @@ async function mount(w: WardInstance) {
       }));
     } else if (w.type === "terminal") {
       const caps = await api<ReturnType<typeof terminalCapabilities>>("capabilities");
+      if (stopped) return;
       const names = { shell: "Shell", codex: "Codex", claude: "Claude Code" };
       const sessions = select("Terminal session", []);
       const surface = el("div", "term-surface");
@@ -198,28 +208,44 @@ async function mount(w: WardInstance) {
       surface.append(screen, empty);
       content.replaceChildren(surface, footer);
       const term = new Terminal({
-        scrollback: 1000, fontSize: 13, lineHeight: 1.2,
+        scrollback: 10000, fontSize: 13, lineHeight: 1.2,
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
         theme: { background: "#101419", foreground: "#e4e9f0", cursor: "#c5d6e8" },
-        disableStdin: true, screenReaderMode: true,
+        disableStdin: true, screenReaderMode: localStorage.getItem("rimeward-terminal-accessibility") === "true",
+        allowProposedApi: true, cursorBlink: true, rightClickSelectsWord: true,
       });
       const fit = new FitAddon(), search = new SearchAddon();
       term.loadAddon(fit);
       term.loadAddon(search);
+      term.loadAddon(new Unicode11Addon());
+      term.unicode.activeVersion = "11";
+      term.loadAddon(new WebLinksAddon((event, url) => {
+        if ((event.ctrlKey || event.metaKey) && /^https?:\/\//i.test(url)) window.open(url, "_blank", "noopener,noreferrer");
+      }));
       term.open(screen);
+      void import("@xterm/addon-webgl").then(({ WebglAddon }) => {
+        if (stopped) return;
+        let gpu: InstanceType<typeof WebglAddon> | undefined;
+        try { gpu = new WebglAddon(); gpu.onContextLoss(() => gpu?.dispose()); term.loadAddon(gpu); }
+        catch { gpu?.dispose(); } // DOM renderer remains available without a GPU.
+      }).catch(() => {});
       let session: SessionView | undefined, list: SessionView[] = [];
       let sequence: number | undefined, updating: Promise<void> | undefined;
-      let inputQueue = Promise.resolve(), connected = false, launching = false;
+      let connected = false, streamReady = false, launching = false;
+      let retrySnapshot: ReturnType<typeof setTimeout> | undefined;
+      let painting: Promise<void> | undefined, outputs: { sequence: number; data: string }[] = [];
+      let outputSize = 0, resync = false, released = false;
       let sessionOptions = "", autoAttach = !state.session;
       const uncertain = new Set<string>();
-      const canType = () => !!session && connected && session.state === "running" &&
+      const canType = () => !stopped && !!session && connected && streamReady && session.state === "running" &&
         session.owner === owner && !uncertain.has(session.id);
       const take = button("Take control", async () => {
         const id = state.session;
         if (!id) return;
         await update(); // Reconcile the screen before acknowledging uncertain input.
-        if (!connected || state.session !== id) return;
+        if (!connected || !streamReady || state.session !== id) return;
         await api("control", { id, takeover: true }, "POST");
+        released = false;
         uncertain.delete(id);
         await update();
         resize();
@@ -255,49 +281,83 @@ async function mount(w: WardInstance) {
         newButton.disabled = launching;
         empty.querySelectorAll<HTMLButtonElement>("button").forEach(b => { b.disabled = launching; });
         take.hidden = session?.state !== "running" || writable;
-        take.disabled = !connected;
+        take.disabled = !connected || !streamReady;
         take.textContent = session && uncertain.has(session.id) ? "Review & take control" : "Take control";
         restart.hidden = !session || session.state === "running";
         restart.disabled = !connected || launching;
         keys.hidden = !showKeys || !session || session.state !== "running";
         keys.querySelectorAll<HTMLButtonElement>("button").forEach(b => { b.disabled = !writable; });
-        const text = !connected ? "Reconnecting…" : !session ? "Ready" :
+        const text = !connected || !streamReady ? "Reconnecting…" : !session ? "Ready" :
           session.state !== "running" ? (session.state === "exited" ? `Exited${session.exitCode === null ? "" : ` · ${session.exitCode}`}` : "Interrupted") :
           uncertain.has(session.id) ? "Input unconfirmed · review the screen" :
           writable ? "You’re in control" : session.owner ? "Viewing · controlled elsewhere" : "Viewing only";
         if (status.textContent !== text) status.textContent = text;
-        status.dataset.state = !connected || (session && uncertain.has(session.id)) ? "attention" : writable ? "active" : "idle";
-        status.title = session ? `${names[session.kind]} · ${session.mode} permissions${session.nextMode !== session.mode ? ` · ${session.nextMode} on next start` : ""}` : "";
+        status.dataset.state = !connected || !streamReady || (session && uncertain.has(session.id)) ? "attention" : writable ? "active" : "idle";
+        status.title = session ? `${names[session.kind]} · Rime input ${session.agentInput ? "enabled" : "off"}${session.kind === "shell" ? "" : ` · ${session.mode === "yolo" ? "Unrestricted" : "Standard"} CLI permissions`}` : "";
       }
+      let resizeTimer: ReturnType<typeof setTimeout> | undefined, resizing = false, lastSize = "";
       const resize = () => {
         if (!canType() || !screen.clientWidth || !screen.clientHeight) return;
-        const id = state.session;
-        const oldCols = term.cols, oldRows = term.rows;
-        fit.fit();
-        if (oldCols !== term.cols || oldRows !== term.rows)
-          void api("resize", { id, cols: term.cols, rows: term.rows }, "POST").catch(() => {});
+        const size = fit.proposeDimensions();
+        if (size) term.resize(Math.max(20, Math.min(400, size.cols)), Math.max(5, Math.min(150, size.rows)));
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => void sendSize(), 60);
       };
+      async function sendSize() {
+        if (resizing || !canType()) return;
+        const id = state.session, cols = term.cols, rows = term.rows, size = `${id}:${cols}:${rows}`;
+        if (lastSize === size) return;
+        resizing = true;
+        try { await api("resize", { id, cols, rows }, "POST"); lastSize = size; }
+        catch { lastSize = ""; }
+        finally { resizing = false; }
+        if (canType() && (term.cols !== cols || term.rows !== rows)) resize();
+      }
+      function sessionList() {
+        const signature = JSON.stringify(list.map(s => [s.id, s.title, s.state]));
+        if (signature !== sessionOptions) {
+          sessionOptions = signature;
+          sessions.replaceChildren(new Option(list.length ? "Choose a session" : "Terminal", ""));
+          for (const s of list) sessions.add(new Option(`${s.title === s.kind ? names[s.kind] : s.title}${s.state === "running" ? "" : ` · ${s.state}`}`, s.id));
+        }
+        sessions.value = state.session ?? "";
+      }
+      function drainOutput() {
+        if (stopped || updating || painting) return;
+        if (resync) { void update(); return; }
+        const chunks = outputs;
+        outputs = []; outputSize = 0;
+        let next = sequence;
+        const text: string[] = [];
+        for (const chunk of chunks) {
+          if (next !== undefined && chunk.sequence <= next) continue;
+          if (next === undefined || chunk.sequence !== next + 1) { resync = true; void update(); return; }
+          next = chunk.sequence;
+          text.push(chunk.data);
+        }
+        if (!text.length) return;
+        painting = new Promise<void>(resolve => term.write(text.join(""), resolve)).then(() => {
+          sequence = next;
+        }).finally(() => { painting = undefined; drainOutput(); });
+      }
       function update(): Promise<void> {
         if (updating) return updating;
         if (stopped) return Promise.resolve();
+        clearTimeout(retrySnapshot);
         updating = (async () => {
           try {
+            await painting;
+            resync = false;
             const next: SessionView[] = await api("sessions", { project: state.project });
             if (stopped) return;
             list = next;
-            // Don't rebuild the searchable picker on every output poll.
-            const signature = JSON.stringify(list.map(s => [s.id, s.title, s.state]));
-            if (signature !== sessionOptions) {
-              sessionOptions = signature;
-              sessions.replaceChildren(new Option(list.length ? "Choose a session" : "Terminal", ""));
-              for (const s of list) sessions.add(new Option(`${s.title === s.kind ? names[s.kind] : s.title}${s.state === "running" ? "" : ` · ${s.state}`}`, s.id));
-            }
+            if (state.session && !list.some(s => s.id === state.session)) { state.session = undefined; autoAttach = true; }
             if (autoAttach && list.length) {
               autoAttach = false;
               state.session = (list.find(s => s.state === "running") ?? list[0])?.id;
               await remember();
             }
-            sessions.value = state.session ?? "";
+            sessionList();
             if (state.session) {
               const id = state.session;
               const result = await api<ReturnType<typeof readSession>>("sessions", { id, ...(sequence === undefined ? {} : { after: sequence }) });
@@ -308,24 +368,29 @@ async function mount(w: WardInstance) {
               if (result.reset) term.reset();
               if (result.data) await new Promise<void>(resolve => term.write(result.data, resolve));
               sequence = result.session.sequence;
+              if (session.state === "running" && !session.owner && !session.agentInput && !released && !uncertain.has(id))
+                session = await api<SessionView>("control", { id }, "POST");
             }
             connected = true;
           } catch {
             connected = false;
-            if (state.session) uncertain.add(state.session);
+            if (!stopped) retrySnapshot = setTimeout(() => void update(), 3000);
           } finally {
-            if (!stopped) draw();
+            if (!stopped) { draw(); resize(); }
           }
-        })().finally(() => { updating = undefined; });
+        })().finally(() => { updating = undefined; if (connected) drainOutput(); });
         return updating;
       }
       async function attach(id: string) {
-        await update();
+        await inputBuffer.flush();
+        await updating;
+        await painting;
         if (stopped) return;
         autoAttach = false;
         state.session = id;
         session = undefined;
         sequence = undefined;
+        outputs = []; outputSize = 0; released = false; lastSize = "";
         term.reset();
         await remember();
         await update();
@@ -336,7 +401,7 @@ async function mount(w: WardInstance) {
         draw();
         try {
           const s: SessionView = previous ? await api("restart", { id: previous }, "POST") :
-            await api("sessions", { project: state.project, kind: "shell", mode: "human", ...options }, "POST");
+            await api("sessions", { project: state.project, kind: "shell", mode: "human", cols: term.cols, rows: term.rows, ...options }, "POST");
           await attach(s.id);
           // This action created the session for this human; make it ready to type.
           await api("control", { id: s.id, takeover: true }, "POST");
@@ -348,20 +413,18 @@ async function mount(w: WardInstance) {
           if (!stopped) draw();
         }
       }
-      const send = async (data: string) => {
-        const id = state.session;
-        inputQueue = inputQueue.catch(() => {}).then(async () => {
-          if (!id || state.session !== id || !canType()) return;
-          try { await api("input", { id, data }, "POST"); }
-          catch (e) {
-            uncertain.add(id);
-            draw();
-            toast((e as Error).message, undefined, true);
-          }
-        });
-        await inputQueue;
+      const inputBuffer = new TerminalInput(async (id, data, binary) => {
+        if (stopped || state.session !== id || !canType()) return;
+        await api("input", { id, data, binary }, "POST");
+      }, (id, error) => {
+        uncertain.add(id);
+        if (!stopped) { draw(); toast((error as Error).message, undefined, true); }
+      });
+      const send = (data: string, binary = false) => {
+        if (state.session && canType()) inputBuffer.send(state.session, data, binary);
       };
       const listener = term.onData(data => void send(data));
+      const binaryListener = term.onBinary(data => send(data, true));
       sessions.onchange = () => void attach(sessions.value).catch(e => toast(e.message, undefined, true));
       const start = button("Open terminal", () => launch());
       start.className = "btn-primary";
@@ -384,22 +447,26 @@ async function mount(w: WardInstance) {
         program.value = initial;
         const shell = select("Shell", [...new Set<string>(caps.shells)]);
         const mode = select("Permission mode", []);
-        mode.add(new Option("Human — I answer permission prompts", "human"));
-        mode.add(new Option("Rimeward — delegate prompt decisions", "rimeward"));
-        mode.add(new Option("YOLO — bypass permission prompts", "yolo"));
-        mode.value = existing?.nextMode ?? "human";
+        mode.add(new Option("Standard — keep CLI permission prompts", "human"));
+        mode.add(new Option("Unrestricted — bypass CLI permissions", "yolo"));
+        mode.value = existing?.nextMode === "yolo" ? "yolo" : "human";
+        const agentInput = el("input"); agentInput.type = "checkbox";
+        agentInput.checked = existing?.agentInput ?? false;
+        agentInput.setAttribute("aria-label", "Allow Rime to type");
+        const agentField = field("Allow Rime to type", agentInput);
         const task = el("textarea", "input");
         task.rows = 3; task.maxLength = 8000;
         task.placeholder = "What would you like the agent to work on?";
         const taskField = field("Initial task (optional)", task);
         const options = el("details", "term-launch-options");
         const shellField = field("Shell", shell);
-        options.append(el("summary", undefined, "More options"), shellField, field("Permissions", mode));
+        const permissionField = field("CLI permissions", mode);
+        options.append(el("summary", undefined, "More options"), shellField, permissionField, agentField);
         const modeHelp = el("p", "term-help");
         const describeMode = () => {
-          modeHelp.textContent = mode.value === "human" ? "Permission prompts stay in the terminal for you to answer." :
-            mode.value === "rimeward" ? "Rimeward may answer native permission prompts under your delegated authority." :
-            "The agent starts with its explicit permission bypass enabled.";
+          modeHelp.textContent = "Rime input includes answering CLI prompts and changes immediately. Taking control pauses Rime; release control to let it type. " +
+            (program.value === "shell" && !existing || existing?.kind === "shell" ? "Shell commands run with your desktop account’s permissions." :
+            mode.value === "human" ? "The CLI keeps its own permission prompts." : "Unrestricted disables the CLI’s approval and sandbox protections on its next start.");
         };
         mode.onchange = describeMode;
         describeMode();
@@ -409,6 +476,8 @@ async function mount(w: WardInstance) {
           const kind = program.value as TerminalKind;
           taskField.hidden = kind === "shell";
           shellField.hidden = kind !== "shell";
+          permissionField.hidden = kind === "shell";
+          describeMode();
           const missing = kind !== "shell" && !caps.agents[kind];
           submit.disabled = missing;
           submit.textContent = kind === "shell" ? "Open terminal" : `Start ${names[kind]}`;
@@ -424,8 +493,9 @@ async function mount(w: WardInstance) {
         if (existing) {
           options.open = true;
           shellField.hidden = true;
-          actions.before(el("p", "term-help", `${existing.title} · ${names[existing.kind]}. Permission changes apply on the next start; this process keeps running.`), options);
-          submit.textContent = "Save for next start";
+          permissionField.hidden = existing.kind === "shell";
+          actions.before(el("p", "term-help", `${existing.title} · ${names[existing.kind]}. CLI permission changes apply on the next start.`), options);
+          submit.textContent = "Save settings";
         } else {
           actions.before(field("Program", program), taskField, availability, options);
           program.onchange = syncProgram;
@@ -437,11 +507,11 @@ async function mount(w: WardInstance) {
           error.hidden = true;
           try {
             if (existing) {
-              await api("configure", { id: existing.id, mode: mode.value }, "POST");
+              await api("configure", { id: existing.id, agentInput: agentInput.checked, ...(existing.kind !== "shell" ? { mode: mode.value } : {}) }, "POST");
               await update();
             } else {
               const kind = program.value as TerminalKind;
-              await launch({ kind, mode: mode.value, ...(kind === "shell" ? { shell: shell.value } : { task: task.value }),
+              await launch({ kind, mode: kind === "shell" ? "human" : mode.value, agentInput: agentInput.checked, ...(kind === "shell" ? { shell: shell.value } : { task: task.value }),
                 title: `${names[kind]} ${list.filter(s => s.kind === kind).length + 1}` });
             }
             d.close();
@@ -478,6 +548,18 @@ async function mount(w: WardInstance) {
           if (e.type === "keydown") { e.preventDefault(); openFind(); }
           return false;
         }
+        if ((e.metaKey || (e.ctrlKey && e.shiftKey)) && e.key.toLowerCase() === "c" && term.hasSelection()) {
+          if (e.type === "keydown") { e.preventDefault(); void navigator.clipboard.writeText(term.getSelection()).catch(err => toast(err.message, undefined, true)); }
+          return false;
+        }
+        if ((e.metaKey || (e.ctrlKey && e.shiftKey)) && ["+", "=", "-", "0"].includes(e.key)) {
+          if (e.type === "keydown") {
+            e.preventDefault();
+            term.options.fontSize = e.key === "0" ? 13 : Math.max(9, Math.min(28, (term.options.fontSize ?? 13) + (e.key === "-" ? -1 : 1)));
+            resize();
+          }
+          return false;
+        }
         return true;
       });
       // Native popovers stay above ward clipping and the expanded dialog, and
@@ -503,13 +585,27 @@ async function mount(w: WardInstance) {
         };
         action("Find in terminal…", openFind, !session);
         action("Copy selection", () => navigator.clipboard.writeText(term.getSelection()), !term.hasSelection());
+        action("Paste", async () => { term.paste(await navigator.clipboard.readText()); term.focus(); }, !canType());
+        action("Clear scrollback", () => term.clear(), !session);
+        action(term.options.screenReaderMode ? "Disable screen reader support" : "Enable screen reader support", () => {
+          term.options.screenReaderMode = !term.options.screenReaderMode;
+          localStorage.setItem("rimeward-terminal-accessibility", String(term.options.screenReaderMode));
+        });
         action(showKeys ? "Hide extra keys" : "Show extra keys", () => { showKeys = !showKeys; draw(); });
         if (session) {
           const target = session;
           menu.append(el("hr"));
           action("Session settings…", () => sessionDialog(target));
+          action("Rename session…", async () => {
+            const title = await askText("Session name");
+            if (title?.trim()) { await api("configure", { id: target.id, title }, "POST"); await update(); }
+          });
           if (target.state === "running") {
-            action("Release input control", async () => { await api("release", { id: target.id }, "POST"); await update(); }, !canType());
+            action(target.agentInput ? "Let Rime type" : "Release input control", async () => {
+              await inputBuffer.flush();
+              released = true;
+              await api("release", { id: target.id }, "POST"); await update();
+            }, !canType());
             action("Interrupt process", () => api("interrupt", { id: target.id }, "POST"), !canType());
             menu.append(el("hr"));
             action("End session…", async () => {
@@ -541,13 +637,40 @@ async function mount(w: WardInstance) {
       const ro = new ResizeObserver(resize);
       ro.observe(screen);
       cleanup.push(
-        poll(async () => {
-          await update();
-          if (canType()) await api("control", { id: state.session }, "POST").catch(() => {});
-        }, 750),
+        terminalEvents(w.device ?? readPages().find(p => p.id === pageOfCard(w.i))?.device ?? "local", w.i, event => {
+          if (stopped) return;
+          if (!event) { streamReady = false; inputBuffer.clear(); draw(); return; }
+          if (event.type === "reset") { streamReady = true; resync = true; void update(); return; }
+          if (event.type === "session") {
+            const next = event.data as SessionView;
+            if (next.project !== state.project) return;
+            const at = list.findIndex(s => s.id === next.id);
+            if (at < 0) list.unshift(next); else list[at] = next;
+            sessionList();
+            if (autoAttach && !launching && !state.session && next.state === "running")
+              void attach(next.id).catch(error => toast(error.message, undefined, true));
+            if (state.session === next.id) {
+              session = next;
+              if (!canType()) {
+                inputBuffer.clear();
+                term.resize(next.cols, next.rows);
+              }
+              draw();
+            }
+            if (updating) resync = true;
+            return;
+          }
+          if (event.type !== "output" || event.id !== state.session) return;
+          const chunk = event.data as { sequence: number; data: string };
+          if (outputSize + chunk.data.length > 1024 * 1024) {
+            outputs = []; outputSize = 0; resync = true;
+          } else { outputs.push(chunk); outputSize += chunk.data.length; }
+          drainOutput();
+        }),
         () => {
           if (menu.matches(":popover-open")) menu.hidePopover();
-          ro.disconnect(); listener.dispose(); term.dispose();
+          clearTimeout(resizeTimer); clearTimeout(retrySnapshot); inputBuffer.clear();
+          ro.disconnect(); listener.dispose(); binaryListener.dispose(); term.dispose();
         },
       );
       await update();

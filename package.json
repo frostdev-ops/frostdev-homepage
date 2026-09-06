@@ -1,7 +1,7 @@
 {
   "name": "rimeward",
   "type": "module",
-  "version": "0.22.1",
+  "version": "0.22.2",
   "private": true,
   "license": "MIT",
   "engines": {
@@ -24,7 +24,7 @@
     "test:ui": "node tests/editor-ui-smoke.mjs && node tests/terminal-ui-smoke.mjs && node tests/conversation-ui-smoke.mjs && node tests/remote-workspace-smoke.mjs",
     "test:standalone": "node tests/standalone-smoke.mjs",
     "goldens": "node ops/goldens.mjs",
-    "lint:desktop": "biome lint --error-on-warnings desktop/prebuild.mjs desktop/sign-runtime.mjs desktop-runtime.mjs public/runtime-bridge.js src/lib/dev src/lib/agent/sync.ts src/lib/agent/sync-store.ts src/pages/api/agent/history.ts src/pages/api/dev src/pages/api/devices src/pages/api/runtime.ts src/pages/runtime src/scripts/app/desktop-setup.ts src/scripts/app/development.ts src/scripts/app/project-editor.ts src/scripts/app/runtime-picker.ts src/scripts/app/workspace-dialogs.ts desktop/frontend desktop/tauri.conf.json desktop/tauri.dev.conf.json desktop/tauri.macos.conf.json desktop/tauri.linux.conf.json desktop/capabilities bin/prepare-pty.mjs src/styles/development.css src/styles/workspaces.css src/scripts/app/browser-cdp.ts",
+    "lint:desktop": "biome lint --error-on-warnings desktop/prebuild.mjs desktop/sign-runtime.mjs desktop-runtime.mjs public/runtime-bridge.js src/lib/dev src/lib/agent/sync.ts src/lib/agent/sync-store.ts src/pages/api/agent/history.ts src/pages/api/dev src/pages/api/devices src/pages/api/runtime.ts src/pages/runtime src/scripts/app/desktop-setup.ts src/scripts/app/development.ts src/scripts/app/terminal-input.ts src/scripts/app/terminal-stream.ts src/scripts/app/project-editor.ts src/scripts/app/runtime-picker.ts src/scripts/app/workspace-dialogs.ts desktop/frontend desktop/tauri.conf.json desktop/tauri.dev.conf.json desktop/tauri.macos.conf.json desktop/tauri.linux.conf.json desktop/capabilities bin/prepare-pty.mjs src/styles/development.css src/styles/workspaces.css src/scripts/app/browser-cdp.ts",
     "desktop:check": "npm run lint:desktop && cargo fmt --manifest-path desktop/Cargo.toml --check && cargo clippy --manifest-path desktop/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path desktop/Cargo.toml"
   },
   "dependencies": {
@@ -47,6 +47,9 @@
     "@xterm/addon-fit": "0.11.0",
     "@xterm/addon-search": "0.16.0",
     "@xterm/addon-serialize": "0.14.0",
+    "@xterm/addon-unicode11": "0.9.0",
+    "@xterm/addon-web-links": "0.12.0",
+    "@xterm/addon-webgl": "0.19.0",
     "@xterm/headless": "6.0.0",
     "@xterm/xterm": "6.0.0",
     "astro": "7.3.1",

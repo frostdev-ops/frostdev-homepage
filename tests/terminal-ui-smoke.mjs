@@ -32,6 +32,17 @@ try {
   browser=await chromium.launch({headless:true,channel:'chromium',args:['--disable-gpu']});
   const pc=await browser.newContext({viewport:{width:1280,height:850}}), page=await pc.newPage();
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.addInitScript(() => localStorage.setItem('rimeward-terminal-accessibility', 'true'));
+  await page.addInitScript(() => {
+    const Native = window.EventSource;
+    window.terminalTestStreams = [];
+    window.EventSource = class extends Native {
+      constructor(url, options) {
+        super(url, options);
+        if (String(url).includes('/api/dev/events')) window.terminalTestStreams.push(this);
+      }
+    };
+  });
   await page.goto(url);
   await page.waitForURL('**/desktop/start');
   await page.getByRole('button',{name:'Continue without connecting'}).click();
@@ -61,10 +72,30 @@ try {
   }
   const marker=process.env.RIMEWARD_GOLDEN_DIR?'Rimeward workspace ready':'TERMINAL_UI_'+crypto.randomUUID().slice(0,8);
   await terminal.focus();await page.keyboard.type('echo '+marker);await page.keyboard.press('Enter');
-  await page.waitForFunction(marker=>document.querySelector('.xterm-screen')?.textContent?.includes(marker),marker);
+  await page.waitForFunction(marker=>document.querySelector('.xterm')?.textContent?.includes(marker),marker);
   const first=(await page.evaluate(()=>fetch('/api/dev/sessions').then(r=>r.json())))[0];
   assert.equal(first.mode,'human');
   assert.ok(first.owner?.startsWith('client:'));
+  if (process.env.RIMEWARD_TERMINAL_BENCH === '1') {
+  const samples=[];
+  for(let i=0;i<5;i++) {
+    const token=crypto.randomUUID().slice(0,8), match='ECHO_'+token;
+    const start=performance.now();
+    await terminal.focus();
+    await page.keyboard.type("printf 'ECHO_%s\\n' "+token);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(match=>{ const q=document.querySelector('.term-find input'); q.value=match; q.dispatchEvent(new Event('input')); return document.querySelector('.term-find-result').textContent===''; },match);
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    samples.push(Math.round(performance.now()-start));
+  }
+  await new Promise(r=>setTimeout(r,1000));
+  let requests=0;
+  const count=req=>{if(/\/api\/dev\/(sessions|control)/.test(req.url()))requests++;};
+  page.on('request',count);
+  await new Promise(r=>setTimeout(r,3000));
+  page.off('request',count);
+  console.log(JSON.stringify({echoMilliseconds:samples,median:samples.sort((a,b)=>a-b)[2],idleRequestsIn3Seconds:requests}));
+  }
   // Search stays in the terminal, while plain Ctrl+F remains a shell key.
   await terminal.focus();await page.keyboard.press('Control+f');
   assert.equal(await ward.locator('.term-find').isVisible(),false);
@@ -74,14 +105,16 @@ try {
   assert.equal(await ward.locator('.term-find').isVisible(),false);
   await ward.getByRole('button',{name:'Expand terminal'}).click();
   const expanded=page.locator('.dev-expanded');
+  await expanded.locator('.xterm-helper-textarea').focus();await page.keyboard.press('Escape');
+  assert.equal(await expanded.isVisible(),true,'Escape reaches terminal applications without closing the view');
   await expanded.getByRole('button',{name:'Terminal actions'}).click();
   const menu=page.getByRole('menu',{name:'Terminal actions'});
   await menu.getByRole('menuitem',{name:'Session settings…'}).click();
   const settings=page.getByRole('dialog',{name:'Session settings',exact:true});
-  await settings.locator('select[aria-label="Permission mode"]').selectOption('rimeward',{force:true});
-  await settings.getByRole('button',{name:'Save for next start'}).click();
+  await settings.getByRole('checkbox',{name:'Allow Rime to type'}).check();
+  await settings.getByRole('button',{name:'Save settings'}).click();
   let sessions=await page.evaluate(()=>fetch('/api/dev/sessions').then(r=>r.json()));
-  assert.equal(sessions[0].mode,'human');assert.equal(sessions[0].nextMode,'rimeward');assert.equal(sessions[0].id,first.id);
+  assert.equal(sessions[0].mode,'human');assert.equal(sessions[0].agentInput,true);assert.equal(sessions[0].id,first.id);
   await expanded.getByRole('button',{name:'Terminal actions'}).click();
   assert.ok(await menu.evaluate(el=>el.matches(':popover-open')),'menu works above expanded dialog');
   await page.keyboard.press('ArrowDown');
@@ -91,6 +124,19 @@ try {
   // New session options are secondary; missing agent guidance doesn't run a CLI.
   await page.route('**/api/dev/capabilities*',async route=>{const r=await route.fetch();const v=await r.json();v.agents={codex:false,claude:false};await route.fulfill({json:v});});
   await page.reload();
+  await ward.getByText('You’re in control',{exact:true}).waitFor();
+  assert.equal((await page.evaluate(()=>fetch('/api/dev/sessions').then(r=>r.json()))).length,1,'reload keeps the same session and ownership');
+  // A transient snapshot failure must recover even when the live stream is idle.
+  let failedSnapshots = 0;
+  await page.route('**/api/dev/sessions*', async route => {
+    if (route.request().method() === 'GET' && !failedSnapshots++)
+      await route.fulfill({status:503,json:{error:'Transient snapshot failure'}});
+    else await route.continue();
+  });
+  await page.reload();
+  await ward.getByText('You’re in control',{exact:true}).waitFor();
+  assert.ok(failedSnapshots > 1, 'the snapshot is retried without output or user input');
+  await page.unroute('**/api/dev/sessions*');
   await ward.getByRole('button',{name:'New terminal session'}).click();
   let launch=page.getByRole('dialog',{name:'New terminal session',exact:true});
   await launch.locator('select[aria-label="Program"]').selectOption('codex',{force:true});
@@ -102,9 +148,8 @@ try {
   sessions=await page.evaluate(()=>fetch('/api/dev/sessions').then(r=>r.json()));
   assert.equal(sessions.length,2);const second=sessions[0];assert.notEqual(first.id,second.id);
   await ward.locator('select[aria-label="Terminal session"]').selectOption(first.id,{force:true});
-  await ward.getByRole('button',{name:'Take control',exact:true}).click();
   await ward.getByText('You’re in control',{exact:true}).waitFor();
-  await page.waitForFunction(marker=>document.querySelector('.xterm-screen')?.textContent?.includes(marker),marker);
+  await page.waitForFunction(marker=>document.querySelector('.xterm')?.textContent?.includes(marker),marker);
   await page.screenshot({path:path.join(screenshotDir,'rimeward-terminal-desktop.png'),animations:'disabled'});
   // Lose one input acknowledgement after the backend actually accepted it.
   let sent=0;
@@ -116,8 +161,19 @@ try {
   await ward.getByRole('button',{name:'Review & take control'}).click();
   await ward.getByText('You’re in control',{exact:true}).waitFor();
   await terminal.focus();await page.keyboard.press('Control+c');
+  // Losing the stream alone is not an uncertain mutation or a new session.
+  await page.evaluate(() => {
+    for (const stream of window.terminalTestStreams) {
+      if (stream.readyState === EventSource.CLOSED) continue;
+      stream.close(); stream.dispatchEvent(new Event('error'));
+    }
+  });
+  await ward.getByText('Reconnecting…',{exact:true}).waitFor();
+  await ward.getByText('You’re in control',{exact:true}).waitFor();
+  assert.equal((await page.evaluate(()=>fetch('/api/dev/sessions').then(r=>r.json()))).length,2);
   // A phone attaches read-only; taking control updates the PC without duplicate sessions.
   const phone=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+  await phone.addInitScript(() => localStorage.setItem('rimeward-terminal-accessibility', 'true'));
   await phone.addCookies(await pc.cookies());const mobile=await phone.newPage();
   mobile.on('pageerror',e=>errors.push(e.message));await mobile.goto(origin+'/dash');
   const mobileWard=mobile.locator('[data-wd="terminal-ui"]');
@@ -141,7 +197,7 @@ try {
   await ward.getByRole('button',{name:'Start again',exact:true}).click();
   await ward.getByText('You’re in control',{exact:true}).waitFor();
   sessions=await page.evaluate(()=>fetch('/api/dev/sessions').then(r=>r.json()));
-  assert.equal(sessions[0].mode,'rimeward');assert.equal(sessions.length,3);
+  assert.equal(sessions[0].mode,'human');assert.equal(sessions[0].agentInput,true);assert.equal(sessions.length,3);
   assert.deepEqual(errors,[]);
   console.log('Terminal UI passed: project entry, one-click shell + typing, four-control toolbar, search, expanded menus, launch guidance, switching, uncertain input, phone takeover, permissions, explicit end/restart. No agent CLI or model calls.');
 } finally {

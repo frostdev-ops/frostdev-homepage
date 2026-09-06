@@ -523,7 +523,8 @@ export function ensureBrowser(): void {
   setInterval(reap, 60_000).unref();
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.once(sig, () => {
-      void Promise.race([shutdown(), sleep(CLOSE_MS + 1_000)]).finally(() => process.exit(0));
+      const terminals = isDesktop() ? import('../dev/terminals.ts').then(m => m.shutdownTerminals()) : Promise.resolve();
+      void Promise.race([Promise.all([shutdown(), terminals]), sleep(CLOSE_MS + 1_000)]).finally(() => process.exit(0));
     });
   }
 }

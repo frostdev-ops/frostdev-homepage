@@ -526,11 +526,12 @@ export function buildInstructions(cfg: AgentWardConfig, userId: number, ward: st
 
 function pushOutput(provider: AgentProvider, items: unknown[], call: AgentToolCall, output: unknown): void {
   // Never hand the model torn JSON — an over-cap result degrades to an
-  // explicit, well-formed error instead of a blind slice.
+  // explicit omission receipt instead of a blind slice or a false execution error.
   let json = JSON.stringify(output);
   if (json.length > OUTPUT_CAP) {
     json = JSON.stringify({
-      error: `result too large (${json.length} chars > ${OUTPUT_CAP}) — narrow the query (filters, fewer rows, page ranges) and call again`,
+      resultOmitted: true,
+      note: `Result omitted (${json.length} chars > ${OUTPUT_CAP}). This is not an execution failure. For reads, narrow the query or use pagination. For changes, inspect the current state; do not repeat an operation just because its response was omitted.`,
     });
   }
   items.push(provider.toolOutputItem(call.call_id, json));

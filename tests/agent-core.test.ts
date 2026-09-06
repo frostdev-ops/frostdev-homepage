@@ -248,7 +248,7 @@ test('headless runs auto-decline what the policy would park', async () => {
   assert.equal(turn.reply, 'skipped it');
 });
 
-test('oversized tool output degrades to a well-formed error, never torn JSON', async () => {
+test('oversized tool output is omitted without implying failure or encouraging repeated writes', async () => {
   const u = seedUser('core-big@x.dev');
   // The exec registry is the seam (same pattern as tests/logic-engine.test.ts).
   TOOLS.huge_probe = {
@@ -267,7 +267,9 @@ test('oversized tool output degrades to a well-formed error, never torn JSON', a
     const out = items.find((it: any) => it.call_id === 'c1') as any;
     // Not a slice: the model must get well-formed JSON that says what happened.
     const parsed = JSON.parse(String(out.output));
-    assert.match(parsed.error, /result too large/);
+    assert.equal(parsed.error, undefined);
+    assert.equal(parsed.resultOmitted, true);
+    assert.match(parsed.note, /do not repeat an operation/);
     assert.ok(String(out.output).length < 12_000);
   } finally {
     delete TOOLS.huge_probe;

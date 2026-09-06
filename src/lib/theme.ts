@@ -601,7 +601,7 @@ export const IMAGE_DEFAULTS = {
  *  overrides all pick from this one list.
  *
  *  A `google` entry is downloaded at build time and served from our own origin:
- *  astro.config.mjs BUILDS ITS `experimental.fonts` FROM THIS OBJECT, so a face
+ *  astro.config.mjs BUILDS ITS `fonts` FROM THIS OBJECT, so a face
  *  added here is registered automatically and `var(--font-<id>)` resolves. The
  *  system stacks cost no request at all and are the defaults.
  *

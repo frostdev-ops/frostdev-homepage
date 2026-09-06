@@ -1,3 +1,4 @@
+import type { searchFiles, bufferCopies } from "../../lib/dev/projects.ts";
 import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine } from "@codemirror/view";
 import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import { LanguageDescription, indentUnit, syntaxHighlighting, foldGutter, indentOnInput, defaultHighlightStyle, bracketMatching, foldKeymap } from "@codemirror/language";
@@ -14,7 +15,7 @@ import { askText, dialog } from "./workspace-dialogs.ts";
 import { poll } from "./wards.ts";
 import type { BufferView, Project } from "../../lib/dev/types.ts";
 
-type Api = (action: string, data?: Record<string, unknown>, method?: string) => Promise<any>;
+type Api = <T = unknown>(action: string, data?: Record<string, unknown>, method?: string) => Promise<T>;
 const run = (fn: () => unknown) => void Promise.resolve().then(fn).catch(e => toast(e.message, undefined, true));
 const folds = foldGutter({ markerDOM: open => {
   const marker = el("span", "editor-fold"); marker.dataset.open = String(open);
@@ -128,7 +129,7 @@ export function fileExplorer(host: HTMLElement, api: Api, project: string, open:
   };
   const create = async (directory: boolean) => {
     const parent = selectedDirectory ? selected : selected.includes("/") ? selected.slice(0, selected.lastIndexOf("/")) : "";
-    const file = await askText(directory ? "New folder" : "New file", parent ? parent + "/" : "");
+    const file = await askText(directory ? "New folder" : "New file", parent ? `${parent}/` : "");
     if (!file) return;
     await api("files", { project, path: file, directory }, "POST");
     search.value = ""; signatures.clear(); await refresh();
@@ -136,7 +137,7 @@ export function fileExplorer(host: HTMLElement, api: Api, project: string, open:
   };
   const stopMenu = actions(add, () => [
     ["New file…", () => create(false)], ["New folder…", () => create(true)],
-    ["Rename…", async () => { const from = selected, to = await askText("Rename " + from, from); if (to && to !== from) { await rename(from, to); search.value = ""; signatures.clear(); await refresh(); } }, !selected],
+    ["Rename…", async () => { const from = selected, to = await askText(`Rename ${from}`, from); if (to && to !== from) { await rename(from, to); search.value = ""; signatures.clear(); await refresh(); } }, !selected],
     ["Refresh files", async () => { search.value = ""; signatures.clear(); await refresh(); }],
   ]);
   let searchTimer: ReturnType<typeof setTimeout>;
@@ -144,11 +145,11 @@ export function fileExplorer(host: HTMLElement, api: Api, project: string, open:
     clearTimeout(searchTimer); const id = ++request, q = search.value;
     searchTimer = setTimeout(() => run(async () => {
       if (!q.trim()) { signatures.clear(); return refresh(); }
-      const rows = await api("search", { project, q });
+      const rows = await api<Awaited<ReturnType<typeof searchFiles>>>("search", { project, q });
       if (stopped || id !== request) return;
       list.replaceChildren();
       for (const r of rows) {
-        const b = action(r.path + ":" + r.line, () => open(r.path, r.line));
+        const b = action(`${r.path}:${r.line}`, () => open(r.path, r.line));
         b.className = "editor-search-result"; b.append(el("small", undefined, r.text)); list.append(b);
       }
       if (!rows.length) list.append(el("p", "editor-no-files", "No matching files or text."));
@@ -175,7 +176,7 @@ export function projectEditor(host: HTMLElement, options: {
   const toggle = action("Toggle file explorer", () => { host.classList.toggle("editor-files-hidden"); toggle.setAttribute("aria-expanded", String(!host.classList.contains("editor-files-hidden"))); }, "folders");
   toggle.setAttribute("aria-expanded", "true");
   const projectName = action(project.name, () => runExclusive(async () => { await flush(); return options.changeProject(); }));
-  projectName.className = "editor-project"; projectName.title = "Change project · " + project.root;
+  projectName.className = "editor-project"; projectName.title = `Change project · ${project.root}`;
   const quick = action("Quick open (⌘/Ctrl P)", () => quickOpen(), "search"), save = action("Save file (⌘/Ctrl S)", () => saveFile(), "save");
   const more = action("Editor actions", () => {}, "more"), expand = action("Expand editor", options.expand, "resize"); expand.classList.add("editor-expand");
   toolbar.append(toggle, projectName, quick, save, more, expand);
@@ -222,7 +223,7 @@ export function projectEditor(host: HTMLElement, options: {
     await runExclusive(async () => {
       await flush();
       await api("rename", { project: project.id, path: from, to }, "POST");
-      const renamed = (p: string) => p === from || p.startsWith(from + "/") ? to + p.slice(from.length) : p;
+      const renamed = (p: string) => p === from || p.startsWith(`${from}/`) ? to + p.slice(from.length) : p;
       for (const [file, cached] of [...fileStates]) if (renamed(file) !== file) { fileStates.delete(file); fileStates.set(renamed(file), cached); }
       state.tabs = state.tabs?.map(renamed);
       if (current) { current.path = renamed(current.path); state.active = current.path; }
@@ -242,13 +243,13 @@ export function projectEditor(host: HTMLElement, options: {
     const focus = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.tab : undefined;
     tabs.replaceChildren();
     for (const file of state.tabs ?? []) {
-      const tab = el("div", "editor-tab"), b = action(file.split("/").at(-1)!, () => load(file));
+      const tab = el("div", "editor-tab"), b = action(file.split("/").at(-1) ?? file, () => load(file));
       tab.dataset.active = String(current?.path === file);
       b.setAttribute("role", "tab"); b.setAttribute("aria-selected", String(current?.path === file)); b.title = file; b.dataset.tab = file;
       b.tabIndex = current?.path === file ? 0 : -1; b.className = "editor-tab-label";
       b.prepend(icon("page"));
       if (dirtyFiles.has(file)) { const dot = el("span", "editor-dirty", "•"); dot.setAttribute("aria-label", "Unsaved"); b.append(dot); }
-      const close = action("Close " + file, () => closeTab(file), "close"); close.classList.add("editor-tab-close");
+      const close = action(`Close ${file}`, () => closeTab(file), "close"); close.classList.add("editor-tab-close");
       tab.append(b, close); tabs.append(tab);
     }
     if (focus) [...tabs.querySelectorAll<HTMLElement>("[data-tab]")].find(b => b.dataset.tab === focus)?.focus();
@@ -318,8 +319,8 @@ export function projectEditor(host: HTMLElement, options: {
   async function saveFile() {
     await runExclusive(async () => {
       await flush(); if (!current) return;
-      current = await api("buffer", { project: project.id, path: current.path, revision: current.revision, save: true }, "POST");
-      dirtyFiles.delete(current!.path); renderTabs();
+      current = await api<BufferView>("buffer", { project: project.id, path: current.path, revision: current.revision, save: true }, "POST");
+      dirtyFiles.delete(current.path); renderTabs();
     });
   }
   async function load(file: string, line?: number) {
@@ -355,7 +356,8 @@ export function projectEditor(host: HTMLElement, options: {
       renderTabs(); renderProblems(); await remember();
       if (dirtyFiles.has(file)) toast("Draft kept on this desktop. Reopen the file to continue.");
     });
-    if (!current && state.tabs?.length) await load(state.tabs.at(-1)!);
+    const last = state.tabs?.at(-1);
+    if (!current && last) await load(last);
   }
   async function takeOver() {
     await runExclusive(async () => {
@@ -364,8 +366,8 @@ export function projectEditor(host: HTMLElement, options: {
         await api("copies", { project: project.id, path: current.path, text: editor.state.doc.toString() }, "POST");
         toast("Your previous text is available in Recovery history.");
       }
-      current = await api("buffer", { project: project.id, path: current.path, takeover: true }, "POST");
-      pending = false; uncertain = false; setText(current!.text); renderTabs();
+      current = await api<BufferView>("buffer", { project: project.id, path: current.path, takeover: true }, "POST");
+      pending = false; uncertain = false; setText(current.text); renderTabs();
     });
     editor.focus();
   }
@@ -395,7 +397,7 @@ export function projectEditor(host: HTMLElement, options: {
     if (current.readonly) { lintLabel = "Read-only file · analysis unavailable"; diagnostics = []; renderProblems(); return; }
     const id = lintGeneration, file = current.path, text = editor.state.doc.toString(); linting = true;
     try {
-      const result = await api("lint", { project: project.id, path: file, text }, "POST");
+      const result = await api<{ supported: boolean; diagnostics: Diagnostic[]; truncated?: boolean }>("lint", { project: project.id, path: file, text }, "POST");
       if (stopped || id !== lintGeneration || file !== current?.path) return;
       diagnostics = result.diagnostics;
       lintLabel = !result.supported ? "No linter for this language" : result.truncated ? "Biome · showing the first 100 problems" : diagnostics.length ? "Biome · current file" : "Biome · no problems found";
@@ -408,8 +410,8 @@ export function projectEditor(host: HTMLElement, options: {
     if (!canEdit()) return;
     await runExclusive(async () => {
       if (!current) return;
-      const result = await api("format", { project: project.id, path: current.path, text: editor.state.doc.toString() }, "POST");
-      if (!result.supported) throw Error("Formatting is not available for this language.");
+      const result = await api<{ supported: boolean; text?: string }>("format", { project: project.id, path: current.path, text: editor.state.doc.toString() }, "POST");
+      if (!result.supported || result.text === undefined) throw Error("Formatting is not available for this language.");
       if (editor.state.doc.toString() !== result.text) editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: result.text }, userEvent: "input.format" });
       await flush();
     });
@@ -426,7 +428,7 @@ export function projectEditor(host: HTMLElement, options: {
       if (!rows.length) results.append(el("p", "editor-no-files", "No matches. Try a file name or some text."));
     };
     render((state.tabs ?? []).map(path => ({ path })));
-    query.oninput = () => { clearTimeout(timer); const id = ++request; timer = setTimeout(() => run(async () => { const rows = query.value.trim() ? await api("search", { project: project.id, q: query.value }) : (state.tabs ?? []).map(path => ({ path })); if (id === request && d.open) render(rows); }), 200); };
+    query.oninput = () => { clearTimeout(timer); const id = ++request; timer = setTimeout(() => run(async () => { const rows = query.value.trim() ? await api<Awaited<ReturnType<typeof searchFiles>>>("search", { project: project.id, q: query.value }) : (state.tabs ?? []).map(path => ({ path })); if (id === request && d.open) render(rows); }), 200); };
     form.onsubmit = e => { e.preventDefault(); results.querySelector<HTMLButtonElement>("button")?.click(); };
     d.onkeydown = e => { if (!["ArrowDown", "ArrowUp"].includes(e.key)) return; e.preventDefault(); const all = [...results.querySelectorAll<HTMLButtonElement>("button")], at = all.indexOf(document.activeElement as HTMLButtonElement); all[(at + (e.key === "ArrowDown" ? 1 : -1) + all.length) % all.length]?.focus(); };
     d.onclose = () => { clearTimeout(timer); d.remove(); }; query.focus();
@@ -436,7 +438,7 @@ export function projectEditor(host: HTMLElement, options: {
     const file = current.path, local = editor.state.doc.toString(), latest: BufferView = await api("buffer", { project: project.id, path: file });
     const d = el("dialog", "fd-dialog editor-compare"), header = el("div", "editor-compare-heading"), mount = el("div", "editor-merge");
     const error = el("p", "banner banner-err"); error.hidden = true;
-    header.append(el("h2", undefined, "Compare changes · " + file), action("Close comparison", () => d.close(), "close"));
+    header.append(el("h2", undefined, `Compare changes · ${file}`), action("Close comparison", () => d.close(), "close"));
     d.setAttribute("aria-label", "Compare changes");
     const labels = el("div", "editor-compare-labels"); labels.append(el("strong", undefined, "On disk"), el("strong", undefined, "Your editor"));
     const controls = el("div", "dev-bar");
@@ -448,16 +450,16 @@ export function projectEditor(host: HTMLElement, options: {
           // Do not resolve an unseen external write made while the comparison was open.
           const now: BufferView = await api("buffer", { project: project.id, path: file });
           if (now.revision !== current.revision || (now.diskText ?? now.text) !== (latest.diskText ?? latest.text)) throw Error("The file changed while comparing. Close and compare again.");
-          current = await api("buffer", { project: project.id, path: file, revision: current.revision, resolve: version }, "POST");
-          pending = false; uncertain = false; dirtyFiles.delete(file); setText(current!.text); renderTabs();
+          current = await api<BufferView>("buffer", { project: project.id, path: file, revision: current.revision, resolve: version }, "POST");
+          pending = false; uncertain = false; dirtyFiles.delete(file); setText(current.text); renderTabs();
         });
         d.close();
       } catch (e) { error.textContent = (e as Error).message; error.hidden = false; }
     };
     if (!latest.readonly && (!latest.owner || latest.owner === owner)) controls.append(action("Use disk version", () => resolve("disk")), action("Save editor version", () => resolve("mine")));
-    const copies = await api("copies", { project: project.id, path: file });
+    const copies = await api<ReturnType<typeof bufferCopies>>("copies", { project: project.id, path: file });
     const history = el("details", "editor-recovery"); history.append(el("summary", undefined, `Recovery history (${copies.length})`));
-    for (const c of copies) { const item = el("details"), text = el("textarea", "input"); text.value = c.text; text.readOnly = true; text.setAttribute("aria-label", "Recovery from " + c.saved_at); item.append(el("summary", undefined, c.saved_at), text, action("Copy recovery text", () => navigator.clipboard.writeText(c.text))); history.append(item); }
+    for (const c of copies) { const item = el("details"), text = el("textarea", "input"); text.value = c.text; text.readOnly = true; text.setAttribute("aria-label", `Recovery from ${c.saved_at}`); item.append(el("summary", undefined, c.saved_at), text, action("Copy recovery text", () => navigator.clipboard.writeText(c.text))); history.append(item); }
     d.append(header, labels, mount, error, controls, history); document.body.append(d); d.showModal();
     const cm = [editorSetup, theme.of(editorTheme()), EditorView.editable.of(false), EditorState.readOnly.of(true)];
     const merge = new MergeView({ parent: mount, a: { doc: latest.diskText ?? latest.text, extensions: cm }, b: { doc: local, extensions: cm }, highlightChanges: true, collapseUnchanged: { margin: 3, minSize: 8 }, diffConfig: { timeout: 1000 } });
@@ -488,7 +490,7 @@ export function projectEditor(host: HTMLElement, options: {
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-mode"] });
   const unload = (e: BeforeUnloadEvent) => { if (pending) { e.preventDefault(); e.returnValue = ""; } };
   window.addEventListener("beforeunload", unload);
-  renderTabs(); refreshStatus(); renderProblems(); if (state.active) run(() => load(state.active!));
+  renderTabs(); refreshStatus(); renderProblems(); const active = state.active; if (active) run(() => load(active));
   return () => {
     stopped = true; clearTimeout(recoveryTimer); clearTimeout(lintTimer); lintGeneration++; stopPoll(); stopMenu(); stopChrome(); explorer.stop(); themeObserver.disconnect(); tabResize.disconnect();
     window.removeEventListener("fd:open-file", onOpen); window.removeEventListener("beforeunload", unload); host.removeEventListener("keydown", onKey);

@@ -11,6 +11,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use base64::Engine;
 use futures_util::StreamExt;
 use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
@@ -47,6 +48,7 @@ pub struct Chromium {
     /// The dashboard's origin, allowed onto the DevTools socket (Chrome 111+
     /// refuses a browser page's Origin otherwise).
     origin: String,
+    profile_scope: String,
     spec: Option<Spec>,
     state: State,
     instances: HashMap<String, Instance>,
@@ -60,7 +62,15 @@ pub struct Changes(pub watch::Receiver<u64>);
 impl Chromium {
     pub fn new(data: PathBuf, origin: String) -> (Shared, Changes) {
         let (tx, rx) = watch::channel(0);
-        let c = Chromium { data, origin, spec: None, state: State::Missing, instances: HashMap::new(), changed: tx };
+        let c = Chromium {
+            data,
+            origin,
+            profile_scope: String::new(),
+            spec: None,
+            state: State::Missing,
+            instances: HashMap::new(),
+            changed: tx,
+        };
         (Arc::new(Mutex::new(c)), Changes(rx))
     }
 
@@ -79,7 +89,9 @@ impl Chromium {
     }
 
     fn dir(&self) -> Option<PathBuf> {
-        self.spec.as_ref().map(|s| self.data.join("chromium").join(&s.version))
+        self.spec
+            .as_ref()
+            .map(|s| self.data.join("chromium").join(&s.version))
     }
 
     fn exe(&self) -> Option<PathBuf> {
@@ -93,12 +105,49 @@ impl Chromium {
     }
 }
 
+pub async fn set_server(shared: &Shared, origin: String, device: String) {
+    let mut c = shared.lock().await;
+    // Separate paired accounts and servers even if their ward IDs match.
+    c.profile_scope =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!("{origin}/{device}"));
+    c.origin = origin;
+}
+
+pub async fn disconnected(shared: &Shared) {
+    for instance in shared.lock().await.instances.values_mut() {
+        instance.open = 0;
+        instance.idle_since = Instant::now();
+    }
+}
+
+pub async fn allows_origin(shared: &Shared, url: &url::Url) -> bool {
+    shared.lock().await.origin == url.origin().ascii_serialization()
+}
+
 /// Which archive and which file inside it, per platform — playwright-core's
 /// own table (lib/coreBundle.js EXECUTABLE_PATHS) for Chrome for Testing.
 fn archive() -> (&'static str, &'static [&'static str]) {
     match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64") => ("mac-arm64/chrome-mac-arm64.zip", &["chrome-mac-arm64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"]),
-        ("macos", _) => ("mac-x64/chrome-mac-x64.zip", &["chrome-mac-x64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"]),
+        ("macos", "aarch64") => (
+            "mac-arm64/chrome-mac-arm64.zip",
+            &[
+                "chrome-mac-arm64",
+                "Google Chrome for Testing.app",
+                "Contents",
+                "MacOS",
+                "Google Chrome for Testing",
+            ],
+        ),
+        ("macos", _) => (
+            "mac-x64/chrome-mac-x64.zip",
+            &[
+                "chrome-mac-x64",
+                "Google Chrome for Testing.app",
+                "Contents",
+                "MacOS",
+                "Google Chrome for Testing",
+            ],
+        ),
         ("windows", _) => ("win64/chrome-win64.zip", &["chrome-win64", "chrome.exe"]),
         _ => ("linux64/chrome-linux64.zip", &["chrome-linux64", "chrome"]),
     }
@@ -142,16 +191,26 @@ async fn fetch(shared: &Shared, spec: &Spec, dir: &Path) -> Result<(), String> {
     let url = format!("{}{}", spec.base, suffix);
     let zip = dir.with_extension("zip");
     std::fs::create_dir_all(dir.parent().unwrap()).map_err(|e| e.to_string())?;
-    let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?;
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?;
     let total = resp.content_length().unwrap_or(0);
-    let mut file = tokio::fs::File::create(&zip).await.map_err(|e| e.to_string())?;
+    let mut file = tokio::fs::File::create(&zip)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut body = resp.bytes_stream();
     let (mut got, mut shown) = (0u64, 0u8);
     while let Some(chunk) = body.next().await {
         let chunk = chunk.map_err(|e| e.to_string())?;
         file.write_all(&chunk).await.map_err(|e| e.to_string())?;
         got += chunk.len() as u64;
-        let pct = if total > 0 { (got * 100 / total) as u8 } else { 0 };
+        let pct = if total > 0 {
+            (got * 100 / total) as u8
+        } else {
+            0
+        };
         if pct >= shown + 2 {
             shown = pct;
             let mut c = shared.lock().await;
@@ -166,9 +225,32 @@ async fn fetch(shared: &Shared, spec: &Spec, dir: &Path) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let status = match std::env::consts::OS {
-        "macos" => Command::new("ditto").args(["-x", "-k"]).arg(&zip).arg(dir).status().await,
-        "windows" => Command::new("tar").arg("-xf").arg(&zip).arg("-C").arg(dir).status().await,
-        _ => Command::new("unzip").arg("-q").arg(&zip).arg("-d").arg(dir).status().await,
+        "macos" => {
+            Command::new("ditto")
+                .args(["-x", "-k"])
+                .arg(&zip)
+                .arg(dir)
+                .status()
+                .await
+        }
+        "windows" => {
+            Command::new("tar")
+                .arg("-xf")
+                .arg(&zip)
+                .arg("-C")
+                .arg(dir)
+                .status()
+                .await
+        }
+        _ => {
+            Command::new("unzip")
+                .arg("-q")
+                .arg(&zip)
+                .arg("-d")
+                .arg(dir)
+                .status()
+                .await
+        }
     }
     .map_err(|e| format!("extract: {e}"))?;
     let _ = std::fs::remove_file(&zip);
@@ -189,7 +271,12 @@ async fn fetch(shared: &Shared, spec: &Spec, dir: &Path) -> Result<(), String> {
 /// The ward's instance, launched if needed: its DevTools port and browser
 /// websocket path. Counts one more user of it until `release`.
 pub async fn acquire(shared: &Shared, ward: &str) -> Result<(u16, String), String> {
-    if ward.is_empty() || ward.len() > 32 || !ward.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
+    if ward.is_empty()
+        || ward.len() > 32
+        || !ward
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
         return Err("bad ward id".into());
     }
     let mut c = shared.lock().await;
@@ -206,9 +293,18 @@ pub async fn acquire(shared: &Shared, ward: &str) -> Result<(u16, String), Strin
         }
         c.instances.remove(ward);
     }
-    let profile = c.data.join("profiles").join(ward);
+    let profile = c.data.join("profiles").join(&c.profile_scope).join(ward);
     let (child, port, ws_path) = launch(&exe, &profile, &c.origin).await?;
-    c.instances.insert(ward.to_string(), Instance { child, port, ws_path: ws_path.clone(), open: 1, idle_since: Instant::now() });
+    c.instances.insert(
+        ward.to_string(),
+        Instance {
+            child,
+            port,
+            ws_path: ws_path.clone(),
+            open: 1,
+            idle_since: Instant::now(),
+        },
+    );
     Ok((port, ws_path))
 }
 
@@ -287,5 +383,44 @@ pub async fn shutdown(shared: &Shared) {
     let mut c = shared.lock().await;
     for (_, mut i) in c.instances.drain() {
         let _ = i.child.kill().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn approved_server_scopes_commands_and_profiles() {
+        let (shared, _) = Chromium::new(PathBuf::new(), String::new());
+        let first: url::Url = "https://one.example/dash".parse().unwrap();
+        assert!(!allows_origin(&shared, &first).await);
+        set_server(
+            &shared,
+            first.origin().ascii_serialization(),
+            "device-a".into(),
+        )
+        .await;
+        let scope = shared.lock().await.profile_scope.clone();
+        assert!(allows_origin(&shared, &first).await);
+        for url in [
+            "http://one.example/dash",
+            "https://one.example:8443/dash",
+            "https://one.example.evil/dash",
+            "http://127.0.0.1/dash",
+        ] {
+            assert!(!allows_origin(&shared, &url.parse().unwrap()).await);
+        }
+        set_server(
+            &shared,
+            first.origin().ascii_serialization(),
+            "device-b".into(),
+        )
+        .await;
+        assert_ne!(scope, shared.lock().await.profile_scope);
+        set_server(&shared, "https://two.example".into(), "device-a".into()).await;
+        assert!(!allows_origin(&shared, &first).await);
+        assert_ne!(scope, shared.lock().await.profile_scope);
+        assert!(!shared.lock().await.profile_scope.contains('/'));
     }
 }

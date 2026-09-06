@@ -5,7 +5,6 @@ import { getDb } from './lib/db.ts';
 import { ensureStatusEngine } from './lib/status.ts';
 import { ensureLogicEngine } from './lib/logic-engine.ts';
 import { ensureBrowser } from './lib/browser/session.ts';
-import { ensureComms } from './lib/comms/index.ts';
 import { ensureTunnel } from './lib/tunnel.ts';
 import { ensureRemote } from './lib/dev/remote.ts';
 import { ensureDevices } from './lib/dev/devices.ts';
@@ -18,7 +17,7 @@ getDb(); // migrations, and the monitor registry the first status tick needs
 ensureStatusEngine();
 ensureLogicEngine();
 ensureBrowser(); // orphan sweep + graceful close for the browser wards
-ensureComms(); // every chat ward with a token reconnects; sockets close on the way down
+(await import('./lib/comms/index.ts')).ensureComms(); // every chat ward with a token reconnects; sockets close on the way down
 ensureDevices();
 ensureRemote();
 ensureTunnel(); // publishes the desktop app's upgrade handler for server.mjs / the dev hook

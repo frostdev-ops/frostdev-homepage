@@ -1,6 +1,6 @@
 export function terminalEnv(
   source: NodeJS.ProcessEnv = process.env,
-): Record<string, string> {
+): Record<string, string> & { PATH: string } {
   // Build the user's shell environment; never inherit the backend's credentials.
   const names = [
     "HOME",
@@ -33,15 +33,16 @@ export function terminalEnv(
     "DBUS_SESSION_BUS_ADDRESS",
   ];
   const env = Object.fromEntries([
-    ...names
-      .filter((k) => source[k] !== undefined)
-      .map((k) => [k, source[k]!] as const),
+    ...names.flatMap((key) => {
+      const value = source[key];
+      return value === undefined ? [] : [[key, value] as const];
+    }),
     ["TERM", "xterm-256color"],
     ["TERM_PROGRAM", "Rimeward"],
   ]);
   // GUI launchers often supply only /usr/bin:/bin; include standard user installs.
   const home = source.HOME ?? source.USERPROFILE ?? os.homedir();
-  env.PATH = [
+  const PATH = [
     ...new Set(
       [
         ...(source.PATH ?? "").split(path.delimiter),
@@ -56,7 +57,7 @@ export function terminalEnv(
       ].filter(Boolean),
     ),
   ].join(path.delimiter);
-  return env;
+  return { ...env, PATH };
 }
 import path from "node:path";
 import os from "node:os";

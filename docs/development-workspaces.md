@@ -1,6 +1,6 @@
 # Standalone development workspaces
 
-The Tauri app runs the existing Astro backend and Rimeward harness locally. Node 22.22.0 is a Tauri sidecar; application code, native dependencies, migrations, assets, and pinned Chromium are bundled for each target OS/architecture. The local owner is created on first launch. Account integrations are configured independently on each installation. The desktop keeps a stable loopback port; register its displayed origin and callback paths with any OAuth clients you configure locally. Initial integration authorization is performed on the desktop.
+The Tauri app runs the existing Astro 7 backend and Rimeward harness locally. Node 22.22.0 is a Tauri sidecar; application code, native dependencies, migrations, assets, and pinned Chromium are bundled for each target OS/architecture. The local owner is created on first launch. Account integrations are configured independently on each installation. The desktop keeps a stable loopback port; register its displayed origin and callback paths with any OAuth clients you configure locally. Initial integration authorization is performed on the desktop.
 
 ## Use
 
@@ -32,7 +32,7 @@ Connected messaging wards also support multiline drafts and retain them through 
 - `homepage.db` and the existing harness run independently on each installation. `workspaces.db` stores desktop projects, recovery buffers, session screens, assignments, and review receipts. OS credential storage holds the encryption key and pairing credentials. PTY/Git environments exclude backend secrets.
 - The server stores only device enrollment and pairing metadata. An authenticated control connection creates an in-memory, backpressured WebSocket channel for each relayed HTTP exchange. No desktop database replication or disconnected mutation queue exists.
 - `/runtime/<device>/…` selects the desktop. Its own application HTML, assets, media, uploads, streams, and API calls pass through that namespace. The early runtime bridge routes client fetch/EventSource/media operations before application scripts execute. The desktop resolves its own local owner; server user IDs and cookies never become local identities.
-- Reconnection reads terminal sequence snapshots and editor revisions. Failed/uncertain mutations and terminal input are not retried automatically. Explicit revocation closes existing channels. Existing `/api/tunnel` browser clients retain their protocol.
+- Reconnection reads terminal sequence snapshots and editor revisions. Failed/uncertain mutations and terminal input are not retried automatically. Explicit revocation closes existing channels. Existing `/api/tunnel` browser clients retain their protocol. Opening an approved server dashboard starts its home route; native browser commands are restricted to that origin, and profiles are separated by server and paired device. Disconnects cancel stream tasks and release browser usage counts.
 - Terminals remain alive while views close. Explicit application exit requests graceful backend/browser/PTY shutdown. Restarted processes are reported as exited/interrupted, not resumed.
 - Git coordination is advisory for external CLI writes. Managed worktree operations serialize on the repository's common Git directory and reject dirty worktrees, unsaved editor recovery, or running sessions.
 
@@ -68,7 +68,7 @@ for a unique test marker. Remove disposable test accounts and devices afterward.
 
 - `npm test` — existing regression tests plus root confinement, recovery/version conflicts, PTY ownership, CLI launch flags, worktree safety, relay identity isolation/revocation, and non-replication checks.
 - `npm run typecheck` and `npm run build`.
-- `cargo check --manifest-path desktop/Cargo.toml` after staging.
+- `npm run desktop:check` after staging — desktop Biome lint (warnings fail), Rust format check, Clippy with `-D warnings`, and native tests.
 - `node tests/standalone-smoke.mjs` after `node desktop/prebuild.mjs` — bundled-Node startup/authentication, dashboard, recovery, real PTY, shutdown/restart.
 - `node tests/remote-workspace-smoke.mjs` after building — first-run browser login/approval, existing server dashboard, project creation from an empty terminal, the Open project flow, independent desktop/server handoff, shared terminal input and editor recovery, offline behavior, and server data/log marker checks. Requires OpenSSL and bundled Chromium. Native folder/browser/cookie operations use a test adapter; this does not verify the actual macOS webview or native dialogs.
 - `node tests/conversation-ui-smoke.mjs` after building — desktop/phone chat layout, draft isolation, uploads, IME/Enter behavior, copy controls, error recovery, new chat, activity, approvals, reading position, reduced motion, and messaging drafts. Uses synthetic provider/transport responses; sends no external messages or model requests.
@@ -76,6 +76,8 @@ for a unique test marker. Remove disposable test accounts and devices afterward.
 - `node tests/terminal-ui-smoke.mjs` after building — real PTY through the terminal UI: one-click launch/control, search, menus inside expansion, session switching, lost input acknowledgements, phone takeover, permission configuration, and end/restart. Launcher guidance is tested without starting Codex/Claude or sending model requests.
 - `node tests/cli-launch-smoke.mjs` — optional installed-Codex/Claude interactive launch checks in each permission mode; no tasks, approval responses, or model requests are sent.
 - `npm run test:ui` runs the four editor, terminal, conversation, and remote-handoff scripts in order; `npm run test:standalone` checks the staged runtime. `npm run goldens` rebuilds and regenerates the original six dashboard images plus editor, terminal, and chat screenshots on desktop and phone. These are documentation goldens; the smoke tests assert behavior and layout separately.
+
+macOS release packaging signs nested Chromium apps, frameworks, executables, and native modules before Tauri signs and notarizes the outer app. CI verifies nested signatures and excludes native build intermediates from the payload.
 
 Release validation still requires signed installers and native PTY/credential-store behavior on Windows and Linux, physical mobile touch/IME testing, real delegated-agent task/approval flows, and checking production proxy/edge logs, caches, temporary files, and backups. Automated browser emulation is not a substitute for those checks. Language servers, cross-file type checking, debugging, and VS Code extension compatibility are not included.
 

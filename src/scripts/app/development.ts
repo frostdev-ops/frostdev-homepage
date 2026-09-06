@@ -1,3 +1,5 @@
+import type { terminalCapabilities, readSession } from "../../lib/dev/terminals.ts";
+import type { gitView } from "../../lib/dev/projects.ts";
 import { icon } from "./icon.ts";
 import { chooseProject, askText, confirmAction, dialog as workspaceDialog } from "./workspace-dialogs.ts";
 import { RENDERERS, body, poll } from "./wards.ts";
@@ -16,17 +18,17 @@ import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import "../../styles/development.css";
 
-const owner = "client:" + crypto.randomUUID();
-async function api(
+const owner = `client:${crypto.randomUUID()}`;
+async function api<T = unknown>(
   action: string,
   data: Record<string, unknown> = {},
   method = "GET",
-): Promise<any> {
+): Promise<T> {
   const response = await fetch(
     "/api/dev/" +
       action +
       (method === "GET"
-        ? "?" + new URLSearchParams(data as Record<string, string>)
+        ? `?${new URLSearchParams(data as Record<string, string>)}`
         : ""),
     {
       method,
@@ -101,7 +103,7 @@ async function mount(w: WardInstance) {
     bar = el("div", "dev-bar"),
     content = el("div", "dev-content");
   host.dataset.kind = w.type;
-  host.dataset.title = w.title ?? CATALOG[w.type]!.title;
+  host.dataset.title = w.title ?? CATALOG[w.type]?.title ?? w.type;
   host.append(bar, content);
   b.replaceChildren(host);
   let stopped = false;
@@ -109,7 +111,7 @@ async function mount(w: WardInstance) {
   states.set(w.i, {
     stop() {
       stopped = true;
-      cleanup.forEach((f) => f());
+      for (const stop of cleanup) stop();
       states.delete(w.i);
     },
   });
@@ -123,7 +125,7 @@ async function mount(w: WardInstance) {
       "";
     const picker = select("Project", []);
     picker.add(new Option("Select project", ""));
-    projects.forEach((p) => picker.add(new Option(p.name, p.id)));
+    for (const p of projects) picker.add(new Option(p.name, p.id));
     picker.value = state.project;
     const remember = () => api("view", { id: w.i, value: state }, "POST");
     picker.onchange = async () => {
@@ -141,7 +143,8 @@ async function mount(w: WardInstance) {
       await mount(w);
     });
     bar.append(picker, projectButton, button("Expand", () => expand(host)));
-    if (!state.project) {
+    const project = projects.find(p => p.id === state.project);
+    if (!project) {
       if (w.type === "terminal" || w.type === "editor") bar.hidden = true;
       const empty = el("div", "dev-empty");
       const mark = el("span", "dev-empty-icon"); mark.append(icon(w.type === "terminal" ? "code" : "folder"));
@@ -160,11 +163,11 @@ async function mount(w: WardInstance) {
       const { projectEditor } = await import("./project-editor.ts");
       if (stopped) return;
       cleanup.push(projectEditor(host, {
-        api, owner, project: projects.find(p => p.id === state.project)!, state, remember,
+        api, owner, project, state, remember,
         changeProject: () => projectButton.click(), expand: () => expand(host), page: pageOfCard(w.i),
       }));
     } else if (w.type === "terminal") {
-      const caps = await api("capabilities");
+      const caps = await api<ReturnType<typeof terminalCapabilities>>("capabilities");
       const names = { shell: "Shell", codex: "Codex", claude: "Claude Code" };
       const sessions = select("Terminal session", []);
       const surface = el("div", "term-surface");
@@ -173,7 +176,6 @@ async function mount(w: WardInstance) {
       const footer = el("div", "term-footer");
       const status = el("span", "term-status", "Loading sessions…");
       status.setAttribute("role", "status");
-      const project = projects.find(p => p.id === state.project)!;
       projectButton.className = "term-project";
       projectButton.replaceChildren(icon("folder"), el("span", undefined, project?.name ?? "Project"));
       projectButton.title = project?.root ?? "Change project";
@@ -233,11 +235,11 @@ async function mount(w: WardInstance) {
       const keys = el("div", "term-keys");
       let showKeys = matchMedia("(pointer: coarse)").matches;
       for (const [label, data, direction] of [["Esc", "\x1b"], ["Tab", "\t"], ["Left", "\x1b[D", "180deg"],
-        ["Down", "\x1b[B", "90deg"], ["Up", "\x1b[A", "-90deg"], ["Right", "\x1b[C", "0deg"], ["Ctrl-C", "\x03"], ["Enter", "\r"]]) {
-        const key = button(label!, () => send(data!));
+        ["Down", "\x1b[B", "90deg"], ["Up", "\x1b[A", "-90deg"], ["Right", "\x1b[C", "0deg"], ["Ctrl-C", "\x03"], ["Enter", "\r"]] as const) {
+        const key = button(label, () => send(data));
         if (direction) {
           const arrow = el("span"); arrow.style.display = "inline-flex"; arrow.style.rotate = direction;
-          arrow.append(icon("right")); key.replaceChildren(arrow); key.setAttribute("aria-label", label!); key.title = label!;
+          arrow.append(icon("right")); key.replaceChildren(arrow); key.setAttribute("aria-label", label); key.title = label;
         }
         // A touch key must not dismiss the phone's terminal keyboard.
         key.addEventListener("pointerdown", e => e.preventDefault());
@@ -251,14 +253,14 @@ async function mount(w: WardInstance) {
         screen.hidden = !session;
         sessions.disabled = !list.length;
         newButton.disabled = launching;
-        empty.querySelectorAll<HTMLButtonElement>("button").forEach(b => b.disabled = launching);
-        take.hidden = !session || session.state !== "running" || writable;
+        empty.querySelectorAll<HTMLButtonElement>("button").forEach(b => { b.disabled = launching; });
+        take.hidden = session?.state !== "running" || writable;
         take.disabled = !connected;
         take.textContent = session && uncertain.has(session.id) ? "Review & take control" : "Take control";
         restart.hidden = !session || session.state === "running";
         restart.disabled = !connected || launching;
         keys.hidden = !showKeys || !session || session.state !== "running";
-        keys.querySelectorAll<HTMLButtonElement>("button").forEach(b => b.disabled = !writable);
+        keys.querySelectorAll<HTMLButtonElement>("button").forEach(b => { b.disabled = !writable; });
         const text = !connected ? "Reconnecting…" : !session ? "Ready" :
           session.state !== "running" ? (session.state === "exited" ? `Exited${session.exitCode === null ? "" : ` · ${session.exitCode}`}` : "Interrupted") :
           uncertain.has(session.id) ? "Input unconfirmed · review the screen" :
@@ -288,24 +290,24 @@ async function mount(w: WardInstance) {
             if (signature !== sessionOptions) {
               sessionOptions = signature;
               sessions.replaceChildren(new Option(list.length ? "Choose a session" : "Terminal", ""));
-              list.forEach(s => sessions.add(new Option(`${s.title === s.kind ? names[s.kind] : s.title}${s.state === "running" ? "" : ` · ${s.state}`}`, s.id)));
+              for (const s of list) sessions.add(new Option(`${s.title === s.kind ? names[s.kind] : s.title}${s.state === "running" ? "" : ` · ${s.state}`}`, s.id));
             }
             if (autoAttach && list.length) {
               autoAttach = false;
-              state.session = (list.find(s => s.state === "running") ?? list[0])!.id;
+              state.session = (list.find(s => s.state === "running") ?? list[0])?.id;
               await remember();
             }
             sessions.value = state.session ?? "";
             if (state.session) {
               const id = state.session;
-              const result = await api("sessions", { id, ...(sequence === undefined ? {} : { after: sequence }) });
+              const result = await api<ReturnType<typeof readSession>>("sessions", { id, ...(sequence === undefined ? {} : { after: sequence }) });
               if (stopped || state.session !== id) return;
               session = result.session;
               screen.hidden = false;
-              if (session!.cols !== term.cols || session!.rows !== term.rows) term.resize(session!.cols, session!.rows);
+              if (result.session.cols !== term.cols || result.session.rows !== term.rows) term.resize(result.session.cols, result.session.rows);
               if (result.reset) term.reset();
               if (result.data) await new Promise<void>(resolve => term.write(result.data, resolve));
-              sequence = session!.sequence;
+              sequence = result.session.sequence;
             }
             connected = true;
           } catch {
@@ -553,8 +555,8 @@ async function mount(w: WardInstance) {
       const output = el("pre", "dev-diff");
       content.append(output);
       const refresh = async () => {
-        const g = await api("git", { project: state.project });
-        output.textContent = g.status + "\n" + g.diff + "\n" + g.worktrees;
+        const g = await api<Awaited<ReturnType<typeof gitView>>>("git", { project: state.project });
+        output.textContent = `${g.status}\n${g.diff}\n${g.worktrees}`;
       };
       bar.append(
         button("Refresh", refresh),

@@ -3,8 +3,8 @@ import { el } from "./dom.ts";
 import type { Project } from "../../lib/dev/types.ts";
 import "../../styles/development.css";
 
-export async function desktopApi(action: string, body?: unknown): Promise<any> {
-  const r = await fetch("/api/dev/" + action, {
+export async function desktopApi<T = unknown>(action: string, body?: unknown): Promise<T> {
+  const r = await fetch(`/api/dev/${action}`, {
     method: body === undefined ? "GET" : "POST",
     cache: "no-store",
     ...(body === undefined
@@ -30,7 +30,7 @@ export function dialog(title: string) {
     submit = el("button", "btn-primary", "Continue");
   error.hidden = true;
   error.setAttribute("role", "alert");
-  heading.id = "dialog-" + crypto.randomUUID();
+  heading.id = `dialog-${crypto.randomUUID()}`;
   d.setAttribute("aria-labelledby", heading.id);
   cancel.type = "button";
   cancel.onclick = () => d.close();
@@ -94,7 +94,8 @@ export function chooseProject(): Promise<Project | null> {
   folder.setAttribute("aria-label", "Project folder");
   folder.required = true;
   folder.placeholder = "Choose a folder on this desktop";
-  folderLabel.append(folder, browse);
+  const folderCaption = el("span", undefined, "Project folder");
+  folderLabel.replaceChildren(folderCaption, folder, browse);
   name.setAttribute("aria-label", "Project name");
   name.required = true;
   nameLabel.append(name);
@@ -109,7 +110,7 @@ export function chooseProject(): Promise<Project | null> {
     else root = folder.value;
     create = next;
     folder.value = create ? parent : root;
-    folderLabel.firstChild!.textContent = create ? "Create inside this folder" : "Project folder";
+    folderCaption.textContent = create ? "Create inside this folder" : "Project folder";
     nameLabel.hidden = !create;
     name.disabled = !create;
     existing.setAttribute("aria-pressed", String(!create));
@@ -133,11 +134,11 @@ export function chooseProject(): Promise<Project | null> {
   submit.textContent = "Open project";
   browse.onclick = async () => {
     try {
-      const r = await desktopApi("folder", {});
+      const r = await desktopApi<{ path: string | null }>("folder", {});
       if (r.path) folder.value = r.path;
     } catch (e) {
       error.textContent =
-        (e as Error).message + " You can enter the folder path above.";
+        `${(e as Error).message} You can enter the folder path above.`;
       error.hidden = false;
     }
   };
@@ -153,12 +154,12 @@ export function chooseProject(): Promise<Project | null> {
       d.remove();
       resolve(result);
     };
-    void Promise.all([desktopApi("projects"), desktopApi("project-defaults")])
+    void Promise.all([desktopApi<Project[]>("projects"), desktopApi<{ parent: string }>("project-defaults")])
       .then(([projects, defaults]) => {
         parent = defaults.parent;
         if (create && !folder.value) folder.value = parent;
         if (projects.length) saved.append(el("p", "dev-label", "Recent projects"));
-        for (const p of projects as Project[]) {
+        for (const p of projects) {
           const b = el("button", "dev-recent-project");
           const text = el("span");
           text.append(el("strong", undefined, p.name), el("small", undefined, p.root));
@@ -199,9 +200,9 @@ export function chooseProject(): Promise<Project | null> {
 export async function openProjectWorkspace() {
   const project = await chooseProject();
   if (project) {
-    const { page } = await desktopApi("open-project", { project: project.id });
+    const { page } = await desktopApi<{ page: string }>("open-project", { project: project.id });
     const next=new URL(location.href);
-    next.hash='p='+page;
+    next.hash=`p=${page}`;
     next.searchParams.set('workspace',page);
     location.assign(next.href);
   }

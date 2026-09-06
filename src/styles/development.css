@@ -4,7 +4,8 @@
   width: 100%;
   height: 100%;
   min-height: 220px;
-  gap: 0.4rem;
+  gap: 0.65rem;
+  min-width: 0;
 }
 .dev-bar {
   display: flex;
@@ -24,26 +25,6 @@
   overflow: auto;
   min-height: 0;
   gap: 0.35rem;
-}
-.dev-files {
-  display: flex;
-  flex-direction: column;
-  overflow: auto;
-}
-.dev-files details {
-  padding-left: 0.8rem;
-}
-.dev-files button {
-  display: block;
-  text-align: left;
-  white-space: nowrap;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.dev-file {
-  cursor: pointer;
-  padding: 0.25rem;
 }
 .dev-editor {
   flex: 1;
@@ -83,20 +64,6 @@ dialog.fd-dialog.dev-expanded {
   flex: 1;
   min-height: 0;
 }
-.dev-comparison {
-  display: flex;
-  gap: 1rem;
-  min-height: 50vh;
-}
-.dev-comparison section {
-  flex: 1;
-  min-width: 0;
-}
-.dev-comparison textarea {
-  width: 100%;
-  height: 45vh;
-  font-family: monospace;
-}
 .dev-diff {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -108,17 +75,6 @@ dialog.fd-dialog.dev-expanded {
     height: 98dvh;
     max-height: 98dvh;
   }
-  .dev-comparison {
-    flex-direction: column;
-  }
-  .dev-keys {
-    position: sticky;
-    bottom: 0;
-  }
-  .dev-keys button {
-    min-width: 34px;
-    min-height: 36px;
-  }
 }
 dialog.fd-dialog.dev-project-dialog { width:min(94vw,36rem); padding:1.5rem; }
 .dev-project-dialog form { display:flex; flex-direction:column; gap:1rem; }
@@ -129,24 +85,14 @@ dialog.fd-dialog.dev-project-dialog { width:min(94vw,36rem); padding:1.5rem; }
 .dev-project-dialog .dev-bar:last-child { justify-content:flex-end; }
 
 /* A consistent workbench surface across files, editor, terminals and changes. */
-.dev-workspace { gap:.65rem; min-width:0; }
 .dev-bar { gap:.45rem; }
 .dev-workspace > .dev-bar { padding-bottom:.65rem; border-bottom:1px solid var(--color-line); }
 .dev-bar .btn, .dev-bar .input, .dev-bar .fd-ss-btn { min-height:32px; border-radius:.5rem; }
 .dev-content { gap:.65rem; scrollbar-width:thin; }
 .dev-content > .input { min-height:34px; border-radius:.5rem; }
 .dev-content > p { color:var(--color-ink-muted); font-size:.72rem; line-height:1.5; }
-.dev-files { gap:.1rem; }
-.dev-file { border-radius:.35rem; padding:.4rem .55rem; transition:background-color 140ms; }
-.dev-file:hover { background:var(--color-surface-2); }
-.dev-file:focus-visible { outline:2px solid var(--color-accent); outline-offset:-2px; }
 .dev-editor, .dev-terminal { border:1px solid var(--color-line); border-radius:.6rem; }
 .dev-terminal { padding:.55rem; }
-.dev-settings { border-radius:.5rem; }
-.dev-settings[open] { flex-basis:100%; padding:.65rem; background:var(--color-surface-2); border:1px solid var(--color-line); }
-.dev-settings[open] > summary { margin-bottom:.65rem; width:fit-content; }
-.dev-keys { display:flex; gap:.3rem; flex-wrap:wrap; }
-.dev-keys button { font-family:var(--font-mono,monospace); }
 .dev-empty { flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; gap:.8rem; padding:1.5rem 1rem; }
 .dev-empty-icon { font-size:1.7rem; color:var(--color-accent-hi); }
 .dev-empty h3 { font-size:1rem; font-weight:600; letter-spacing:-.02em; }
@@ -195,13 +141,11 @@ dialog.fd-dialog.dev-project-dialog { border-radius:1.1rem; padding:1.6rem; }
 .setup-card > p { font-size:.85rem; color:var(--color-ink-muted); line-height:1.75; }
 .setup-progress { display:flex; align-items:center; justify-content:space-between; gap:.6rem; width:100%; padding:.8rem 0; border-top:1px solid var(--color-line); border-bottom:1px solid var(--color-line); list-style:none; }
 .setup-progress li { display:flex; align-items:center; gap:.4rem; font-size:.7rem; color:var(--color-ink-muted); }
-.setup-progress li > span { display:grid; place-items:center; width:1.4rem; height:1.4rem; border-radius:50%; border:1px solid var(--color-line-strong); font-size:.6rem; }
+.setup-progress :where(li) > span { display:grid; place-items:center; width:1.4rem; height:1.4rem; border-radius:50%; border:1px solid var(--color-line-strong); font-size:.6rem; }
 .setup-progress [aria-current] { color:var(--color-accent-hi); }
-.setup-progress [aria-current] > span { background:var(--color-accent); color:var(--color-accent-ink); border-color:transparent; }
+.setup-progress :where([aria-current]) > span { background:var(--color-accent); color:var(--color-accent-ink); border-color:transparent; }
 #setup-form { display:flex; flex-direction:column; gap:.6rem; width:100%; margin-top:auto; }
 #setup-form label { font-size:.78rem; font-weight:500; }
-#setup-form .input { padding:.75rem; border-radius:.6rem; }
-#setup-form .btn-primary { margin-top:.35rem; border-radius:.65rem; min-height:42px; justify-content:space-between; }
 .setup-help { color:var(--color-ink-muted); font-size:.72rem; line-height:1.6; }
 .setup-features { display:flex; flex-direction:column; gap:1.3rem; padding:.5rem 0; list-style:none; }
 .setup-features li { display:flex; align-items:center; gap:.85rem; }
@@ -243,9 +187,6 @@ dialog.fd-dialog.dev-project-dialog { border-radius:1.1rem; padding:1.6rem; }
   .setup-intro, .setup-card, .setup-connected-row { animation:setup-arrive 260ms ease-out both; }
   .setup-card:nth-child(2) { animation-delay:60ms; }
   @keyframes setup-arrive { from { opacity:0; translate:0 8px; } }
-}
-@media (prefers-reduced-motion:reduce) {
-  .desktop-setup *, .dev-workspace * { animation:none !important; transition:none !important; }
 }
 .dev-workspace [hidden] { display:none; }
 .setup-approval-page { max-width:38rem; margin:3rem auto; padding:0 1.2rem; }
@@ -373,13 +314,13 @@ dialog.fd-dialog.dev-project-dialog { border-radius:1.1rem; padding:1.6rem; }
 .project-editor .cm-search { padding:.5rem; font-size:.75rem; }
 .project-editor .cm-textfield { background:var(--color-surface); color:var(--color-ink); border:1px solid var(--color-line-strong); border-radius:4px; padding:.25rem .4rem; max-width:40%; }
 .project-editor .cm-button { background:var(--color-surface); color:var(--color-ink); border:1px solid var(--color-line); border-radius:4px; padding:.2rem .5rem; }
+.editor-action { padding:.3rem .5rem; border-radius:4px; color:var(--color-accent-hi); font-size:.75rem; cursor:pointer; }
 .editor-welcome { display:flex; flex:1; min-height:140px; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:1.5rem; }
 .editor-welcome-mark { font-size:2rem; color:var(--color-ink-muted); margin-bottom:.7rem; }
 .editor-welcome h3 { font-size:1.12rem; font-weight:550; margin-bottom:.4rem; letter-spacing:-.02em; }
 .editor-welcome p { max-width:290px; color:var(--color-ink-muted); font-size:.78rem; line-height:1.7; }
 .editor-welcome .editor-action { margin-top:.9rem; color:var(--color-accent-hi); }
 .editor-welcome small { margin-top:1.4rem; color:var(--color-ink-faint); font-size:.64rem; }
-.editor-action { padding:.3rem .5rem; border-radius:4px; color:var(--color-accent-hi); font-size:.75rem; cursor:pointer; }
 .editor-action:hover { background:var(--color-surface-2); }
 .editor-notice { display:flex; align-items:center; flex-wrap:wrap; gap:.25rem .5rem; padding:.45rem .75rem; font-size:.72rem; line-height:1.5; background:color-mix(in srgb,var(--color-warn) 9%,var(--color-surface)); border-bottom:1px solid var(--color-line); flex-shrink:0; }
 .editor-notice > span { flex:1; min-width:120px; color:var(--color-ink-muted); }
@@ -441,3 +382,7 @@ dialog.fd-dialog.editor-compare { width:94vw; max-width:none; height:90dvh; max-
 .project-editor .cm-lint-marker-warning { color:var(--color-warn); }
 .project-editor .cm-lint-marker-error { color:var(--color-err); }
 .project-editor .cm-search button[name="close"] { display:inline-flex; align-items:center; justify-content:center; font-size:.8rem; }
+
+#setup-form .input { padding:.75rem; border-radius:.6rem; }
+
+#setup-form .btn-primary { margin-top:.35rem; border-radius:.65rem; min-height:42px; justify-content:space-between; }

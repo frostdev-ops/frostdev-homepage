@@ -74,7 +74,7 @@
       typeof value === "string"
         ? value.replace(
             /url\(["']?(\/[^)"']+)["']?\)/g,
-            (_, url) => "url(" + JSON.stringify(map(url)) + ")",
+            (_, url) => `url(${JSON.stringify(map(url))})`,
           )
         : value,
       priority,

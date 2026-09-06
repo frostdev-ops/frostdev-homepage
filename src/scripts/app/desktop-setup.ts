@@ -1,11 +1,17 @@
+import type { beginSignIn, pollSignIn, onboarding } from "../../lib/dev/remote.ts";
 import { desktopApi, chooseProject } from "./workspace-dialogs.ts";
 import { el } from "./dom.ts";
-const root = document.querySelector<HTMLElement>(".desktop-setup")!,
-  status = document.getElementById("setup-status")!,
-  form = document.getElementById("setup-form") as HTMLFormElement,
-  submit = document.getElementById("setup-submit") as HTMLButtonElement,
-  wait = document.getElementById("setup-wait")!,
-  connected = document.getElementById("setup-connected")!;
+function required<T extends HTMLElement>(selector: string): T {
+  const element = document.querySelector<T>(selector);
+  if (!element) throw new Error(`Setup control is missing: ${selector}`);
+  return element;
+}
+const root = required(".desktop-setup"),
+  status = required("#setup-status"),
+  form = required<HTMLFormElement>("#setup-form"),
+  submit = required<HTMLButtonElement>("#setup-submit"),
+  wait = required("#setup-wait"),
+  connected = required("#setup-connected");
 let requestId = "",
   timer: ReturnType<typeof setTimeout> | undefined;
 function step(value: "connect" | "approve" | "ready") {
@@ -47,7 +53,7 @@ function showConnected(p: { id: string; server: string; email?: string }) {
     el(
       "p",
       undefined,
-      p.email ? "Connected as " + p.email : "Already connected to this server",
+      p.email ? `Connected as ${p.email}` : "Already connected to this server",
     ),
     action("Open server dashboard", () => openServer(p.id)),
   );
@@ -57,7 +63,7 @@ async function poll() {
   const id = requestId;
   if (!id) return;
   try {
-    const result = await desktopApi("sign-in-poll", { id });
+    const result = await desktopApi<Awaited<ReturnType<typeof pollSignIn>>>("sign-in-poll", { id });
     if (id !== requestId) return;
     if (result.status === "connected") {
       requestId = "";
@@ -98,10 +104,10 @@ form.onsubmit = async (e) => {
     status.textContent = "Connecting to your server…";
     const input = form.elements.namedItem("server") as HTMLInputElement;
     const raw = input.value.trim(),
-      server = /^https?:\/\//i.test(raw) ? raw : "https://" + raw;
-    const result = await desktopApi("sign-in-start", { server });
+      server = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const result = await desktopApi<Awaited<ReturnType<typeof beginSignIn>>>("sign-in-start", { server });
     requestId = result.id;
-    document.getElementById("setup-code")!.textContent = result.userCode;
+    required("#setup-code").textContent = result.userCode;
     (document.getElementById("setup-link") as HTMLAnchorElement).href =
       result.verificationUrl;
     wait.hidden = false;
@@ -115,33 +121,33 @@ form.onsubmit = async (e) => {
     report(e);
   }
 };
-document.getElementById("setup-reopen")!.onclick = () =>
+required("#setup-reopen").onclick = () =>
   void desktopApi("sign-in-open", { id: requestId }).catch(report);
-document.getElementById("setup-cancel")!.onclick = () =>
+required("#setup-cancel").onclick = () =>
   void cancel()
     .then(() => {
       status.textContent = "Connection cancelled.";
     })
     .catch(report);
-document.getElementById("setup-local")!.onclick = () =>
+required("#setup-local").onclick = () =>
   void cancel()
     .then(() => desktopApi("onboard", { home: "local" }))
     .then(() => location.assign("/dash"))
     .catch(report);
-document.getElementById("setup-project")!.onclick = async () => {
+required("#setup-project").onclick = async () => {
   try {
     const p = await chooseProject();
     if (!p) return;
-    const { page } = await desktopApi("open-project", { project: p.id });
+    const { page } = await desktopApi<{ page: string }>("open-project", { project: p.id });
     await cancel();
     await desktopApi("onboard", { home: "local" });
-    location.assign("/dash#p=" + page);
+    location.assign(`/dash#p=${page}`);
   } catch (e) {
     report(e);
   }
 };
 window.addEventListener("pagehide", () => clearTimeout(timer));
-void desktopApi("onboarding")
+void desktopApi<Awaited<ReturnType<typeof onboarding>>>("onboarding")
   .then(async (state) => {
     for (const p of state.pairs) showConnected(p);
     if (state.complete && root.dataset.setup !== "1") {

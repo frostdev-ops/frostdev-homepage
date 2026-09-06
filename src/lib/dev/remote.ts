@@ -70,7 +70,7 @@ async function enrollmentRequest(
   action: string,
   body: unknown,
 ) {
-  const res = await fetch(serverOrigin(server) + "/api/devices/" + action, {
+  const res = await fetch(`${serverOrigin(server)}/api/devices/${action}`, {
     method: "POST",
     redirect: "error",
     headers: { "content-type": "application/json" },
@@ -122,7 +122,7 @@ export async function beginSignIn(user: number, server: string) {
   )
     throw new DevError("Invalid server connection response.", 502);
   const id = crypto.randomUUID(),
-    verificationUrl = origin + "/desktop/connect?code=" + grant.user_code;
+    verificationUrl = `${origin}/desktop/connect?code=${grant.user_code}`;
   signIns.set(id, {
     server: origin,
     code: grant.device_code,
@@ -164,8 +164,8 @@ export function cancelSignIn(user: number, id: string) {
 }
 export async function pollSignIn(user: number, id: string) {
   const s = signInOf(user, id);
-  if (s.result) return { status: "connected", ...s.result };
-  if (s.busy || Date.now() - s.lastPoll < 3000) return { status: "pending" };
+  if (s.result) return { status: "connected" as const, ...s.result };
+  if (s.busy || Date.now() - s.lastPoll < 3000) return { status: "pending" as const };
   s.busy = true;
   s.lastPoll = Date.now();
   try {
@@ -176,7 +176,7 @@ export async function pollSignIn(user: number, id: string) {
       result.error === "authorization_pending" ||
       result.error === "slow_down"
     )
-      return { status: "pending" };
+      return { status: "pending" as const };
     if (result.error)
       throw new DevError(
         result.error === "access_denied"
@@ -206,7 +206,7 @@ export async function pollSignIn(user: number, id: string) {
       email: String(result.email ?? ""),
       server: p.server,
     };
-    return { status: "connected", ...s.result };
+    return { status: "connected" as const, ...s.result };
   } finally {
     s.busy = false;
   }
@@ -230,11 +230,11 @@ export async function openServer(user: number, id: string) {
   await remotePairs(user);
   const p = pairs.find((p) => p.id === id);
   if (!p) throw new DevError("Connect this server first.", 404);
-  const response = await fetch(p.server + "/api/devices/session", {
+  const response = await fetch(`${p.server}/api/devices/session`, {
     method: "POST",
     redirect: "error",
     headers: {
-      authorization: "Bearer " + p.token,
+      authorization: `Bearer ${p.token}`,
       "content-type": "application/json",
     },
     body: "{}",
@@ -249,8 +249,9 @@ export async function openServer(user: number, id: string) {
     );
   const session = await response.json();
   await nativeDesktop("server", {
-    url: p.server + "/dash",
+    url: `${p.server}/dash`,
     session: session.id,
+    device: p.id,
   });
   return { ok: true };
 }
@@ -299,9 +300,9 @@ export async function unpairDesktop(user: number, id: string) {
 function connect(pair: Pair) {
   if (controls.has(pair.id)) return;
   const ws = new WebSocket(
-    pair.server.replace(/^https:/, "wss:") + "/api/devices/connect",
+    `${pair.server.replace(/^https:/, "wss:")}/api/devices/connect`,
     {
-      headers: { authorization: "Bearer " + pair.token },
+      headers: { authorization: `Bearer ${pair.token}` },
       maxPayload: 16_384,
       perMessageDeflate: false,
     },
@@ -328,7 +329,7 @@ function connect(pair: Pair) {
       if (
         m.type === "request" &&
         /^[\w-]{36}$/.test(m.id) &&
-        m.base === "/runtime/" + pair.id
+        m.base === `/runtime/${pair.id}`
       )
         openChannel(pair, m.id, m.base);
     } catch {}
@@ -349,10 +350,10 @@ function openChannel(pair: Pair, id: string, base: string) {
   const set = channels.get(pair.id);
   if (!set || set.size >= 64) return;
   const ws = new WebSocket(
-    pair.server.replace(/^https:/, "wss:") + "/api/devices/connect",
+    `${pair.server.replace(/^https:/, "wss:")}/api/devices/connect`,
     {
       headers: {
-        authorization: "Bearer " + pair.token,
+        authorization: `Bearer ${pair.token}`,
         "x-rimeward-request": id,
       },
       maxPayload: 16 * 1024 * 1024,
@@ -369,9 +370,9 @@ function openChannel(pair: Pair, id: string, base: string) {
         res.end();
         return;
       }
-      const headers: Record<string, string> = {
-        "x-rimeward-native-token": process.env.RIMEWARD_NATIVE_TOKEN!,
-      };
+      const token = process.env.RIMEWARD_NATIVE_TOKEN;
+      if (!token) { res.writeHead(503); res.end(); return; }
+      const headers: Record<string, string> = { "x-rimeward-native-token": token };
       for (const key of forwardHeaders) {
         const value = req.headers[key];
         if (typeof value === "string") headers[key] = value;
@@ -430,7 +431,7 @@ export function relayHtml(html: string, base: string) {
       /((?:src|href|action|poster|data-default)=["'])\/(?!\/)/g,
       `$1${base}/`,
     )
-    .replace(/url\(["']?\/(?!\/)/g, (match) => match + base.slice(1) + "/")
+    .replace(/url\(["']?\/(?!\/)/g, (match) => `${match + base.slice(1)}/`)
     .replace(
       "<head>",
       `<head><meta name="rimeward-runtime-base" content="${base}"><script>${bridge}</script>`,

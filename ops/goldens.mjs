@@ -21,7 +21,7 @@ if (!process.env.PLAYWRIGHT_BROWSERS_PATH && fs.existsSync('desktop/runtime/brow
 
 let server, browser;
 try {
-  execFileSync(process.execPath, ['node_modules/astro/astro.js', 'build'], { stdio: 'inherit' });
+  execFileSync(process.execPath, ['node_modules/astro/bin/astro.mjs', 'build'], { stdio: 'inherit' });
 
   const { createUser } = await import('../src/lib/users.ts');
   const { createSession } = await import('../src/lib/auth.ts');

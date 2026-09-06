@@ -59,7 +59,7 @@ export function executable(name: string): string | null {
     process.platform === "win32"
       ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";")
       : [""];
-  const dirs = terminalEnv().PATH!.split(path.delimiter);
+  const dirs = terminalEnv().PATH.split(path.delimiter);
   dirs.push(
     path.join(os.homedir(), ".local", "bin"),
     path.join(os.homedir(), ".cargo", "bin"),
@@ -291,8 +291,10 @@ export async function startSession(
       const sequence = ++s.sequence;
       s.chunks.push({ sequence, data });
       s.bytes += Buffer.byteLength(data);
-      while (s.bytes > MAX_HISTORY && s.chunks.length > 1)
-        s.bytes -= Buffer.byteLength(s.chunks.shift()!.data);
+      while (s.bytes > MAX_HISTORY && s.chunks.length > 1) {
+        const oldest = s.chunks.shift();
+        if (oldest) s.bytes -= Buffer.byteLength(oldest.data);
+      }
       emitDev(user, "output", id, { sequence, data });
       if (!s.flush) {
         s.flush = setTimeout(() => persist(s), 2000);
@@ -345,7 +347,7 @@ export function readSession(user: number, id: string, after?: number) {
     reset: !incremental,
     data: incremental
       ? s.chunks
-          .filter((c) => c.sequence > after!)
+          .filter((c) => c.sequence > (after ?? -1))
           .map((c) => c.data)
           .join("")
       : s

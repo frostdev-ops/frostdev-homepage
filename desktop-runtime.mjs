@@ -30,7 +30,7 @@ const nativeRequest = (type, op, value) =>
       type === "desktop" ? 120000 : 15000,
     );
     pending.set(id, { resolve, reject, timer });
-    process.stdout.write(JSON.stringify({ type, id, op, value }) + "\n");
+    process.stdout.write(`${JSON.stringify({ type, id, op, value })}\n`);
   });
 globalThis.__nativeVault = (op, value) => nativeRequest("vault", op, value);
 globalThis.__nativeDesktop = (op, value) => nativeRequest("desktop", op, value);
@@ -60,11 +60,11 @@ if (!httpServer.listening)
   await new Promise((resolve) => httpServer.once("listening", resolve));
 process.env.PUBLIC_BASE_URL = `http://127.0.0.1:${httpServer.address().port}`;
 process.stdout.write(
-  JSON.stringify({
+  `${JSON.stringify({
     type: "ready",
     url:
       process.env.PUBLIC_BASE_URL +
       "/api/native/bootstrap?token=" +
       process.env.RIMEWARD_NATIVE_TOKEN,
-  }) + "\n",
+  })}\n`,
 );

@@ -15,7 +15,7 @@ export async function analyzeFile(user: number, project: string, file: string, t
   projectPath(user, project, file, true);
   if (typeof text !== "string" || Buffer.byteLength(text) > 1024 * 1024)
     throw new DevError("Live analysis supports files up to 1 MiB.");
-  const ext = file.split(".").at(-1)!.toLowerCase();
+  const ext = path.extname(file).slice(1).toLowerCase();
   if (!extensions.has(ext)) return { supported: false, diagnostics: [] };
   if (running >= 2) throw new DevError("Analysis is busy. Try again shortly.", 429);
   running++;
@@ -31,12 +31,12 @@ export async function analyzeFile(user: number, project: string, file: string, t
       linter: { enabled: true, rules: { recommended: true } },
       formatter: { indentStyle: "space", indentWidth: 2 },
     }), { mode: 0o600 });
-    const name = "buffer." + ext;
+    const name = `buffer.${ext}`;
     await fs.writeFile(path.join(folder, name), text, { mode: 0o600 });
     const packageName = `@biomejs/cli-${process.platform}-${process.arch}`;
     let binary: string;
     try { binary = require.resolve(packageName + (process.platform === "win32" ? "/biome.exe" : "/biome")); }
-    catch { binary = require.resolve(packageName + "-musl/biome"); }
+    catch { binary = require.resolve(`${packageName}-musl/biome`); }
     const args = format ? ["format", "--write", name] : ["lint", "--reporter=json", "--max-diagnostics=100", name];
     const stdout = await new Promise<string>((resolve, reject) => {
       execFile(binary, args, { cwd: folder, env: { ...terminalEnv(), BIOME_THREADS: "2" }, timeout: 10_000, maxBuffer: 2 * 1024 * 1024, windowsHide: true }, (err, out) => {
@@ -47,20 +47,29 @@ export async function analyzeFile(user: number, project: string, file: string, t
     });
     if (format) return { supported: true, text: (await fs.readFile(path.join(folder, name), "utf8")).replace(/\r\n?/g, "\n") };
     // Biome's pinned JSON reporter uses 1-based line/column positions.
-    const report = JSON.parse(stdout);
-    const lines = text.split("\n"), starts = [0];
-    for (let i = 0; i < lines.length - 1; i++) starts.push(starts[i]! + lines[i]!.length + 1);
-    const offset = (loc?: { line: number; column: number }) => {
-      const line = Math.max(0, Math.min(lines.length - 1, (loc?.line ?? 1) - 1));
-      // Reporter columns count Unicode scalar values; CodeMirror uses UTF-16.
-      const prefix = [...lines[line]!].slice(0, Math.max(0, (loc?.column ?? 1) - 1)).join("");
-      return Math.min(starts[line]! + prefix.length, starts[line]! + lines[line]!.length);
+    const report = JSON.parse(stdout) as {
+      diagnostics: { location?: { start?: { line: number; column: number }; end?: { line: number; column: number } }; severity: string; message: string; category?: string }[];
+      summary?: { diagnosticsNotPrinted?: number };
     };
-    return { supported: true, diagnostics: report.diagnostics.slice(0, 100).map((d: any) => ({
+    let position = 0;
+    const lines = text.split("\n").map((text) => {
+      const line = { text, start: position };
+      position += text.length + 1;
+      return line;
+    });
+    const offset = (loc?: { line: number; column: number }) => {
+      const index = Math.max(0, Math.min(lines.length - 1, (loc?.line ?? 1) - 1));
+      const line = lines[index];
+      if (!line) return 0;
+      // Reporter columns count Unicode scalar values; CodeMirror uses UTF-16.
+      const prefix = [...line.text].slice(0, Math.max(0, (loc?.column ?? 1) - 1)).join("");
+      return line.start + prefix.length;
+    };
+    return { supported: true, diagnostics: report.diagnostics.slice(0, 100).map((d) => ({
       from: offset(d.location?.start), to: offset(d.location?.end),
       severity: d.severity === "warning" ? "warning" : d.severity === "error" || d.severity === "fatal" ? "error" : "info",
       message: String(d.message), source: "Biome", code: String(d.category ?? ""),
-    })), truncated: report.summary?.diagnosticsNotPrinted > 0 };
+    })), truncated: (report.summary?.diagnosticsNotPrinted ?? 0) > 0 };
   } finally {
     try { if (folder) await fs.rm(folder, { recursive: true, force: true }); }
     finally { running--; }

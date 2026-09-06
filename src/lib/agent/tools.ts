@@ -63,7 +63,7 @@ import { scheduleWake, cancelWake, listWakes } from './wakes.ts';
 import type { AgentToolSpec } from './provider.ts';
 import { deleteDoc, docPath, writeDoc, DOC_DESC_MAX, STORES, type StoreKind } from './store.ts';
 import { askAgent, getMessage, listInbox, INBOX_MODES, type InboxMode, type InboxRow } from './inbox.ts';
-import { commsRead, opsDoc, reactChat, sendChat } from '../comms/index.ts';
+import { opsDoc } from '../comms/ops.ts';
 import { COMMS_TYPES, isCommsType } from '../comms/types.ts';
 
 // The agent's tool registry. Every wrap goes through the SAME trust boundary
@@ -1284,6 +1284,7 @@ export const TOOLS: Record<string, ToolDef> = {
     run: async (a, ctx) => {
       const w = chatWard(ctx.userId, a.ward);
       const { ward: _w, what, ...rest } = a;
+      const { commsRead } = await import('../comms/index.ts');
       return { ward: w.i, type: w.type, result: await commsRead(ctx.userId, w.i, String(what), rest) };
     },
   },
@@ -1296,6 +1297,7 @@ export const TOOLS: Record<string, ToolDef> = {
     ),
     run: async (a, ctx) => {
       const w = chatWard(ctx.userId, a.ward);
+      const { sendChat } = await import('../comms/index.ts');
       const m = await sendChat(ctx.userId, w.i, a.channel ? String(a.channel) : undefined, String(a.text ?? ''), { replyTo: a.reply_to ? String(a.reply_to) : undefined, thread: a.thread === true });
       return { ok: true, id: m.id, channel: m.channel };
     },
@@ -1306,6 +1308,7 @@ export const TOOLS: Record<string, ToolDef> = {
     parameters: obj({ ward: str('the chat ward id — optional when there is only one'), channel: str('channel id'), message: str('message id'), emoji: str('👍 or name:id') }, ['channel', 'message', 'emoji']),
     run: async (a, ctx) => {
       const w = chatWard(ctx.userId, a.ward);
+      const { reactChat } = await import('../comms/index.ts');
       await reactChat(ctx.userId, w.i, String(a.channel), String(a.message), String(a.emoji));
       return { ok: true };
     },

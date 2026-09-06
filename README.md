@@ -103,7 +103,7 @@ User-facing copy always says ward, leyline, Rime.
 
 ## Stack
 
-Astro 5 (SSR, Node adapter) · TypeScript · Tailwind 4 · SQLite (`better-sqlite3`) · three.js
+Astro 7 (SSR, Node adapter) · TypeScript · Tailwind 4 · SQLite (`better-sqlite3`) · three.js
 for the splash · Playwright for the browser wards · Tauri 2 (Rust) for the desktop app ·
 CodeMirror 6 + Biome for editing · xterm.js + node-pty for terminals.
 Node 22.18 or newer.

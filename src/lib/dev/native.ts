@@ -30,9 +30,8 @@ let redeemed = false;
 export function nativeRequest(context: APIContext): Response | undefined {
   if (!isDesktop()) return;
   const { request, url, cookies } = context;
-  if (
-    request.headers.get("host") !== new URL(process.env.PUBLIC_BASE_URL!).host
-  )
+  const base = process.env.PUBLIC_BASE_URL;
+  if (!base || request.headers.get("host") !== new URL(base).host)
     return new Response("Invalid host", { status: 403 });
   const trusted = secretEqual(
     request.headers.get("x-rimeward-native-token"),

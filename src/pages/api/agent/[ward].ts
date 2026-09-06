@@ -1,16 +1,5 @@
 import type { APIRoute } from 'astro';
-import {
-  agentWardConfig,
-  clearThread,
-  interruptTurn,
-  resolveConfirmTurn,
-  steerTurn,
-  runChatTurn,
-  runCommand,
-  wardBusy,
-  wardSurface,
-  type AgentEvent,
-} from '../../../lib/agent/core.ts';
+import type { AgentEvent } from '../../../lib/agent/core.ts';
 import { agentConfigured } from '../../../lib/agent/provider.ts';
 import { parseCommand } from '../../../lib/agent/commands.ts';
 
@@ -22,6 +11,7 @@ export const prerender = false;
 // and the transcript is the record either way.
 
 export const GET: APIRoute = async ({ params, locals }) => {
+  const { wardSurface } = await import('../../../lib/agent/core.ts');
   const userId = locals.user!.userId;
   const surface = wardSurface(userId, String(params.ward));
   // 400, not 404 — the ward helpers map 404 to a Connect chip.
@@ -30,6 +20,7 @@ export const GET: APIRoute = async ({ params, locals }) => {
 };
 
 export const POST: APIRoute = async ({ params, request, locals }) => {
+  const { agentWardConfig, clearThread, interruptTurn, resolveConfirmTurn, steerTurn, runChatTurn, runCommand, wardBusy } = await import('../../../lib/agent/core.ts');
   const userId = locals.user!.userId;
   const ward = String(params.ward);
   const cfg = agentWardConfig(userId, ward);

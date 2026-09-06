@@ -29,7 +29,7 @@ routes, tables and CSS classes keep their engineering names (`WardInstance`, log
 - Nothing instance-specific in the tree: names, domains, addresses and the monitor list are
   settings, environment or `data/` (see `.env.example`, `src/lib/site.ts`, `src/lib/brand-files.ts`,
   the admin monitor registry).
-- `npm test`, `npm run typecheck`, and `npm run build` green; the Tests workflow runs these on every push.
+- `npm run lint:desktop`, `npm test`, `npm run typecheck`, and `npm run build` green; the Tests workflow runs these on every push. Desktop lint treats warnings as failures and covers the native launcher, runtime, APIs, editor/terminal UI, and development styles.
 
 ## Desktop and remote workspaces
 
@@ -39,6 +39,18 @@ Node version's `better-sqlite3` or `node-pty` binaries into the payload. The des
 owns `workspaces.db`, recovery, PTYs, and agent tasks. The ordinary server must reject native
 execution and persist only device pairing metadata. Keep relay paths free of payload logging
 and persistent caching. See [the runtime contract and checks](docs/development-workspaces.md).
+
+After staging, run `npm run desktop:check`: Biome, Rust formatting, Clippy with warnings
+as errors, and native unit tests. Desktop release Actions run this on each target; the release remains a draft until every platform succeeds. On macOS,
+`desktop/sign-runtime.mjs` signs and verifies bundled Chromium and native binaries before
+Tauri signs/notarizes the outer app. Build intermediates and other platforms' PTY prebuilds
+are excluded. `desktop/entitlements.plist` supplies the Node/Chromium JIT entitlements.
+
+Install-script permissions are pinned in `package.json` for native dependencies. The SDK's
+network-based model-type freshness check is disabled; models are discovered at runtime.
+The current `just-bash` dependency emits Node's experimental `stripTypeScriptTypes` notice
+when its JavaScript worker starts under Node 22. Its optional compression dependency also
+uses the deprecated `prebuild-install` package. These upstream notices are not suppressed.
 
 After a web build, run `npm run test:ui` with the staged Chromium available. These checks
 exercise real editor/PTY behavior, shared-client control, recovery, and isolated HTTPS

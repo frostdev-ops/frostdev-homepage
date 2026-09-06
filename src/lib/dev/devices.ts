@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import http from "node:http";
 import type net from "node:net";
 import { Readable } from "node:stream";
-import WebSocket, { WebSocketServer, createWebSocketStream } from "ws";
+import type WebSocket from "ws";
+import { WebSocketServer, createWebSocketStream } from "ws";
 import { getDb } from "../db.ts";
 import { DevError, isDesktop } from "./runtime.ts";
 
@@ -224,7 +225,7 @@ export const forwardHeaders = [
 export function allowedRelayPath(value: string) {
   if (value.length > 8192 || !value.startsWith("/") || value.startsWith("//"))
     return false;
-  let pathname = value.split("?")[0]!;
+  let pathname = value.split("?")[0] ?? "";
   try {
     pathname = decodeURIComponent(pathname);
   } catch {
@@ -278,7 +279,7 @@ export async function relayRequest(
       JSON.stringify({
         type: "request",
         id: challenge,
-        base: "/runtime/" + device,
+        base: `/runtime/${device}`,
       }),
     );
   });
@@ -321,7 +322,7 @@ export async function relayRequest(
         const location = res.headers.location;
         if (location) {
           if (location.startsWith("/") && !location.startsWith("//"))
-            out.set("location", "/runtime/" + device + location);
+            out.set("location", `/runtime/${device}${location}`);
           else out.set("location", location);
         }
         resolve(
@@ -349,7 +350,7 @@ export async function relayRequest(
     });
     ws.on("error", () => req.destroy());
     if (request.body)
-      Readable.fromWeb(request.body as any)
+      Readable.fromWeb(request.body as import("node:stream/web").ReadableStream<Uint8Array>)
         .on("error", () => req.destroy())
         .pipe(req);
     else req.end();

@@ -158,3 +158,20 @@ test('keyEvent: specials carry a virtual key code, characters carry text, the re
   assert.equal(keyEvent('7', 'down', 0, false)!.code, 'Digit7');
   assert.equal(keyEvent('Dead', 'down', 0, false), null);
 });
+
+
+test('closing a target during activation is harmless; invalid mouse buttons are dropped', async () => {
+  const tr = new Fake(), events: BrowserEvent[] = [];
+  const send = tr.send.bind(tr);
+  tr.send = text => {
+    if (JSON.parse(text).method === 'Page.startScreencast')
+      tr.event('Target.targetDestroyed', { targetId: 'T1' });
+    send(text);
+  };
+  const driver = new LocalDriver(tr, event => events.push(event));
+  await driver.start();
+  assert.equal(events.some(event => event.type === 'nav'), false);
+  const { tr: active, d } = await boot();
+  await d.run([{ t: 'down', x: 1, y: 1, button: 1.5 }]);
+  assert.equal(active.calls('Input.dispatchMouseEvent').length, 0);
+});

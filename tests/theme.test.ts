@@ -202,7 +202,7 @@ test('brand: stock knobs reproduce the shipped wordmark, and are not a preset\'s
 });
 
 test('fonts: one catalogue, and astro.config builds its download list from it', () => {
-  // astro.config.mjs imports FONTS and derives `experimental.fonts` from it,
+  // astro.config.mjs imports FONTS and derives `fonts` from it,
   // so the two cannot drift — what it must not do is stop importing it.
   const config = readFileSync(new URL('../astro.config.mjs', import.meta.url), 'utf8');
   assert.match(config, /from '\.\/src\/lib\/theme\.ts'/);

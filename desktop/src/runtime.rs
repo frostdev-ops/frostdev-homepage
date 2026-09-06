@@ -210,6 +210,9 @@ async fn desktop_request(
                 window
                     .set_cookie(cookie)
                     .map_err(|_| "Could not sign in to the desktop window")?;
+                let device = value["device"].as_str().ok_or("Missing paired device")?;
+                crate::tunnel::start(app, url.clone(), session.to_string(), device.to_string())
+                    .await?;
                 window
                     .navigate(url)
                     .map_err(|_| "Could not open the server dashboard")?;

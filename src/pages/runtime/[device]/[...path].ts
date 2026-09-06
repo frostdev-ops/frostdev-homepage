@@ -3,10 +3,11 @@ import { relayRequest } from "../../../lib/dev/devices.ts";
 import { DevError } from "../../../lib/dev/runtime.ts";
 export const ALL: APIRoute = async ({ params, locals, request, url }) => {
   try {
+    if (!locals.user) throw new DevError("Sign in required.", 401);
     return await relayRequest(
-      locals.user!.userId,
+      locals.user.userId,
       params.device ?? "",
-      "/" + (params.path ?? "") + url.search,
+      `/${params.path ?? ""}${url.search}`,
       request,
     );
   } catch (e) {

@@ -41,6 +41,7 @@ const FONT_FACES = Object.entries(FONTS).flatMap(([id, f]) => {
 
 export default defineConfig({
   output: 'server',
+  compressHTML: true,
   adapter: node({ mode: 'standalone' }),
   integrations: [
     {
@@ -61,10 +62,7 @@ export default defineConfig({
       },
     },
   ],
-  // Still `experimental` on Astro 5 — a top-level `fonts` key is an Astro 6
-  // thing and is silently IGNORED here, which looks exactly like a build that
-  // works and a font that never downloads.
-  experimental: { fonts: FONT_FACES },
+  fonts: FONT_FACES,
   // Astro's CSRF check compares Origin with the request host, which behind a
   // reverse proxy is the proxy's — src/lib/csrf.ts does the same check against
   // PUBLIC_BASE_URL at runtime instead (middleware), so a build is not tied to
@@ -74,5 +72,17 @@ export default defineConfig({
     plugins: [/** @type {any} */ (tailwindcss())],
     // better-sqlite3 is a native module — never bundle it.
     ssr: { external: ['better-sqlite3'] },
+    build: {
+      rollupOptions: {
+        output: {
+          // Three already separates its core from the WebGL renderer. Preserve
+          // that boundary so lazy scene loads share two cacheable chunks.
+          manualChunks(id) {
+            if (id.endsWith('/three/build/three.core.js')) return 'three-core';
+            if (id.endsWith('/three/build/three.module.js')) return 'three-renderer';
+          },
+        },
+      },
+    },
   },
 });

@@ -33,9 +33,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22.22.0
           cache: npm
@@ -43,6 +43,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          components: rustfmt, clippy
           targets: ${{ startsWith(matrix.platform, 'macos-') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - uses: swatinem/rust-cache@v2
@@ -62,10 +63,32 @@ jobs:
       - name: Bundle standalone runtime
         run: node desktop/prebuild.mjs
 
+      - name: Desktop lint and native tests
+        run: npm run desktop:check
+
       - name: Runtime validation
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/desktop/runtime/browsers
         run: npm run typecheck && npm test && node tests/standalone-smoke.mjs
+
+      - name: Sign nested macOS runtime code
+        if: startsWith(matrix.platform, 'macos-')
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          signing_dir=$(mktemp -d)
+          export RIMEWARD_SIGNING_KEYCHAIN="$signing_dir/runtime.keychain-db"
+          signing_password=$(openssl rand -hex 24)
+          trap 'security delete-keychain "$RIMEWARD_SIGNING_KEYCHAIN" >/dev/null 2>&1 || true; rm -rf "$signing_dir"' EXIT
+          printf '%s' "$APPLE_CERTIFICATE" | base64 -d > "$signing_dir/certificate.p12"
+          security create-keychain -p "$signing_password" "$RIMEWARD_SIGNING_KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$RIMEWARD_SIGNING_KEYCHAIN"
+          security unlock-keychain -p "$signing_password" "$RIMEWARD_SIGNING_KEYCHAIN"
+          security import "$signing_dir/certificate.p12" -k "$RIMEWARD_SIGNING_KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$signing_password" "$RIMEWARD_SIGNING_KEYCHAIN" >/dev/null
+          node desktop/sign-runtime.mjs
 
       - name: App Store Connect key
         if: startsWith(matrix.platform, 'macos-')
@@ -73,7 +96,7 @@ jobs:
         env:
           APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY_B64 }}
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -85,9 +108,23 @@ jobs:
         with:
           projectPath: desktop
           tauriScript: cargo tauri
-          tagName: ${{ github.ref_name }}
-          releaseName: Rimeward ${{ github.ref_name }}
+          tagName: desktop-v__VERSION__
+          releaseName: Rimeward desktop-v__VERSION__
           releaseBody: Download the build for your platform below.
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Publish completed desktop release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(node -p "'desktop-v' + require('./desktop/tauri.conf.json').version")
+          gh release edit "$tag" --draft=false

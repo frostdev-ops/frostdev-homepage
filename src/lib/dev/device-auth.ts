@@ -50,7 +50,7 @@ export function beginDeviceAuth(
     throw new DevError("Too many connection requests. Try again shortly.", 429);
   const deviceCode = crypto.randomBytes(32).toString("base64url");
   const raw = crypto.randomBytes(4).toString("hex").toUpperCase(),
-    code = raw.slice(0, 4) + "-" + raw.slice(4);
+    code = `${raw.slice(0, 4)}-${raw.slice(4)}`;
   db.prepare(
     "INSERT INTO device_authorizations(device_hash,user_code,name,platform,protocol,expires_at) VALUES(?,?,?,?,?,?)",
   ).run(
@@ -65,7 +65,7 @@ export function beginDeviceAuth(
     device_code: deviceCode,
     user_code: code,
     verification_uri: "/desktop/connect",
-    verification_uri_complete: "/desktop/connect?code=" + code,
+    verification_uri_complete: `/desktop/connect?code=${code}`,
     expires_in: 600,
     interval: 3,
   };

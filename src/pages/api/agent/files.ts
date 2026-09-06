@@ -1,5 +1,4 @@
 import type { APIRoute } from 'astro';
-import { agentWardConfig } from '../../../lib/agent/core.ts';
 import { agentConfigured } from '../../../lib/agent/provider.ts';
 import { activeConversation } from '../../../lib/agent/conversations.ts';
 import { storeAttachment } from '../../../lib/agent/attachments.ts';
@@ -23,6 +22,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
   const form = await request.formData().catch(() => null);
   if (!form) return Response.json({ error: 'bad form' }, { status: 400 });
+  const { agentWardConfig } = await import('../../../lib/agent/core.ts');
   const cfg = agentWardConfig(userId, String(form.get('ward') ?? ''));
   if (!cfg) return Response.json({ error: 'not an agent ward' }, { status: 400 });
   if (!agentConfigured(userId, cfg.provider)) return Response.json({ error: 'not-configured' }, { status: 503 });

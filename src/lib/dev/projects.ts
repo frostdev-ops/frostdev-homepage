@@ -20,7 +20,7 @@ const MAX_FILE = 5 * 1024 * 1024;
 const hash = (b: Buffer) => crypto.createHash("sha256").update(b).digest("hex");
 const inside = (root: string, file: string) =>
   file === root ||
-  (!path.relative(root, file).startsWith(".." + path.sep) &&
+  (!path.relative(root, file).startsWith(`..${path.sep}`) &&
     path.relative(root, file) !== ".." &&
     !path.isAbsolute(path.relative(root, file)));
 export function projectOf(user: number, id: string): Project {
@@ -47,7 +47,8 @@ export function createProject(
   if (
     !name ||
     name.length > 100 ||
-    /[\x00-\x1f<>:"/\\|?*]/.test(name) ||
+    /[<>:"/\\|?*]/.test(name) ||
+    [...name].some((character) => character.charCodeAt(0) < 32) ||
     /[. ]$/.test(name) ||
     name === "." ||
     name === ".."
@@ -197,7 +198,7 @@ export function renameFile(
   if (
     !link &&
     dirty.some(
-      (b) => b.path === sourceKey || b.path.startsWith(sourceKey + "/"),
+      (b) => b.path === sourceKey || b.path.startsWith(`${sourceKey}/`),
     )
   )
     throw new DevError("Save open changes before renaming.", 409);
@@ -208,7 +209,7 @@ export function renameFile(
   for (const row of rows)
     if (
       !link &&
-      (row.path === sourceKey || row.path.startsWith(sourceKey + "/"))
+      (row.path === sourceKey || row.path.startsWith(`${sourceKey}/`))
     )
       workDb()
         .prepare("DELETE FROM buffers WHERE user_id=? AND project=? AND path=?")
@@ -227,7 +228,8 @@ export async function searchFiles(
   let visited = 0;
   // ponytail: bounded project scan; use a bundled search index if large-repo latency matters.
   while (pending.length && visited < 10_000 && matches.length < 200) {
-    const dir = pending.pop()!;
+    const dir = pending.pop();
+    if (dir === undefined) break;
     const real = projectPath(user, project, dir);
     if (seen.has(real)) continue;
     seen.add(real);
@@ -244,13 +246,11 @@ export async function searchFiles(
       const d = decode(fs.readFileSync(projectPath(user, project, e.path)));
       if (d.readonly) continue;
       const lines = d.text.split("\n");
-      for (let i = 0; i < lines.length && matches.length < 200; i++)
-        if (lines[i]!.toLowerCase().includes(query.toLowerCase()))
-          matches.push({
-            path: e.path,
-            line: i + 1,
-            text: lines[i]!.slice(0, 300),
-          });
+      for (const [i, line] of lines.entries()) {
+        if (matches.length >= 200) break;
+        if (line.toLowerCase().includes(query.toLowerCase()))
+          matches.push({ path: e.path, line: i + 1, text: line.slice(0, 300) });
+      }
     }
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
@@ -508,7 +508,7 @@ export function editBuffer(
           "INSERT INTO buffer_copies(user_id,project,path,text) VALUES(?,?,?,?)",
         ).run(user, project, file, decode(fs.readFileSync(target)).text);
       const bytes = encode(row.text, row.encoding, row.newline);
-      const tmp = target + ".rimeward-" + crypto.randomBytes(6).toString("hex");
+      const tmp = `${target}.rimeward-${crypto.randomBytes(6).toString("hex")}`;
       try {
         fs.writeFileSync(tmp, bytes, {
           flag: "wx",
@@ -532,7 +532,7 @@ export function bufferCopies(user: number, project: string, file: string) {
     .prepare(
       "SELECT id,text,saved_at FROM buffer_copies WHERE user_id=? AND project=? AND path=? ORDER BY id DESC LIMIT 20",
     )
-    .all(user, project, file);
+    .all(user, project, file) as { id: number; text: string; saved_at: string }[];
 }
 export function keepBufferCopy(user: number, project: string, file: string, text: unknown) {
   const current = readBuffer(user, project, file);
@@ -548,7 +548,6 @@ export async function git(
   project: string,
   args: string[],
 ): Promise<string> {
-  const p = projectOf(user, project);
   const { stdout } = await exec("git", args, {
     cwd: projectPath(user, project),
     timeout: 30_000,

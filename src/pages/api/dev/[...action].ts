@@ -67,8 +67,9 @@ const json = (data: unknown, status = 200) =>
   });
 export const ALL: APIRoute = async ({ params, request, locals, url }) => {
   try {
+    if (!locals.user) throw new DevError("Sign in required.", 401);
     requireDesktop();
-    const user = locals.user!.userId,
+    const user = locals.user.userId,
       action = params.action ?? "";
     const body =
       request.method === "GET"
@@ -196,7 +197,7 @@ export const ALL: APIRoute = async ({ params, request, locals, url }) => {
           : addProject(user, String(body.root ?? ""));
         const existing = getPages(user).find((page) => page.project === p.id && getDashboard(user).some((w) => w.type === "editor" && w.page === page.id));
         if (existing) return json({ page: existing.id });
-        const page = "p" + crypto.randomBytes(4).toString("hex");
+        const page = `p${crypto.randomBytes(4).toString("hex")}`;
         const pages = validatePages([
           ...getPages(user),
           { id: page, title: p.name, project: p.id },
@@ -210,7 +211,7 @@ export const ALL: APIRoute = async ({ params, request, locals, url }) => {
           [
             ...getDashboard(user),
             ...types.map((type) => ({
-              i: "w" + crypto.randomBytes(4).toString("hex"),
+              i: `w${crypto.randomBytes(4).toString("hex")}`,
               type,
               page,
               size: type === "editor" ? "6x4" : "3x2",

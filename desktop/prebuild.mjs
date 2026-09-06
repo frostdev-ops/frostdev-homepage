@@ -36,11 +36,11 @@ try {
       if (!r.ok) throw new Error("Node download failed");
       return r.arrayBuffer();
     }),
-    fetch(origin + "SHASUMS256.txt").then((r) => r.text()),
+    fetch(`${origin}SHASUMS256.txt`).then((r) => r.text()),
   ]);
   const expected = checks
     .split("\n")
-    .find((line) => line.endsWith("  " + name))
+    .find((line) => line.endsWith(`  ${name}`))
     ?.split(" ")[0];
   if (
     !expected ||
@@ -103,6 +103,10 @@ try {
   for (const dir of fs.readdirSync(
     path.join(app, "node_modules/node-pty/prebuilds"),
   )) {
+    if (dir !== `${platform}-${arch}`) {
+      fs.rmSync(path.join(app, "node_modules/node-pty/prebuilds", dir), { recursive: true, force: true });
+      continue;
+    }
     const helper = path.join(
       app,
       "node_modules/node-pty/prebuilds",
@@ -110,6 +114,10 @@ try {
       "spawn-helper",
     );
     if (fs.existsSync(helper)) fs.chmodSync(helper, 0o755);
+  }
+  // Native build intermediates are not runtime code and cannot be notarized.
+  for (const entry of fs.readdirSync(path.join(app, "node_modules"), { recursive: true, withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith(".o")) fs.unlinkSync(path.join(entry.parentPath, entry.name));
   }
   const browsers = path.join(runtime, "browsers");
   run(
@@ -136,13 +144,13 @@ try {
     node,
     path.join(
       binaries,
-      "rimeward-node-" + target + (platform === "win32" ? ".exe" : ""),
+      `rimeward-node-${target}${platform === "win32" ? ".exe" : ""}`,
     ),
   );
   fs.chmodSync(
     path.join(
       binaries,
-      "rimeward-node-" + target + (platform === "win32" ? ".exe" : ""),
+      `rimeward-node-${target}${platform === "win32" ? ".exe" : ""}`,
     ),
     0o755,
   );

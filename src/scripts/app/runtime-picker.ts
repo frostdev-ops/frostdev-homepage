@@ -9,10 +9,10 @@ if (host) {
   const picker = el("select", "input text-xs");
   picker.setAttribute("aria-label", "Environment");
   const serverFetch =
-    (window as any).rimewardServerFetch ?? window.fetch.bind(window);
+    (window as Window & { rimewardServerFetch?: typeof fetch }).rimewardServerFetch ?? window.fetch.bind(window);
   if (base) {
     picker.add(new Option("Server", "/dash"));
-    picker.add(new Option("Connected desktop", base + "/dash", true, true));
+    picker.add(new Option("Connected desktop", `${base}/dash`, true, true));
   } else
     picker.add(
       new Option(
@@ -29,12 +29,12 @@ if (host) {
       : fetch("/api/dev/pairings", { cache: "no-store" })
   )
     .then((r: Response) => r.json())
-    .then((list: any[]) => {
+    .then((list: { id: string; server: string; name: string; online: boolean }[]) => {
       if (!Array.isArray(list)) return;
       for (const d of list) {
         const url =
-          native && !base ? "server:" + d.id : "/runtime/" + d.id + "/dash";
-        if (base === "/runtime/" + d.id) continue;
+          native && !base ? `server:${d.id}` : `/runtime/${d.id}/dash`;
+        if (base === `/runtime/${d.id}`) continue;
         const option = new Option(
           (native && !base ? new URL(d.server).host : d.name) +
             (!native && !d.online ? " · offline" : ""),

@@ -53,6 +53,7 @@ pub fn run() {
             app.manage(shared.clone());
             app.manage(changes);
             tauri::async_runtime::spawn(chromium::reap_loop(shared));
+            app.manage(tunnel::Tunnel::default());
             app.manage(runtime::Runtime(std::sync::Arc::new(
                 tokio::sync::Mutex::new(None),
             )));
@@ -98,6 +99,7 @@ pub fn run() {
             {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {
+                    tunnel::stop(&app).await;
                     runtime::shutdown(&app).await;
                     let shared = app.state::<chromium::Shared>().inner().clone();
                     chromium::shutdown(&shared).await;

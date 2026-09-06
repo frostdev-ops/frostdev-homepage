@@ -1,5 +1,5 @@
 //! The tunnel's app side. One websocket to `<origin>/api/tunnel`,
-//! authenticated with the session cookie read out of the webview; the
+//! authenticated with the approved device session; the
 //! server opens streams over it and this side dials them at home.
 //! Frames: [u32 BE stream id][u8 op][payload] — src/lib/tunnel.ts is the
 //! other half, byte for byte.
@@ -13,7 +13,8 @@ use futures_util::{SinkExt, StreamExt};
 use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{lookup_host, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
+use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -28,11 +29,6 @@ pub const CLOSE: u8 = 4;
 pub const STATUS: u8 = 5;
 pub const HELLO: u8 = 6;
 
-/// The session cookie's name — keep in step with SESSION_COOKIES in the
-/// server's src/lib/auth.ts. A session opened before the server's v0.16.0
-/// still carries the old name; the server accepts both.
-const COOKIE: &str = "rimeward_session";
-const LEGACY_COOKIE: &str = "frost_session";
 const CHUNK: usize = 64 * 1024;
 const CONNECT_MS: u64 = 20_000;
 
@@ -50,7 +46,11 @@ pub fn parse(buf: &[u8]) -> Option<(u32, u8, &[u8])> {
     if buf.len() < 5 {
         return None;
     }
-    Some((u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]), buf[4], &buf[5..]))
+    Some((
+        u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]),
+        buf[4],
+        &buf[5..],
+    ))
 }
 
 /// The server's own table (src/lib/net-guard.ts), so what home resolves a
@@ -71,7 +71,10 @@ pub fn is_public(ip: IpAddr) -> bool {
             if let Some(m) = v6.to_ipv4_mapped() {
                 return is_public(IpAddr::V4(m));
             }
-            !(v6.is_loopback() || v6.is_unspecified() || v6.is_unique_local() || v6.is_unicast_link_local())
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local())
         }
     }
 }
@@ -89,22 +92,49 @@ enum Fail {
     Other(String),
 }
 
-/// Forever: find the window, read the cookie, hold a session, back off, again.
-pub async fn run(app: AppHandle) {
+#[derive(Default)]
+pub struct Tunnel(Mutex<Option<JoinHandle<()>>>);
+
+/// Only the native, approved server handoff may start a legacy home route.
+pub async fn start(
+    app: &AppHandle,
+    page: url::Url,
+    session: String,
+    device: String,
+) -> Result<(), String> {
+    let origin = page.origin().ascii_serialization();
+    app.add_capability(
+        tauri::ipc::CapabilityBuilder::new(format!("browser-{origin}"))
+            .window("main")
+            .local(false)
+            .remote(format!("{origin}/*"))
+            .permission("allow-ward-browser")
+            .permission("allow-ward-touch"),
+    )
+    .map_err(|_| "Could not enable this server's browser wards")?;
+    stop(app).await;
+    let shared = app.state::<Shared>().inner().clone();
+    chromium::shutdown(&shared).await;
+    chromium::set_server(&shared, origin, device).await;
+    *app.state::<Tunnel>().0.lock().await = Some(tokio::spawn(run(
+        app.clone(),
+        page,
+        format!("rimeward_session={session}"),
+    )));
+    Ok(())
+}
+
+pub async fn stop(app: &AppHandle) {
+    if let Some(task) = app.state::<Tunnel>().0.lock().await.take() {
+        task.abort();
+        let _ = task.await;
+    }
+}
+
+/// Keep the selected server connected even when the local dashboard is shown.
+async fn run(app: AppHandle, page: url::Url, cookie: String) {
     let mut backoff = 5;
     loop {
-        let (page, cookie) = match credentials(&app) {
-            Ok(c) => c,
-            Err(Wait::Window) => {
-                sleep(Duration::from_secs(2)).await;
-                continue;
-            }
-            Err(Wait::Cookie) => {
-                crate::set_status(&app, "Home route: sign in to connect");
-                sleep(Duration::from_secs(10)).await;
-                continue;
-            }
-        };
         let wait = match session(&app, &page, &cookie).await {
             Ok(()) => {
                 backoff = 5;
@@ -135,33 +165,13 @@ pub async fn run(app: AppHandle) {
     }
 }
 
-enum Wait {
-    Window,
-    Cookie,
-}
-
-/// The page's URL is the one source of truth (tauri.dev.conf.json only swaps
-/// the window URL, and everything else follows), and its cookie jar holds
-/// the session — HttpOnly included, which is the point of asking the webview.
-fn credentials(app: &AppHandle) -> Result<(url::Url, String), Wait> {
-    let w = app.get_webview_window("main").ok_or(Wait::Window)?;
-    let url = w.url().map_err(|_| Wait::Window)?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err(Wait::Window);
-    }
-    let cookies = w.cookies_for_url(url.clone()).map_err(|_| Wait::Cookie)?;
-    // The whole `name=value` pair, under whichever name the jar holds it.
-    let cookie = cookies
-        .iter()
-        .find(|c| c.name() == COOKIE || c.name() == LEGACY_COOKIE)
-        .map(|c| format!("{}={}", c.name(), c.value()))
-        .ok_or(Wait::Cookie)?;
-    Ok((url, cookie))
-}
-
 async fn session(app: &AppHandle, page: &url::Url, cookie: &str) -> Result<(), Fail> {
     let mut ws_url = page.clone();
-    let _ = ws_url.set_scheme(if page.scheme() == "https" { "wss" } else { "ws" });
+    let _ = ws_url.set_scheme(if page.scheme() == "https" {
+        "wss"
+    } else {
+        "ws"
+    });
     ws_url.set_path("/api/tunnel");
     ws_url.set_query(None);
     ws_url.set_fragment(None);
@@ -171,7 +181,9 @@ async fn session(app: &AppHandle, page: &url::Url, cookie: &str) -> Result<(), F
         .map_err(|e| Fail::Other(e.to_string()))?;
     req.headers_mut().insert(
         "cookie",
-        cookie.parse().map_err(|_| Fail::Other("bad cookie".into()))?,
+        cookie
+            .parse()
+            .map_err(|_| Fail::Other("bad cookie".into()))?,
     );
     let (ws, _) = connect_async(req).await.map_err(|e| match e {
         WsError::Http(resp) => Fail::Http(resp.status().as_u16()),
@@ -184,19 +196,25 @@ async fn session(app: &AppHandle, page: &url::Url, cookie: &str) -> Result<(), F
     // deadlocking the writer, which is why the halves are split.
     let (sink, stream) = ws.split();
     let (tx, rx) = mpsc::channel::<Vec<u8>>(32);
-    let writer = tokio::spawn(write_loop(sink, rx));
+    // Dropping the session (including server switches and Quit) cancels its tasks.
+    let mut tasks = JoinSet::new();
+    tasks.spawn(write_loop(sink, rx));
     let shared = app.state::<Shared>().inner().clone();
-    let status = tokio::spawn(status_loop(shared.clone(), app.state::<Changes>().0.clone(), tx.clone()));
-    let result = read_loop(stream, &tx, &shared).await;
-    status.abort();
-    drop(tx);
-    let _ = writer.await;
-    result
+    tasks.spawn(status_loop(
+        shared.clone(),
+        app.state::<Changes>().0.clone(),
+        tx.clone(),
+    ));
+    read_loop(stream, &tx, &shared).await
 }
 
 /// STATUS now, and again on every Chromium state change (download progress,
 /// ready, failed) — what the ward shows while it waits.
-async fn status_loop(shared: Shared, mut changes: tokio::sync::watch::Receiver<u64>, tx: mpsc::Sender<Vec<u8>>) {
+async fn status_loop(
+    shared: Shared,
+    mut changes: tokio::sync::watch::Receiver<u64>,
+    tx: mpsc::Sender<Vec<u8>>,
+) {
     loop {
         let json = shared.lock().await.status_json(platform());
         if tx.send(frame(0, STATUS, json.as_bytes())).await.is_err() {
@@ -234,52 +252,78 @@ async fn write_loop(mut sink: SplitSink<Ws, Message>, mut rx: mpsc::Receiver<Vec
     }
 }
 
-async fn read_loop(mut stream: SplitStream<Ws>, tx: &mpsc::Sender<Vec<u8>>, shared: &Shared) -> Result<(), Fail> {
+async fn read_loop(
+    mut stream: SplitStream<Ws>,
+    tx: &mpsc::Sender<Vec<u8>>,
+    shared: &Shared,
+) -> Result<(), Fail> {
     let mut streams: HashMap<u32, mpsc::Sender<Vec<u8>>> = HashMap::new();
-    while let Some(msg) = stream.next().await {
-        match msg {
-            Ok(Message::Binary(b)) => {
-                let Some((id, op, payload)) = parse(&b) else { continue };
-                match op {
-                    OPEN => {
-                        streams.retain(|_, s| !s.is_closed());
-                        let (stx, srx) = mpsc::channel::<Vec<u8>>(32);
-                        streams.insert(id, stx);
-                        tokio::spawn(stream_task(id, String::from_utf8_lossy(payload).into_owned(), srx, tx.clone(), shared.clone()));
-                    }
-                    DATA => {
-                        if let Some(s) = streams.get(&id) {
-                            if s.send(payload.to_vec()).await.is_err() {
-                                streams.remove(&id);
+    let mut tasks = JoinSet::new();
+    let result = async {
+        while let Some(msg) = stream.next().await {
+            match msg {
+                Ok(Message::Binary(b)) => {
+                    let Some((id, op, payload)) = parse(&b) else {
+                        continue;
+                    };
+                    match op {
+                        OPEN => {
+                            streams.retain(|_, s| !s.is_closed());
+                            let (stx, srx) = mpsc::channel::<Vec<u8>>(32);
+                            streams.insert(id, stx);
+                            while tasks.try_join_next().is_some() {}
+                            tasks.spawn(stream_task(
+                                id,
+                                String::from_utf8_lossy(payload).into_owned(),
+                                srx,
+                                tx.clone(),
+                                shared.clone(),
+                            ));
+                        }
+                        DATA => {
+                            if let Some(s) = streams.get(&id) {
+                                if s.send(payload.to_vec()).await.is_err() {
+                                    streams.remove(&id);
+                                }
                             }
                         }
-                    }
-                    // Dropping the sender is the close: the task's recv ends, the socket drops.
-                    CLOSE => {
-                        streams.remove(&id);
-                    }
-                    HELLO => {
-                        #[derive(serde::Deserialize)]
-                        struct Hello {
-                            chromium: chromium::Spec,
+                        // Dropping the sender is the close: the task's recv ends, the socket drops.
+                        CLOSE => {
+                            streams.remove(&id);
                         }
-                        if let Ok(h) = serde_json::from_slice::<Hello>(payload) {
-                            chromium::set_spec(shared, h.chromium).await;
+                        HELLO => {
+                            #[derive(serde::Deserialize)]
+                            struct Hello {
+                                chromium: chromium::Spec,
+                            }
+                            if let Ok(h) = serde_json::from_slice::<Hello>(payload) {
+                                chromium::set_spec(shared, h.chromium).await;
+                            }
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
+                Ok(Message::Close(_)) => return Ok(()),
+                Ok(_) => {}
+                Err(e) => return Err(Fail::Other(e.to_string())),
             }
-            Ok(Message::Close(_)) => return Ok(()),
-            Ok(_) => {}
-            Err(e) => return Err(Fail::Other(e.to_string())),
         }
+        Ok(())
     }
-    Ok(())
+    .await;
+    tasks.shutdown().await;
+    chromium::disconnected(shared).await;
+    result
 }
 
 /// One TCP connection at home for one stream id, until either end hangs up.
-async fn stream_task(id: u32, target: String, mut rx: mpsc::Receiver<Vec<u8>>, tx: mpsc::Sender<Vec<u8>>, shared: Shared) {
+async fn stream_task(
+    id: u32,
+    target: String,
+    mut rx: mpsc::Receiver<Vec<u8>>,
+    tx: mpsc::Sender<Vec<u8>>,
+    shared: Shared,
+) {
     let ward = target.strip_prefix("cdp:").map(str::to_string);
     let (tcp, opened) = match dial(&target, &shared).await {
         Ok(t) => t,
@@ -302,7 +346,7 @@ async fn stream_task(id: u32, target: String, mut rx: mpsc::Receiver<Vec<u8>>, t
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     if tx.send(frame(id, DATA, &buf[..n])).await.is_err() {
-                        return;
+                        break;
                     }
                 }
             },
@@ -312,7 +356,7 @@ async fn stream_task(id: u32, target: String, mut rx: mpsc::Receiver<Vec<u8>>, t
                         break;
                     }
                 }
-                None => return,
+                None => break,
             }
         }
     }
@@ -336,7 +380,9 @@ async fn dial(target: &str, shared: &Shared) -> Result<(TcpStream, String), Stri
             }
         };
     }
-    let (host, port) = target.rsplit_once(':').ok_or_else(|| "bad target".to_string())?;
+    let (host, port) = target
+        .rsplit_once(':')
+        .ok_or_else(|| "bad target".to_string())?;
     let host = host.trim_matches(|c| c == '[' || c == ']');
     let port: u16 = port.parse().map_err(|_| "bad port".to_string())?;
     if host.is_empty() || port == 0 {
@@ -351,13 +397,19 @@ async fn dial(target: &str, shared: &Shared) -> Result<(TcpStream, String), Stri
     }
     for a in &addrs {
         if !is_public(a.ip()) {
-            return Err(format!("refused: {host} resolves to the private address {}", a.ip()));
+            return Err(format!(
+                "refused: {host} resolves to the private address {}",
+                a.ip()
+            ));
         }
     }
-    let tcp = tokio::time::timeout(Duration::from_millis(CONNECT_MS), TcpStream::connect(&addrs[..]))
-        .await
-        .map_err(|_| format!("{host}:{port} timed out"))?
-        .map_err(|e| format!("{host}:{port}: {e}"))?;
+    let tcp = tokio::time::timeout(
+        Duration::from_millis(CONNECT_MS),
+        TcpStream::connect(&addrs[..]),
+    )
+    .await
+    .map_err(|_| format!("{host}:{port} timed out"))?
+    .map_err(|e| format!("{host}:{port}: {e}"))?;
     Ok((tcp, String::new()))
 }
 
@@ -378,12 +430,32 @@ mod tests {
     #[test]
     fn private_ranges_are_not_public() {
         for s in [
-            "0.0.0.0", "10.1.2.3", "127.0.0.1", "169.254.169.254", "172.16.0.1", "172.31.255.255", "192.168.1.1",
-            "100.64.0.1", "100.127.255.255", "::1", "::", "fe80::1", "fc00::1", "fd12::1", "::ffff:192.168.0.1",
+            "0.0.0.0",
+            "10.1.2.3",
+            "127.0.0.1",
+            "169.254.169.254",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.1.1",
+            "100.64.0.1",
+            "100.127.255.255",
+            "::1",
+            "::",
+            "fe80::1",
+            "fc00::1",
+            "fd12::1",
+            "::ffff:192.168.0.1",
         ] {
             assert!(!is_public(s.parse().unwrap()), "{s}");
         }
-        for s in ["1.1.1.1", "8.8.8.8", "172.32.0.1", "100.128.0.1", "2606:4700::1111", "::ffff:8.8.8.8"] {
+        for s in [
+            "1.1.1.1",
+            "8.8.8.8",
+            "172.32.0.1",
+            "100.128.0.1",
+            "2606:4700::1111",
+            "::ffff:8.8.8.8",
+        ] {
             assert!(is_public(s.parse().unwrap()), "{s}");
         }
     }

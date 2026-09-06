@@ -113,7 +113,7 @@ export class LocalDriver {
       else p.resolve(msg.result);
       return;
     }
-    const params = (msg.params ?? {}) as Record<string, any>;
+    const params = (msg.params ?? {}) as Record<string, unknown>;
     switch (msg.method) {
       case 'Target.targetCreated':
       case 'Target.targetInfoChanged': {
@@ -190,7 +190,8 @@ export class LocalDriver {
     await this.call('Target.activateTarget', { targetId: id }).catch(() => {});
     await this.applyViewport();
     await this.startCast();
-    const t = this.targets.get(id)!;
+    const t = this.targets.get(id);
+    if (!t || this.active !== id) return;
     this.emit({ type: 'nav', url: t.url, title: t.title });
     this.pushTabs();
   }
@@ -220,16 +221,17 @@ export class LocalDriver {
   }
 
   private mouse(type: 'mouseMoved' | 'mousePressed' | 'mouseReleased', x: number, y: number, button?: number, clicks?: number): Promise<unknown> {
+    const i = num(button, 2), name = BUTTONS[i], bit = BUTTON_BITS[i];
+    if (!name || bit === undefined) return Promise.resolve();
     if (type !== 'mouseMoved') {
-      const i = num(button, 2);
-      this.button = type === 'mousePressed' ? BUTTONS[i]! : 'none';
-      this.buttons = type === 'mousePressed' ? this.buttons | BUTTON_BITS[i]! : this.buttons & ~BUTTON_BITS[i]!;
+      this.button = type === 'mousePressed' ? name : 'none';
+      this.buttons = type === 'mousePressed' ? this.buttons | bit : this.buttons & ~bit;
     }
     return this.page('Input.dispatchMouseEvent', {
       type,
       x: num(x, this.viewport.width),
       y: num(y, this.viewport.height),
-      button: type === 'mouseMoved' ? this.button : BUTTONS[num(button, 2)],
+      button: type === 'mouseMoved' ? this.button : name,
       buttons: this.buttons,
       clickCount: Math.max(1, num(clicks, 3)),
       modifiers: this.mods,

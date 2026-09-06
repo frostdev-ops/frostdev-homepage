@@ -26,7 +26,7 @@ export const ALL: APIRoute = async ({
     const body = request.method === "GET" ? {} : await request.json();
     let value: unknown;
     if (request.method === "POST" && action === "authorize") {
-      limitDeviceAuth("start:" + clientAddress, 10);
+      limitDeviceAuth(`start:${clientAddress}`, 10);
       value = beginDeviceAuth(body.name, body.platform, body.protocol);
     } else if (request.method === "POST" && action === "token") {
       value = pollDeviceAuth(body.device_code);

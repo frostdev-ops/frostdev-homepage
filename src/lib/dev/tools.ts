@@ -24,7 +24,7 @@ const schema = (
   properties: Record<string, unknown>,
   required: string[] = [],
 ) => ({ type: "object", properties, required, additionalProperties: false });
-const owner = (ctx: ToolCtx) => "agent:" + ctx.ward;
+const owner = (ctx: ToolCtx) => `agent:${ctx.ward}`;
 const wrap = (
   kind: ToolDef["kind"],
   description: string,

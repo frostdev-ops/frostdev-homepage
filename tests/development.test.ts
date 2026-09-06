@@ -171,7 +171,7 @@ test("terminal permissions change live, denied input cannot claim ownership, and
 
 test("streamed terminal output is ordered, bounded and drains before exit; restart keeps settings without replaying tasks", async () => {
   const p = addProject(1, root);
-  const s = await startSession(1, { project: p.id, shell: process.platform === "win32" ? undefined : "/bin/sh", agentInput: true, task: "do not replay", cols: 100, rows: 30 });
+  const s = await startSession(1, { project: p.id, shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh", agentInput: true, task: "do not replay", cols: 100, rows: 30 });
   let bytes = 0, sequence = 0;
   const stop = subscribeDev(1, event => {
     if (event.type !== "output" || event.id !== s.id) return;

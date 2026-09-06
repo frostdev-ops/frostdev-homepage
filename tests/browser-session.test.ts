@@ -28,7 +28,7 @@ test('orphan cleanup terminates only processes using the selected profile root',
   try {
     await Promise.all(children.map((child) => once(child, 'spawn')));
     const stopped = once(children[0]!, 'exit', { signal: AbortSignal.timeout(15_000) });
-    killByProfile(root + path.sep);
+    assert.equal(killByProfile(root + path.sep), 1);
     await stopped;
     assert.equal(children[1]!.exitCode, null);
     assert.equal(children[1]!.signalCode, null);

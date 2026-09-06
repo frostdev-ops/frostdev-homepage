@@ -469,24 +469,28 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** SIGKILL every chromium whose profile sits under `prefix`. At boot that is
  *  everything a SIGKILLed predecessor (pm2 max_memory_restart) left behind. */
-export function killByProfile(prefix: string): void {
+export function killByProfile(prefix: string): number {
   let out = '';
   try {
     out = process.platform === 'win32'
-      ? execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-          '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }',
+      ? execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
+          Buffer.from('[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }', 'utf16le').toString('base64'),
         ], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
       : execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8', timeout: 10_000 });
-  } catch {
-    return;
+  } catch (error) {
+    console.warn('[browser] Profile cleanup failed:', (error as NodeJS.ErrnoException).code ?? 'process query failed');
+    return 0;
   }
+  let killed = 0;
   for (const line of out.split('\n')) {
     const m = /^\s*(\d+)\s+(.*)$/.exec(line);
     if (!m || !m[2]!.includes(`--user-data-dir=${prefix}`)) continue;
     try {
       process.kill(Number(m[1]), 'SIGKILL');
+      killed++;
     } catch {}
   }
+  return killed;
 }
 
 function reap(): void {

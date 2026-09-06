@@ -51,13 +51,17 @@ links. Linux builds DEB and AppImage packages; RPM is excluded because its packa
 on the bundled runtime, even with Zstandard compression. `desktop/entitlements.plist`
 supplies the Node/Chromium JIT entitlements. Manual release dispatches must select the
 version's existing tag; every build verifies that tag against its checked-out commit.
+DMGs use Tauri's CI mode to avoid opening Finder during packaging; they retain the
+application and Applications link without customized icon positioning.
 
 Install-script permissions are pinned in `package.json` for native dependencies. The SDK's
 network-based model-type freshness check is disabled; models are discovered at runtime.
 The current `just-bash` dependency emits Node's experimental `stripTypeScriptTypes` notice
 when its JavaScript worker starts under Node 22. Its optional compression dependency also
 uses the deprecated `prebuild-install` package. Node 22 also marks the built-in mock timers
-used by Discord tests as experimental. These upstream/tooling notices are not suppressed.
+used by Discord tests as experimental. macOS 27 also reports deprecated `hdiutil` commands
+in Tauri's DMG packager; those commands still work. These upstream/tooling notices are not
+suppressed.
 
 After a web build, run `npm run test:ui` with the staged Chromium available. These checks
 exercise real editor/PTY behavior, shared-client control, recovery, and isolated HTTPS

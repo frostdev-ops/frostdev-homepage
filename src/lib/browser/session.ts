@@ -469,10 +469,14 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** SIGKILL every chromium whose profile sits under `prefix`. At boot that is
  *  everything a SIGKILLed predecessor (pm2 max_memory_restart) left behind. */
-function killByProfile(prefix: string): void {
+export function killByProfile(prefix: string): void {
   let out = '';
   try {
-    out = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' });
+    out = process.platform === 'win32'
+      ? execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+          '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }',
+        ], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
+      : execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8', timeout: 10_000 });
   } catch {
     return;
   }

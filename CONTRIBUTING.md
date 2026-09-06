@@ -29,7 +29,7 @@ routes, tables and CSS classes keep their engineering names (`WardInstance`, log
 - Nothing instance-specific in the tree: names, domains, addresses and the monitor list are
   settings, environment or `data/` (see `.env.example`, `src/lib/site.ts`, `src/lib/brand-files.ts`,
   the admin monitor registry).
-- `npm run lint:desktop`, `npm test`, `npm run typecheck`, and `npm run build` green; the Tests workflow runs these on every push. Desktop lint treats warnings as failures and covers the native launcher, runtime, APIs, editor/terminal UI, and development styles.
+- `npm run lint:desktop`, `npm test`, `npm run typecheck`, and `npm run build` green; the Tests workflow runs these on Linux and Windows on every push. Keep the test glob double-quoted so Windows runs the suite. Desktop lint treats warnings as failures and covers the native launcher, runtime, APIs, editor/terminal UI, and development styles.
 
 ## Desktop and remote workspaces
 

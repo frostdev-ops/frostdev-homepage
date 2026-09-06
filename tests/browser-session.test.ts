@@ -1,9 +1,14 @@
 import './_setup.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { chromium } from 'playwright-core';
 import { getDb } from '../src/lib/db.ts';
 import { saveDashboard } from '../src/lib/dashboard.ts';
-import { closeSession, open, peek, runCmds } from '../src/lib/browser/session.ts';
+import { closeSession, killByProfile, open, peek, runCmds } from '../src/lib/browser/session.ts';
 import { TOOLS } from '../src/lib/agent/tools.ts';
 
 // The one end-to-end check: a real headless Chromium through session.ts, the
@@ -15,6 +20,24 @@ function seedUser(email: string): number {
   return (getDb().prepare('SELECT id FROM users WHERE email = ?').get(email) as { id: number }).id;
 }
 
+test('orphan cleanup terminates only processes using the selected profile root', async () => {
+  const root = path.join(process.env.HOMEPAGE_DATA_DIR!, 'browser profiles');
+  const children = [root, `${root}-other`].map((dir) => spawn(process.execPath,
+    ['-e', 'setInterval(() => {}, 1000)', '--', `--user-data-dir=${path.join(dir, 'ward')}`],
+    { stdio: 'ignore' }));
+  try {
+    await Promise.all(children.map((child) => once(child, 'spawn')));
+    const stopped = once(children[0]!, 'exit', { signal: AbortSignal.timeout(15_000) });
+    killByProfile(root + path.sep);
+    await stopped;
+    assert.equal(children[1]!.exitCode, null);
+    assert.equal(children[1]!.signalCode, null);
+    process.kill(children[1]!.pid!, 0);
+  } finally {
+    for (const child of children) child.kill('SIGKILL');
+  }
+});
+
 test('one session, two drivers', async (t) => {
   const uid = seedUser('bw@test');
   saveDashboard(uid, [{ i: 'bw1', type: 'browser', size: '3x2', config: { backend: 'local' } }]);
@@ -22,6 +45,7 @@ test('one session, two drivers', async (t) => {
   try {
     s = await open(uid, 'bw1', { backend: 'local' });
   } catch (err) {
+    if (existsSync(process.env.BROWSER_EXECUTABLE ?? chromium.executablePath())) throw err;
     t.skip(`no chromium here: ${err instanceof Error ? err.message.split('\n')[0] : err}`);
     return;
   }

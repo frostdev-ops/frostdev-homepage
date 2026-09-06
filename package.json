@@ -24,7 +24,7 @@
     "test:ui": "node tests/editor-ui-smoke.mjs && node tests/terminal-ui-smoke.mjs && node tests/conversation-ui-smoke.mjs && node tests/remote-workspace-smoke.mjs",
     "test:standalone": "node tests/standalone-smoke.mjs",
     "goldens": "node ops/goldens.mjs",
-    "lint:desktop": "biome lint --error-on-warnings desktop/prebuild.mjs desktop/sign-runtime.mjs desktop-runtime.mjs public/runtime-bridge.js src/lib/dev src/pages/api/dev src/pages/api/devices src/pages/runtime src/scripts/app/desktop-setup.ts src/scripts/app/development.ts src/scripts/app/project-editor.ts src/scripts/app/runtime-picker.ts src/scripts/app/workspace-dialogs.ts desktop/frontend desktop/tauri.conf.json desktop/tauri.dev.conf.json desktop/capabilities bin/prepare-pty.mjs src/styles/development.css src/scripts/app/browser-cdp.ts",
+    "lint:desktop": "biome lint --error-on-warnings desktop/prebuild.mjs desktop/sign-runtime.mjs desktop-runtime.mjs public/runtime-bridge.js src/lib/dev src/pages/api/dev src/pages/api/devices src/pages/api/runtime.ts src/pages/runtime src/scripts/app/desktop-setup.ts src/scripts/app/development.ts src/scripts/app/project-editor.ts src/scripts/app/runtime-picker.ts src/scripts/app/workspace-dialogs.ts desktop/frontend desktop/tauri.conf.json desktop/tauri.dev.conf.json desktop/capabilities bin/prepare-pty.mjs src/styles/development.css src/scripts/app/browser-cdp.ts",
     "desktop:check": "npm run lint:desktop && cargo fmt --manifest-path desktop/Cargo.toml --check && cargo clippy --manifest-path desktop/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path desktop/Cargo.toml"
   },
   "dependencies": {

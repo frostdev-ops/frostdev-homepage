@@ -1,8 +1,11 @@
 import type { APIRoute } from "astro";
 import { isDesktop } from "../../lib/dev/runtime.ts";
 import { getDashboard, getPages } from "../../lib/dashboard.ts";
-export const GET: APIRoute = ({ locals }) =>
-  Response.json(
+export const GET: APIRoute = ({ locals }) => {
+  const user = locals.user;
+  if (!user)
+    return Response.json({ error: "Sign in required." }, { status: 401 });
+  return Response.json(
     {
       runtime: {
         id: isDesktop() ? "desktop" : "server",
@@ -17,9 +20,10 @@ export const GET: APIRoute = ({ locals }) =>
         },
       },
       selectedRuntime: isDesktop() ? "desktop" : "server",
-      pages: getPages(locals.user!.userId),
-      layout: getDashboard(locals.user!.userId),
-      theme: locals.user!.theme,
+      pages: getPages(user.userId),
+      layout: getDashboard(user.userId),
+      theme: user.theme,
     },
     { headers: { "cache-control": "no-store" } },
   );
+};

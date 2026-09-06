@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { createUser } from "../src/lib/users.ts";
 import { getDb } from "../src/lib/db.ts";
 import { getSession, afterLogin } from "../src/lib/auth.ts";
+import { GET as runtimeBootstrap } from "../src/pages/api/runtime.ts";
 import {
   beginDeviceAuth,
   approveDeviceAuth,
@@ -16,6 +17,12 @@ import {
   revoke,
   allowedRelayPath,
 } from "../src/lib/dev/devices.ts";
+
+test("runtime bootstrap requires an authenticated user", async () => {
+  const response = await runtimeBootstrap({ locals: {} } as Parameters<typeof runtimeBootstrap>[0]);
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "Sign in required." });
+});
 
 test("browser approval binds the initiating desktop, tokens are one-use, and revocation ends its server sessions", () => {
   const user = createUser("pair-flow@example.com", null),

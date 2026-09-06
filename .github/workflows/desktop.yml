@@ -60,14 +60,6 @@ jobs:
       - name: Bundle standalone runtime
         run: node desktop/prebuild.mjs
 
-      - name: Desktop lint and native tests
-        run: npm run desktop:check
-
-      - name: Runtime validation
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/desktop/runtime/browsers
-        run: npm run typecheck && npm test && node tests/standalone-smoke.mjs
-
       - name: Sign nested macOS runtime code
         if: startsWith(matrix.platform, 'macos-')
         env:
@@ -79,13 +71,25 @@ jobs:
           export RIMEWARD_SIGNING_KEYCHAIN="$signing_dir/runtime.keychain-db"
           signing_password=$(openssl rand -hex 24)
           trap 'security delete-keychain "$RIMEWARD_SIGNING_KEYCHAIN" >/dev/null 2>&1 || true; rm -rf "$signing_dir"' EXIT
+          signing_keychains=()
+          while IFS= read -r keychain; do signing_keychains+=("$keychain"); done < <(security list-keychains -d user | sed 's/^[[:space:]]*"//; s/"[[:space:]]*$//')
           printf '%s' "$APPLE_CERTIFICATE" | base64 -d > "$signing_dir/certificate.p12"
           security create-keychain -p "$signing_password" "$RIMEWARD_SIGNING_KEYCHAIN"
           security set-keychain-settings -lut 3600 "$RIMEWARD_SIGNING_KEYCHAIN"
           security unlock-keychain -p "$signing_password" "$RIMEWARD_SIGNING_KEYCHAIN"
           security import "$signing_dir/certificate.p12" -k "$RIMEWARD_SIGNING_KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$signing_password" "$RIMEWARD_SIGNING_KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "${signing_keychains[@]}" "$RIMEWARD_SIGNING_KEYCHAIN"
+          security find-identity -v -p codesigning "$RIMEWARD_SIGNING_KEYCHAIN"
           node desktop/sign-runtime.mjs
+
+      - name: Desktop lint and native tests
+        run: npm run desktop:check
+
+      - name: Runtime validation
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/desktop/runtime/browsers
+        run: npm run typecheck && npm test && node tests/standalone-smoke.mjs
 
       - name: App Store Connect key
         if: startsWith(matrix.platform, 'macos-')

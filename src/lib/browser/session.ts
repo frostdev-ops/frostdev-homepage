@@ -473,7 +473,7 @@ export function killByProfile(prefix: string): number {
   let out = '';
   try {
     out = process.platform === 'win32'
-      ? execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
+      ? execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-OutputFormat', 'Text', '-EncodedCommand',
           Buffer.from('[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }', 'utf16le').toString('base64'),
         ], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
       : execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8', timeout: 10_000 });
@@ -482,7 +482,7 @@ export function killByProfile(prefix: string): number {
     return 0;
   }
   let killed = 0;
-  for (const line of out.split('\n')) {
+  for (const line of out.split(/\r?\n/)) {
     const m = /^\s*(\d+)\s+(.*)$/.exec(line);
     if (!m || !m[2]!.includes(`--user-data-dir=${prefix}`)) continue;
     try {

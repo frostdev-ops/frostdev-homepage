@@ -1,3 +1,4 @@
+import { isDesktop } from '../dev/runtime.ts';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -104,6 +105,7 @@ export function open(userId: number, ward: string, cfg: BrowserConfig): Promise<
 }
 
 async function launch(userId: number, ward: string, key: string, cfg: BrowserConfig): Promise<Session> {
+  if(isDesktop())cfg={...cfg,backend:cfg.backend==='app'?'local':cfg.backend,route:undefined};
   ensureBrowser();
   await makeRoom();
   const backend =

@@ -1,3 +1,4 @@
+import { icon } from './icon.ts';
 // The Notion DISPLAY layer: how a property value, a rich-text run list and a
 // block look on a ward — chips in Notion's own colours, "Sep 2" dates, links,
 // bullets, callouts, images. Every Notion surface (table cells, page
@@ -271,7 +272,8 @@ export function blockView(b: NBlock, n = 1): HTMLElement {
     }
     case 'child_page':
     case 'child_database': {
-      node = link(`https://www.notion.so/${b.id.replace(/-/g, '')}`, `${b.icon ? `${b.icon} ` : b.type === 'child_page' ? '📄 ' : '🗄 '}${b.text || '(untitled)'}`, 'nblk block truncate text-xs');
+      node = link(`https://www.notion.so/${b.id.replace(/-/g, '')}`, `${b.icon ? `${b.icon} ` : ''}${b.text || '(untitled)'}`, 'nblk block truncate text-xs');
+      if (!b.icon) node.prepend(icon(b.type === 'child_page' ? 'page' : 'database'), document.createTextNode(' '));
       break;
     }
     case 'table_row': {

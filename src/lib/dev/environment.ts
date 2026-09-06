@@ -1,0 +1,62 @@
+export function terminalEnv(
+  source: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  // Build the user's shell environment; never inherit the backend's credentials.
+  const names = [
+    "HOME",
+    "USERPROFILE",
+    "USER",
+    "USERNAME",
+    "LOGNAME",
+    "SHELL",
+    "PATH",
+    "PATHEXT",
+    "SystemRoot",
+    "SYSTEMROOT",
+    "COMSPEC",
+    "WINDIR",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "TMP",
+    "TEMP",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "COLORTERM",
+    "SSH_AUTH_SOCK",
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+  ];
+  const env = Object.fromEntries([
+    ...names
+      .filter((k) => source[k] !== undefined)
+      .map((k) => [k, source[k]!] as const),
+    ["TERM", "xterm-256color"],
+    ["TERM_PROGRAM", "Rimeward"],
+  ]);
+  // GUI launchers often supply only /usr/bin:/bin; include standard user installs.
+  const home = source.HOME ?? source.USERPROFILE ?? os.homedir();
+  env.PATH = [
+    ...new Set(
+      [
+        ...(source.PATH ?? "").split(path.delimiter),
+        path.join(home, ".local", "bin"),
+        path.join(home, ".cargo", "bin"),
+        ...(process.platform === "darwin"
+          ? ["/opt/homebrew/bin", "/usr/local/bin"]
+          : []),
+        ...(process.platform === "win32" && source.APPDATA
+          ? [path.join(source.APPDATA, "npm")]
+          : []),
+      ].filter(Boolean),
+    ),
+  ].join(path.delimiter);
+  return env;
+}
+import path from "node:path";
+import os from "node:os";

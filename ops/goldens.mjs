@@ -1,12 +1,12 @@
 // Regenerates docs/goldens/*.png — the README's screenshots — from a
 // throwaway instance: the example monitor list, a temp data dir, one demo
-// user, the default layout. Nothing personal can appear in them.
-//   node ops/goldens.mjs        (~3 min; no .env needed)
+// user, the default layout, and the workspace UI smoke fixtures.
+//   npm run goldens        (no .env, personal accounts, or model calls)
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, execSync } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { chromium } from 'playwright-core';
 import sharp from 'sharp';
 
@@ -16,10 +16,12 @@ const OUT = 'docs/goldens';
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'goldens-'));
 process.env.HOMEPAGE_DATA_DIR = data;
 process.env.TOKEN_ENC_KEY = crypto.randomBytes(32).toString('base64'); // this instance's own seal
+if (!process.env.PLAYWRIGHT_BROWSERS_PATH && fs.existsSync('desktop/runtime/browsers'))
+  process.env.PLAYWRIGHT_BROWSERS_PATH = path.resolve('desktop/runtime/browsers');
 
-let server;
+let server, browser;
 try {
-  execSync('npm run -s build', { stdio: 'inherit' });
+  execFileSync(process.execPath, ['node_modules/astro/astro.js', 'build'], { stdio: 'inherit' });
 
   const { createUser } = await import('../src/lib/users.ts');
   const { createSession } = await import('../src/lib/auth.ts');
@@ -59,7 +61,11 @@ try {
   console.log('leylines seeded:', edges.map((e) => e.id).join(' '));
   saveGraph(userId, { edges });
 
-  server = spawn(process.execPath, ['server.mjs'], { env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', ASTRO_NODE_AUTOSTART: 'disabled' }, stdio: 'ignore' });
+  server = spawn(process.execPath, ['server.mjs'], { env: {
+    PATH: process.env.PATH, HOME: process.env.HOME, PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
+    HOMEPAGE_DATA_DIR: data, TOKEN_ENC_KEY: process.env.TOKEN_ENC_KEY,
+    PORT: String(PORT), HOST: '127.0.0.1', ASTRO_NODE_AUTOSTART: 'disabled',
+  }, stdio: 'ignore' });
   for (let i = 0; i < 60; i++) {
     try { if ((await fetch(`${BASE}/login`)).ok) break; } catch {}
     await new Promise((r) => setTimeout(r, 500));
@@ -81,12 +87,12 @@ try {
       .toFile(file + '.tmp');
     fs.renameSync(file + '.tmp', file);
   };
-  const browser = await chromium.launch({ channel: 'chromium', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  browser = await chromium.launch({ headless: true, channel: 'chromium', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1.5, colorScheme: 'dark' });
   await ctx.addCookies([{ name: 'rimeward_session', value: cookie, url: BASE }]);
   const page = await ctx.newPage();
   const shot = async (url, name, wait = 2500) => {
-    await page.goto(`${BASE}${url}`, { waitUntil: 'networkidle', timeout: 60_000 });
+    await page.goto(`${BASE}${url}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     await page.waitForTimeout(wait);
     await page.screenshot({ path: `${OUT}/${name}.png` });
     await frame(`${OUT}/${name}.png`);
@@ -107,7 +113,7 @@ try {
   await page.screenshot({ path: `${OUT}/leylines.png` });
   await frame(`${OUT}/leylines.png`);
   console.log('wrote', `${OUT}/leylines.png`);
-  await page.goto(`${BASE}/dash`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/dash`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2000);
   await page.click('#wd-toolbar [data-tb="edit"]');
   await page.waitForTimeout(800);
@@ -117,7 +123,24 @@ try {
   await frame(`${OUT}/wards.png`);
   console.log('wrote', `${OUT}/wards.png`);
   await browser.close();
+  browser = undefined;
+  const shots = fs.mkdtempSync(path.join(os.tmpdir(), 'rimeward-golden-shots-'));
+  try {
+    for (const [test, prefix, name] of [
+      ['editor', 'editor', 'editor'], ['terminal', 'terminal', 'terminal'], ['conversation', 'chat', 'chat'],
+    ]) {
+      execFileSync(process.execPath, [`tests/${test}-ui-smoke.mjs`], {
+        stdio: 'inherit', env: { ...process.env, RIMEWARD_GOLDEN_DIR: shots },
+      });
+      for (const [source, dest] of [['desktop', name], ['phone', name + '-phone']]) {
+        const file = `${OUT}/${dest}.png`;
+        fs.copyFileSync(path.join(shots, `rimeward-${prefix}-${source}.png`), file);
+        await frame(file); console.log('wrote', file);
+      }
+    }
+  } finally { fs.rmSync(shots, { recursive: true, force: true }); }
 } finally {
+  await browser?.close();
   if (server) {
     // Graceful: the browser ward's chromium flushes its profile on the way out.
     server.kill('SIGTERM');

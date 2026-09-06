@@ -123,6 +123,10 @@ export const CATEGORIES = {
 export type Category = keyof typeof CATEGORIES;
 
 export const CATALOG: Record<string, CatalogEntry> = {
+  'project-files': { title: 'Project files', defaultSize: '2x3', icon: 'folder', blurb: 'Browse and search a desktop project.', multi: true, category: 'rime', concepts: ['project','folder','files','tree','workspace','search'], does: ['browse folders','create files','rename files'] },
+  editor: { title: 'Editor', defaultSize: '6x4', icon: 'code', blurb: 'Project files, code editing, linting, and recovery in one workspace.', multi: true, category: 'rime', concepts: ['code','text','file','editor','source','buffer','lint','vscode','explorer'], does: ['edit files','save changes','recover drafts','find problems','format code'] },
+  terminal: { title: 'Terminal', defaultSize: '3x3', icon: 'bot', blurb: 'A live shell, Codex, or Claude Code session on your desktop.', multi: true, category: 'rime', concepts: ['shell','console','terminal','codex','claude','command'], does: ['run commands','control sessions','inspect output'] },
+  changes: { title: 'Changes', defaultSize: '2x3', icon: 'folders', blurb: 'Git status, diffs, and worktrees for a desktop project.', multi: true, category: 'rime', concepts: ['git','diff','changes','worktree','branch','repository'], does: ['review changes','inspect status','manage worktrees'] },
   weather: {
     title: 'Weather', defaultSize: '2x1', icon: 'weather', blurb: 'Now and 3 days for a place you pick; at 2x2 the next 24 hours and the week.', multi: true, configurable: true, category: 'glance',
     concepts: ['forecast', 'temperature', 'rain', 'snow', 'sun', 'clouds', 'wind', 'humidity', 'outlook', 'today', 'tomorrow', 'umbrella', 'cold', 'hot', 'conditions', '3 day', 'week', 'location', 'city', 'place'],
@@ -552,6 +556,7 @@ export interface PageDef {
   id: string;
   title: string;
   icon?: IconId;
+  project?: string;
 }
 /** What an empty stored page list means. */
 export const DEFAULT_PAGES: PageDef[] = [{ id: 'home', title: 'Home' }];
@@ -569,6 +574,7 @@ export function validatePages(raw: unknown): PageDef[] | null {
     if (typeof title !== 'string' || !title.trim() || title.trim().length > PAGE_TITLE_MAX) return null;
     seen.add(id);
     const p: PageDef = { id, title: title.trim() };
+    if (typeof (item as PageDef).project === 'string' && /^[\w-]{1,80}$/.test((item as PageDef).project!)) p.project = (item as PageDef).project;
     if (typeof icon === 'string' && icon in ICONS) p.icon = icon as IconId;
     out.push(p);
   }

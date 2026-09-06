@@ -22,7 +22,9 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: --target universal-apple-darwin
+            args: --target aarch64-apple-darwin
+          - platform: macos-15-intel
+            args: --target x86_64-apple-darwin
           - platform: ubuntu-22.04
             args: ''
           - platform: windows-latest
@@ -33,15 +35,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: npm
+      - run: npm ci
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ startsWith(matrix.platform, 'macos-') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: desktop
 
-      # Rust-only project (no package.json): the CLI comes from cargo, prebuilt.
+      # The Tauri CLI is installed separately from the bundled backend.
       - uses: cargo-bins/cargo-binstall@main
       - run: cargo binstall -y --locked tauri-cli@^2
 
@@ -51,16 +59,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      # The server this build opens (desktop/prebuild.mjs). A fork sets the
-      # RIMEWARD_ORIGIN repository variable; unset builds against the upstream.
-      - name: Server origin
-        working-directory: desktop
-        run: node prebuild.mjs
+      - name: Bundle standalone runtime
+        run: node desktop/prebuild.mjs
+
+      - name: Runtime validation
         env:
-          RIMEWARD_ORIGIN: ${{ vars.RIMEWARD_ORIGIN || 'https://frostdev.io' }}
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/desktop/runtime/browsers
+        run: npm run typecheck && npm test && node tests/standalone-smoke.mjs
 
       - name: App Store Connect key
-        if: matrix.platform == 'macos-latest'
+        if: startsWith(matrix.platform, 'macos-')
         run: echo "$APPLE_API_KEY_B64" | base64 -d > "$RUNNER_TEMP/AuthKey.p8"
         env:
           APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY_B64 }}

@@ -119,7 +119,7 @@ interface Tauri {
   core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> };
 }
 const tauri = (): Tauri | undefined => (window as { __TAURI__?: Tauri }).__TAURI__;
-const isLocal = (m: Mount): boolean => !m.localFailed && !!tauri() && (m.w.config as BrowserConfig | undefined)?.backend === 'app';
+const isLocal = (m: Mount): boolean => document.getElementById('runtime-picker')?.dataset.desktop!=='1' && !m.localFailed && !!tauri() && (m.w.config as BrowserConfig | undefined)?.backend === 'app';
 
 /** The app names the ward's Chromium (launching or downloading it first);
  *  the page then speaks CDP to it over loopback. A webview that refuses the
@@ -348,7 +348,7 @@ function paintTabs(m: Mount, t: Tabs): void {
     b.setAttribute('aria-pressed', String(i === t.active));
     b.addEventListener('click', () => push(m, { t: 'tab', i }, true));
     if (i === t.active && t.tabs.length > 1) {
-      const x = el('span', 'bw-tab-x', '✕');
+      const x = el('span', 'bw-tab-x'); x.append(icon('close'));
       x.title = 'Close tab';
       x.addEventListener('click', (e) => {
         e.stopPropagation();

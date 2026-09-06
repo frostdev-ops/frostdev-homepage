@@ -1,3 +1,5 @@
+import { DEV_TOOLS } from '../dev/tools.ts';
+import { isDesktop } from '../dev/runtime.ts';
 import { randomBytes } from 'node:crypto';
 import { getDb } from '../db.ts';
 import { browserWard, getDashboard, getPages, saveDashboard } from '../dashboard.ts';
@@ -322,6 +324,7 @@ const dropDoc = (kind: StoreKind, a: Record<string, any>, ctx: ToolCtx) => {
 const docName = str('a slug, [a-z0-9-] ≤48 chars, e.g. "user-timezone" or "deploy-check"');
 
 export const TOOLS: Record<string, ToolDef> = {
+  ...(isDesktop()?DEV_TOOLS:{}),
   // ------------------------------------------------------------------ reads
   get_layout: {
     kind: 'read',

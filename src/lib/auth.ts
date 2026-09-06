@@ -3,6 +3,12 @@ import { getDb } from './db.ts';
 
 export const SESSION_COOKIE = 'rimeward_session';
 export const SSO_STATE_COOKIE = 'rimeward_sso';
+/** Only this fixed continuation survives login; never accept a redirect URL. */
+export function afterLogin(cookies: {get(name:string):{value:string}|undefined;delete(name:string,opts:{path:string}):void}):string {
+  const code=cookies.get('rimeward_connect')?.value;
+  cookies.delete('rimeward_connect',{path:'/'});
+  return code&&/^[A-F0-9]{4}-[A-F0-9]{4}$/.test(code)?'/desktop/connect?code='+code:'/dash';
+}
 /** v0.16.0 renamed the cookies from frost_*. Browsers still carry the old one
  *  until they log in again, and the desktop app reads the session cookie BY
  *  NAME from its webview — so reads accept both names and a login sets both.

@@ -1,4 +1,5 @@
 ---
+import Icon from '../Icon.astro';
 // One dialog serves both accounts, and every way in: Compose, Reply, Reply
 // all and Forward from the reader (MailDialog). Two-phase: POST
 // /api/mail/draft returns a server-resolved preview; the confirm step then
@@ -10,7 +11,7 @@
   <form id="compose-form" method="dialog" class="flex flex-col gap-3 p-4">
     <div class="flex items-center justify-between">
       <h2 class="section-title" id="compose-title">New message</h2>
-      <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-compose-close>✕</button>
+      <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-compose-close aria-label="Close"><Icon id="close" /></button>
     </div>
 
     <input type="hidden" name="account" value="google" />

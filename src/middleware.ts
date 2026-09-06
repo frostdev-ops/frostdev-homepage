@@ -7,6 +7,10 @@ import { ensureLogicEngine } from './lib/logic-engine.ts';
 import { ensureBrowser } from './lib/browser/session.ts';
 import { ensureComms } from './lib/comms/index.ts';
 import { ensureTunnel } from './lib/tunnel.ts';
+import { ensureRemote } from './lib/dev/remote.ts';
+import { ensureDevices } from './lib/dev/devices.ts';
+import { nativeRequest } from './lib/dev/native.ts';
+import { validUserCode, CONNECT_COOKIE } from './lib/dev/device-auth.ts';
 
 // The status + logic engines live in-process; middleware load is the one place
 // that runs exactly once per server boot (guarded against dev-HMR double-starts).
@@ -15,6 +19,8 @@ ensureStatusEngine();
 ensureLogicEngine();
 ensureBrowser(); // orphan sweep + graceful close for the browser wards
 ensureComms(); // every chat ward with a token reconnects; sockets close on the way down
+ensureDevices();
+ensureRemote();
 ensureTunnel(); // publishes the desktop app's upgrade handler for server.mjs / the dev hook
 
 // Public: the splash (exact match — everything else under / is gated), login,
@@ -23,6 +29,11 @@ ensureTunnel(); // publishes the desktop app's upgrade handler for server.mjs / 
 const PUBLIC_PREFIXES = [
   '/login',
   '/api/login',
+  '/api/devices/preview',
+  '/api/devices/claim',
+  '/api/devices/authorize',
+  '/api/devices/token',
+  '/api/devices/session',
   '/api/logout', // must work with a DEAD session too, or the cookie can never be cleared
   '/api/auth/google', // covers /callback too
   '/api/connect/google/callback',
@@ -39,6 +50,9 @@ const PUBLIC_PREFIXES = [
 const ADMIN_PREFIXES = ['/admin', '/api/users', '/api/admin'];
 
 export const onRequest = defineMiddleware((context, next) => {
+  const native=nativeRequest(context);
+  if(native)return native;
+  if(context.locals.user)return next();
   const { pathname } = context.url;
   if (csrfBlocked(context.request)) {
     return new Response(JSON.stringify({ error: 'forbidden origin' }), {
@@ -61,6 +75,10 @@ export const onRequest = defineMiddleware((context, next) => {
         status: 401,
         headers: { 'content-type': 'application/json' },
       });
+    }
+    if(pathname==='/desktop/connect') {
+      const code=context.url.searchParams.get('code');
+      if(validUserCode(code)) context.cookies.set(CONNECT_COOKIE,code,{path:'/',httpOnly:true,sameSite:'lax',secure:(process.env.PUBLIC_BASE_URL??'').startsWith('https:'),maxAge:600});
     }
     return context.redirect('/login', 303);
   }

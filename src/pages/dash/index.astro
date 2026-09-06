@@ -1,4 +1,5 @@
 ---
+import { isDesktop } from '../../lib/dev/runtime.ts';
 import AppLayout from '../../layouts/AppLayout.astro';
 import Ward from '../../components/dashboard/Ward.astro';
 import Icon from '../../components/Icon.astro';
@@ -42,10 +43,12 @@ const logicJson = JSON.stringify({
 
 <AppLayout title="Rimeward" fonts={layout.map((w) => w.theme?.font)}>
   <main class="mx-auto max-w-7xl px-4 py-6">
+    {isDesktop() && <aside class="dev-runtime-bar"><span class="dev-runtime-dot"></span><div><strong>This desktop</strong><span>Your local workspace</span></div><a href="/desktop/start?setup=1">Connect or open a server <Icon id="right" /></a></aside>}
     <div id="alerts" data-mode={alertMode}></div>
     <div id="sse-banner" class="banner banner-warn hidden">Live feed lost — retrying…</div>
 
     <div class="mb-3 flex flex-wrap items-center justify-end gap-2" id="wd-toolbar">
+      {isDesktop() && <button id="dev-open-project" class="btn text-xs" type="button" aria-label="Open project"><Icon id="folder" /> Open project</button>}
       <span class="mr-auto truncate text-xs text-ink-faint" data-tb-hint>Right-click a ward for options</span>
       <button type="button" class="btn px-2 py-1 text-xs hidden" data-tb="undo" aria-label="Undo" title="Undo"><Icon id="undo" /><span class="tb-label">Undo</span></button>
       <button type="button" class="btn px-2 py-1 text-xs hidden" data-tb="add" aria-label="Add ward" title="Add ward"><Icon id="plus" /><span class="tb-label">Add ward</span></button>

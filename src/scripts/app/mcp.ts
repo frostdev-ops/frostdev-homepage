@@ -34,7 +34,7 @@ interface Status {
 async function renderMcp(w: WardInstance, fresh = false): Promise<void> {
   const cfg = (w.config ?? {}) as { name?: string; url?: string; trust?: string };
   if (!cfg.url) {
-    note(w.i, 'Set the server URL under ⚙ Configure.');
+    note(w.i, 'Set the server URL under Configure.');
     return;
   }
   const { status, data } = await getJson(`/api/mcp/${w.i}${fresh ? '?fresh=1' : ''}`);

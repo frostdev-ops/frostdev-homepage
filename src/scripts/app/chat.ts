@@ -7,6 +7,7 @@ import { COMMS_TYPES } from '../../lib/comms/types.ts';
 import { rowsOf, type WardInstance } from '../../lib/wards.ts';
 import { el, getJson, hm, postJson, toast } from './dom.ts';
 import { icon } from './icon.ts';
+import '../../styles/conversation.css';
 import { RENDERERS, body, note } from './wards.ts';
 
 interface Status {
@@ -51,6 +52,9 @@ document.addEventListener('fd:layout-saved', () => {
 
 /** The channel each ward is showing (default: its configured channel). */
 const picked = new Map<string, string>();
+// Keep unsent messages through live feed refreshes, scoped to the destination.
+const drafts = new Map<string, string>();
+const sending = new Set<string>();
 
 /** Attachment links are drawn only for the providers' own CDNs — anything
  *  else a message carries stays plain text. Never an <img>. */
@@ -85,42 +89,63 @@ function head(s: Status): HTMLElement {
 }
 
 function row(m: Msg): HTMLElement {
-  const r = el('div', 'min-w-0');
+  const r = el('div', `comms-message${m.mine ? ' comms-mine' : ''}`);
   const meta = el('div', 'flex gap-1 text-[10px] text-ink-faint');
-  meta.append(el('span', 'font-medium text-ink', m.mine ? 'bot' : m.from.name), el('span', '', hm(m.at)));
+  meta.append(el('span', 'font-medium text-ink', m.mine ? 'You · bot' : m.from.name), el('span', '', hm(m.at)));
   r.append(meta);
   if (m.text) r.append(el('div', 'whitespace-pre-wrap break-words', m.text));
   for (const a of m.attachments ?? []) {
     if (safeLink(a.url)) {
-      const link = el('a', 'link block truncate text-[10px]', `📎 ${a.name}`);
+      const link = el('a', 'link block truncate text-[10px]');
+      link.append(icon('attach'), document.createTextNode(' ' + a.name));
       link.href = a.url;
       link.target = '_blank';
       link.rel = 'noopener';
       r.append(link);
-    } else r.append(el('span', 'block truncate text-[10px] text-ink-faint', `📎 ${a.name}`));
+    } else { const attachment = el('span', 'block truncate text-[10px] text-ink-faint'); attachment.append(icon('attach'), document.createTextNode(' ' + a.name)); r.append(attachment); }
   }
   return r;
 }
 
 function composer(w: WardInstance, channel: string): HTMLElement {
-  const form = el('form', 'flex items-center gap-1');
-  const input = el('input', 'input min-h-0 flex-1 px-2 py-1 text-xs');
+  const key = `${w.i}:${channel}`;
+  const form = el('form', 'comms-composer');
+  const input = el('textarea', 'ag-input');
+  input.rows = 1;
+  input.value = drafts.get(key) ?? '';
+  input.setAttribute('aria-label', channel ? 'Message as the bot' : 'Pick a channel first');
   input.placeholder = channel ? 'Message as the bot…' : 'Pick a channel first';
   input.disabled = !channel;
   input.autocomplete = 'off';
   const send = el('button', 'btn min-h-0 px-2 py-1 text-xs');
   send.type = 'submit';
+  send.setAttribute('aria-label', 'Send message');
+  send.disabled = !channel || sending.has(key);
   send.append(icon('send', undefined, 'Send'));
+  input.addEventListener('input', () => {
+    drafts.set(key, input.value);
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229 &&
+        (!matchMedia('(pointer: coarse)').matches || e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
   form.append(input, send);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const text = input.value.trim();
-    if (!text || !channel) return;
+    if (!text || !channel || sending.has(key)) return;
+    sending.add(key);
     send.disabled = true;
     const res = await postJson(api(w), { channel, text });
+    sending.delete(key);
     send.disabled = false;
     if (!res.ok) return toast(res.data?.error ?? 'Could not send', undefined, true);
-    input.value = '';
+    if (drafts.get(key)?.trim() === text) drafts.delete(key);
     void renderChat(w);
   });
   return form;
@@ -141,11 +166,11 @@ async function renderChat(w: WardInstance): Promise<void> {
   }
   const s = data as Status;
   b.textContent = '';
-  const root = el('div', 'flex h-full min-h-0 flex-col gap-1');
+  const root = el('div', 'comms-shell');
   b.append(root);
   root.append(head(s));
   if (!s.hasToken && !s.tokenOptional) {
-    root.append(el('p', 'wd-note text-xs text-ink-faint', `Paste the ${s.type === 'twilio' ? 'auth' : s.type === 'push' ? 'application' : s.type === 'matrix' ? 'access' : 'bot'} token under ⚙ Configure — it is sealed server-side, never shown again.`));
+    root.append(el('p', 'wd-note text-xs text-ink-faint', `Paste the ${s.type === 'twilio' ? 'auth' : s.type === 'push' ? 'application' : s.type === 'matrix' ? 'access' : 'bot'} token under Configure — it is sealed server-side, never shown again.`));
     return;
   }
   if (s.error) root.append(el('p', 'text-[10px] text-err', s.error));
@@ -162,7 +187,7 @@ async function renderChat(w: WardInstance): Promise<void> {
 
   if (s.type === 'push') {
     // Outbound only: what was sent, and a line to send more.
-    const list = el('div', 'flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto text-xs');
+    const list = el('div', 'comms-log');
     root.append(list);
     const res = await getJson(api(w, `?view=messages&limit=${rowsOf(w) * 6}`));
     const msgs: Msg[] = res.status === 200 ? (res.data.messages as Msg[]) : [];
@@ -198,7 +223,7 @@ async function renderChat(w: WardInstance): Promise<void> {
   });
   root.append(sel);
 
-  const list = el('div', 'flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto text-xs');
+  const list = el('div', 'comms-log');
   root.append(list);
   if (current) {
     const res = await getJson(api(w, `?view=messages&channel=${encodeURIComponent(current)}&limit=${rowsOf(w) * 8}`));

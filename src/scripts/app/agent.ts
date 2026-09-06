@@ -1,8 +1,7 @@
 // Agent wards: a chat client over the streamed POST /api/agent/<ward>
 // protocol. One per-ward State drives every attached view — the compact ward
-// and the shared #agent-dialog — by repainting the whole log from a small
-// item model on each event (transcripts are short; simplicity beats DOM
-// surgery here).
+// and the shared #agent-dialog. Unchanged message nodes stay mounted while
+// live events update the item model, preserving selection and reading position.
 //
 // Model output, tool results and file names are hostile input — createElement
 // + textContent only, per the house rule in wards.ts. The markdown renderer
@@ -12,8 +11,9 @@ import { ACTIONS } from '../../lib/logic.ts';
 import { completeCommand, type CommandSpec } from '../../lib/agent/commands.ts';
 import { CATALOG, type WardInstance } from '../../lib/wards.ts';
 import { RENDERERS, body, note } from './wards.ts';
-import { el, getJson, postJson, tapToast } from './dom.ts';
+import { el, getJson, postJson, tapToast, toast } from './dom.ts';
 import { icon } from './icon.ts';
+import '../../styles/conversation.css';
 import { ensureStream, flushPendingLayout, onAgentLive, onAgentPing, reloadHolds } from './logic.ts';
 
 // ------------------------------------------------------------------ markdown
@@ -102,9 +102,14 @@ function markdown(src: string): DocumentFragment {
       i++;
       while (i < lines.length && !/^```/.test(lines[i]!)) buf.push(lines[i++]!);
       i++;
-      const pre = el('pre', 'overflow-x-auto rounded-lg bg-surface-2 p-3 text-xs');
-      pre.appendChild(el('code', undefined, buf.join('\n')));
-      frag.appendChild(pre);
+      const code = buf.join('\n');
+      const block = el('div', 'ag-code');
+      const head = el('div', 'ag-code-head');
+      head.append(el('span', undefined, line.slice(3).trim() || 'Code'), copyButton(code, 'Copy code'));
+      const pre = el('pre');
+      pre.appendChild(el('code', undefined, code));
+      block.append(head, pre);
+      frag.appendChild(block);
       continue;
     }
 
@@ -209,7 +214,7 @@ interface Step {
   ms?: number;
 }
 
-const ICON: Record<string, string> = { read: '🔍', write: '✎', confirm: '⏸' };
+const ICON: Record<string, string> = { read: 'eye', write: 'pen', confirm: 'stop' };
 
 /** Fallback label if the agent somehow sent no reason. */
 function humanise(tool: string): string {
@@ -219,16 +224,16 @@ function humanise(tool: string): string {
 /** One tool call, as the user reads it: the reason first, in plain words.
  *  Tool name, args and raw result live behind a <details> click. */
 function stepCard(step: Step, running = false): HTMLElement {
-  const row = el('div', 'rounded-lg border border-line bg-surface-2/60 px-2.5 py-1.5 text-xs');
+  const row = el('div', 'ag-step');
 
   const head = el('div', 'flex items-start gap-2');
-  const icon = el('span', running ? 'spinner mt-0.5 shrink-0' : 'mt-px shrink-0');
+  const mark = el('span', running ? 'spinner mt-0.5 shrink-0' : 'mt-px shrink-0');
   if (!running) {
-    icon.textContent = step.error ? '✕' : (ICON[step.kind] ?? '·');
-    if (step.error) icon.classList.add('text-err');
+    mark.append(icon(step.error ? 'close' : ICON[step.kind] ?? 'eye'));
+    if (step.error) mark.classList.add('text-err');
   }
   const line = el('span', `min-w-0 flex-1${step.error ? ' text-err' : ''}`, step.reason || humanise(step.tool));
-  head.append(icon, line);
+  head.append(mark, line);
 
   if (!running && step.ms) head.append(el('span', 'shrink-0 text-[10px] text-ink-faint', fmtMs(step.ms)));
   row.append(head);
@@ -253,23 +258,6 @@ function stepCard(step: Step, running = false): HTMLElement {
 }
 
 const fmtMs = (ms: number) => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
-
-/** One tool round with several calls: they ran at the same time, so they are
- *  drawn as one block — a header saying so, the cards inside, and the batch's
- *  wall time (the SLOWEST call, not the sum) once every card has landed. */
-function batchCard(group: StepItem[]): HTMLElement {
-  const wrap = el('div', 'space-y-1 rounded-lg border border-line/70 p-1');
-  const head = el('div', 'flex items-center gap-1.5 px-1.5 text-[10px] text-ink-faint');
-  head.append(el('span', undefined, `${group.length} at once`));
-  const left = group.filter((g) => g.running).length;
-  const failed = group.filter((g) => !g.running && g.step.error).length;
-  const tail = left
-    ? `${group.length - left}/${group.length} done`
-    : `${fmtMs(Math.max(...group.map((g) => g.step.ms ?? 0)))}${failed ? ` · ${failed} failed` : ''}`;
-  head.append(el('span', `ml-auto${failed && !left ? ' text-err' : ''}`, tail));
-  wrap.append(head, ...group.map((g) => stepCard(g.step, g.running)));
-  return wrap;
-}
 
 // -------------------------------------------------------------------- state
 
@@ -305,7 +293,7 @@ type Item =
   | { k: 'msg'; role: 'user' | 'assistant'; text: string; src?: TurnSource }
   | StepItem
   | { k: 'thinking'; label?: string }
-  | { k: 'note'; text: string; err?: boolean };
+  | { k: 'note'; text: string; err?: boolean; icon?: string };
 
 /** One attached view of a ward's conversation (the ward, or the dialog). */
 interface Ui {
@@ -317,6 +305,10 @@ interface Ui {
   chips: HTMLElement;
   pendingBox: HTMLElement;
   pendingText: HTMLElement;
+  status: HTMLElement;
+  jump: HTMLButtonElement;
+  follow: boolean;
+  rendered: { signature: string; node: HTMLElement }[];
 }
 
 interface State {
@@ -331,6 +323,8 @@ interface State {
   abort: AbortController | null;
   attachments: { id: string; name: string }[];
   uploading: number;
+  draft: string;
+  clearing: boolean;
   uis: Set<Ui>;
 }
 
@@ -339,7 +333,7 @@ const states = new Map<string, State>();
 function stateFor(w: WardInstance): State {
   let st = states.get(w.i);
   if (!st) {
-    st = { w, items: [], pending: null, busy: false, remote: false, abort: null, attachments: [], uploading: 0, uis: new Set() };
+    st = { w, items: [], pending: null, busy: false, remote: false, abort: null, attachments: [], uploading: 0, draft: '', clearing: false, uis: new Set() };
     states.set(w.i, st);
   }
   st.w = w; // config changes keep the same id — track the live instance
@@ -357,16 +351,33 @@ function itemsFrom(transcript: any[]): Item[] {
   return items;
 }
 
+function copyButton(text: string, label: string): HTMLButtonElement {
+  const button = el('button', 'ag-copy');
+  button.type = 'button';
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.append(icon('copy'), el('span', undefined, 'Copy'));
+  button.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      button.lastElementChild!.textContent = 'Copied';
+      setTimeout(() => { button.lastElementChild!.textContent = 'Copy'; }, 1600);
+    } catch {
+      toast('Clipboard unavailable. Select the text to copy it.');
+    }
+  };
+  return button;
+}
+
 function bubble(role: 'user' | 'assistant', text: string): HTMLElement {
-  const wrap = el(
-    'div',
-    role === 'user'
-      ? 'ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-accent-soft px-3 py-2'
-      : 'max-w-[92%] rounded-2xl rounded-bl-sm bg-surface-2 px-3 py-2'
-  );
-  const inner = el('div', 'space-y-2');
-  inner.appendChild(markdown(text));
-  wrap.append(inner);
+  const wrap = el('article', `ag-message ag-${role}`);
+  wrap.setAttribute('aria-label', role === 'user' ? 'You' : 'Assistant');
+  const inner = el('div', 'ag-prose');
+  if (role === 'user') inner.textContent = text;
+  else inner.append(markdown(text));
+  const actions = el('div', 'ag-message-actions');
+  actions.append(copyButton(text, 'Copy message'));
+  wrap.append(inner, actions);
   return wrap;
 }
 
@@ -410,27 +421,24 @@ function capabilities(): [string, string][] {
 }
 
 function emptyState(st: State, ui: Ui): HTMLElement {
-  const wrap = el('div', 'space-y-2 py-1');
-  // Only the dialog has room to introduce itself; a 2x2 ward gets the chips.
-  if (ui.root instanceof HTMLDialogElement) {
-    wrap.append(
-      el(
-        'p',
-        'text-xs text-ink-muted',
-        'This agent runs against this dashboard. It can read what your wards read — service status, weather, mail, ' +
-          'agenda, Notion — and change the dashboard itself: add and arrange wards, retheme it, draw leylines. ' +
-          'Ask in plain English; anything destructive stops and asks you first. Type /help for conversation commands.'
-      )
-    );
-  }
-
-  const chips = el('div', 'flex flex-wrap gap-1');
-  for (const text of STARTERS) {
-    const c = el('button', 'rounded-md border border-line bg-surface-2 px-2 py-1 text-left text-[11px] text-ink-muted hover:text-accent-hi', text);
+  const wrap = el('div', 'ag-empty');
+  const mark = el('div', 'ag-empty-mark');
+  mark.append(icon('sparkle'));
+  wrap.append(mark, el('h3', undefined, 'What would you like to work on?'),
+    el('p', undefined, 'Plan a project, explore an idea, or put your workspace to work.'));
+  const chips = el('div', 'ag-starters');
+  const starters = st.w.config?.project ? [
+    'Explore this project and explain how it fits together',
+    'Review the current changes',
+    'Help me plan the next feature',
+    'Check on my terminal agents',
+  ] : STARTERS.slice(0, 4);
+  for (const text of starters) {
+    const c = el('button', 'ag-starter', text);
     c.type = 'button';
     c.addEventListener('click', () => {
-      ui.input.value = text; // through the composer, so the send path is the same one
-      submit(st, ui);
+      setDraft(st, text);
+      ui.input.focus();
     });
     chips.append(c);
   }
@@ -451,49 +459,83 @@ function emptyState(st: State, ui: Ui): HTMLElement {
 
 // ----------------------------------------------------------------- the log
 
-const SRC_LABEL: Record<TurnSource, string> = { chat: '', automation: '⚡ automation', wake: '⏰ scheduled', agent: '🤝 another agent' };
+const SRC_LABEL: Record<TurnSource, string> = { chat: '', automation: 'automation', wake: 'scheduled', agent: 'another agent' };
 
 function buildLog(st: State, ui: Ui): void {
   const log = ui.log;
-  log.replaceChildren();
-  if (!st.items.length) {
-    // Not note()/.wd-note — that class centers the whole body, composer included.
-    log.append(emptyState(st, ui));
-  }
-  // A turn nobody typed must never read like one, so it carries a marker and
-  // an accent rail. The rail repeats per item; the label only when the source
-  // changes, or a five-step automation would shout five times.
+  const entries: { signature: string; create: () => HTMLElement }[] = [];
+  if (!st.items.length) entries.push({ signature: 'empty', create: () => emptyState(st, ui) });
   let prev: TurnSource = 'chat';
   for (let i = 0; i < st.items.length; i++) {
     const it = st.items[i]!;
-    let node: HTMLElement;
-    if (it.k === 'msg') node = bubble(it.role, it.text);
-    else if (it.k === 'step') {
-      // A run of cards from the same tool round is one batch.
-      let j = i + 1;
-      while (it.batch && j < st.items.length) {
-        const n = st.items[j]!;
-        if (n.k !== 'step' || n.batch !== it.batch) break;
-        j++;
+    const src = it.k === 'msg' || it.k === 'step' ? it.src ?? 'chat' : 'chat';
+    const label = src !== 'chat' && src !== prev ? SRC_LABEL[src] : '';
+    const group: StepItem[] = [];
+    if (it.k === 'step') {
+      group.push(it);
+      while (st.items[i + 1]?.k === 'step' && (st.items[i + 1] as StepItem).src === it.src)
+        group.push(st.items[++i] as StepItem);
+    }
+    entries.push({ signature: JSON.stringify([label, group.length ? group : it]), create: () => {
+      let node: HTMLElement;
+      if (it.k === 'msg') node = bubble(it.role, it.text);
+      else if (it.k === 'step') {
+        const activity = el('details', 'ag-activity');
+        const running = group.filter(g => g.running).length;
+        const failed = group.filter(g => g.step.error).length;
+        const summary = el('summary');
+        const mark = el('span', running ? 'spinner' : 'ag-activity-mark');
+        if (!running) mark.append(icon(failed ? 'warning' : 'check'));
+        summary.append(mark,
+          el('span', undefined, running ? group.find(g => g.running)!.step.reason || 'Working…' : `${group.length} ${group.length === 1 ? 'agent action' : 'agent actions'}${failed ? ` · ${failed} need attention` : ''}`));
+        activity.open = failed > 0;
+        activity.append(summary, ...group.map(g => stepCard(g.step, g.running)));
+        node = activity;
+      } else if (it.k === 'thinking') {
+        node = el('div', 'ag-thinking');
+        node.append(el('span', 'spinner'), el('span', undefined, it.label ?? 'Thinking…'));
+      } else {
+        node = el('div', `ag-notice${it.err ? ' ag-error' : ''}`);
+        if (it.icon || it.err) node.append(icon(it.icon ?? 'warning'), document.createTextNode(' '));
+        node.append(document.createTextNode(it.text));
       }
-      node = j - i > 1 ? batchCard(st.items.slice(i, j) as StepItem[]) : stepCard(it.step, it.running);
-      i = j - 1;
-    }
-    else if (it.k === 'thinking') node = el('div', 'text-xs text-ink-faint italic', it.label ?? 'thinking…');
-    // pre-wrap: /help is a multi-line list.
-    else node = el('div', `whitespace-pre-wrap text-center text-[11px] ${it.err ? 'text-err' : 'text-ink-faint'}`, it.text);
-    const src = it.k === 'msg' || it.k === 'step' ? (it.src ?? 'chat') : 'chat';
-    if (src === 'chat') {
-      log.append(node);
-    } else {
-      const rail = el('div', 'space-y-1.5 border-l-2 border-accent-hi/40 pl-2');
-      if (src !== prev) rail.append(el('div', 'text-[10px] text-ink-faint', SRC_LABEL[src]));
-      rail.append(node);
-      log.append(rail);
-    }
+      if (label) {
+        const rail = el('div', 'ag-source');
+        const source = el('span', 'ag-source-label');
+        source.append(icon(src === 'wake' ? 'timer' : src === 'agent' ? 'bot' : 'flow'), document.createTextNode(' ' + label));
+        rail.append(source, node);
+        return rail;
+      }
+      return node;
+    }});
     prev = src;
   }
-  log.scrollTop = log.scrollHeight;
+  // Keep unchanged message nodes in place: selecting text, reading older
+  // replies and expanding tool details must survive live activity.
+  const top = log.scrollTop;
+  const rendered = entries.map((entry, i) => {
+    const old = ui.rendered[i];
+    if (old?.signature === entry.signature) return old;
+    const node = entry.create();
+    if (old?.node instanceof HTMLDetailsElement && node instanceof HTMLDetailsElement)
+      node.open ||= old.node.open;
+    if (old) old.node.replaceWith(node);
+    else log.append(node);
+    return { signature: entry.signature, node };
+  });
+  for (const old of ui.rendered.slice(entries.length)) old.node.remove();
+  ui.rendered = rendered;
+  log.scrollTop = ui.follow ? log.scrollHeight : top;
+  ui.jump.hidden = ui.follow || log.scrollHeight - log.clientHeight < 48;
+}
+
+function setDraft(st: State, value: string): void {
+  st.draft = value;
+  for (const ui of st.uis) {
+    if (ui.input.value !== value) ui.input.value = value;
+    autoGrow(ui.input);
+    ui.send.disabled = st.uploading > 0 || st.clearing || (!value.trim() && !st.attachments.length);
+  }
 }
 
 function paintChips(st: State, chips: HTMLElement): void {
@@ -503,7 +545,7 @@ function paintChips(st: State, chips: HTMLElement): void {
     chip.append(el('span', 'truncate', a.name));
     const rm = el('button', 'shrink-0 text-ink-faint hover:text-err');
     rm.type = 'button';
-    rm.textContent = '✕';
+    rm.append(icon('close'));
     rm.setAttribute('aria-label', `Remove ${a.name}`);
     rm.addEventListener('click', () => {
       st.attachments = st.attachments.filter((x) => x !== a);
@@ -529,10 +571,14 @@ function paint(st: State): void {
   for (const ui of [...st.uis]) if (!ui.root.isConnected) st.uis.delete(ui);
   for (const ui of st.uis) {
     buildLog(st, ui);
-    // A remote turn holds the composer too — the server would 409 anyway, and
-    // the thread is shared, so "wait" is the honest state.
-    // Mid-turn the composer stays open: a send then steers the running turn.
-    ui.send.disabled = st.uploading > 0;
+    // Mid-turn the composer stays open: a send steers the running turn.
+    ui.send.disabled = st.uploading > 0 || st.clearing || (!st.draft.trim() && !st.attachments.length);
+    const working = st.busy || st.remote;
+    const status = st.pending ? 'Approval needed' : st.clearing ? 'Starting a new chat…' : working ? 'Working · send a follow-up to steer' : 'Rimeward agent';
+    if (ui.status.textContent !== status) ui.status.textContent = status;
+    ui.root.dataset.working = String(working);
+    ui.input.placeholder = working ? 'Add a follow-up…' : 'Message Rime…';
+    ui.root.querySelectorAll<HTMLButtonElement>('[data-ag-clear]').forEach(b => { b.disabled = working || st.clearing || st.uploading > 0; });
     ui.stop.classList.toggle('hidden', !st.busy && !st.remote); // server-side stop — any client, any turn
     ui.pendingBox.classList.toggle('hidden', !st.pending);
     ui.pendingBox.classList.toggle('flex', !!st.pending);
@@ -545,7 +591,7 @@ function paint(st: State): void {
  *  turn-finished ping: the chain hasn't released `busy` yet at that instant, so
  *  trusting it there would strand a spinner and a disabled composer. */
 async function refetch(st: State, settled = false): Promise<void> {
-  const { status, data } = await getJson(`/api/agent/${encodeURIComponent(st.w.i)}`);
+  const { status, data } = await getJson(`/api/agent/${encodeURIComponent(st.w.i)}`).catch(() => ({ status: 0, data: null }));
   if (status !== 200 || !data) return;
   if (st.busy) return; // a local stream started mid-fetch — it owns the log
   st.items = itemsFrom(data.transcript ?? []);
@@ -579,12 +625,12 @@ interface Restore {
 }
 
 function fail(st: State, msg: string, restore: Restore): void {
-  st.items.push({ k: 'note', err: true, text: `⚠️ ${msg}` });
+  st.items.push({ k: 'note', err: true, text: msg });
   // Nothing typed, uploaded or parked is lost — the request didn't land.
   if (restore.files?.length) st.attachments = [...restore.files, ...st.attachments];
   if (restore.pending) st.pending = restore.pending;
   paint(st);
-  if (restore.text) for (const ui of st.uis) if (!ui.input.value) ui.input.value = restore.text;
+  if (restore.text && !st.draft) setDraft(st, restore.text);
 }
 
 /** Apply one streamed AgentEvent to the item model. Shared by the local POST
@@ -736,7 +782,7 @@ async function post(st: State, payload: Record<string, unknown>, back: Restore =
   } catch (err) {
     endTurn(st);
     if ((err as Error)?.name === 'AbortError') {
-      st.items.push({ k: 'note', text: '⏹ Stopped.' });
+      st.items.push({ k: 'note', icon: 'stop', text: 'Stopped.' });
       paint(st);
       void refetch(st); // the server may have finished the turn anyway
       return;
@@ -751,22 +797,25 @@ async function post(st: State, payload: Record<string, unknown>, back: Restore =
 
 function submit(st: State, ui: Ui): void {
   const text = ui.input.value.trim();
-  if (!text || st.uploading > 0) return;
+  if ((!text && !st.attachments.length) || st.uploading > 0 || st.clearing) return;
+  for (const view of st.uis) view.follow = true;
   // Mid-turn (here or elsewhere), a message is a steer: it lands inside the
   // running turn and paints from its 'user' event. Commands stay commands.
   if ((st.busy || st.remote) && !text.startsWith('/')) {
-    ui.input.value = '';
-    ui.input.style.height = '';
+    if (st.attachments.length) {
+      toast('Send attached files after the current turn finishes. Your draft is saved.');
+      return;
+    }
+    setDraft(st, '');
     void steer(st, text);
     return;
   }
   if (st.busy) return; // a command while this client streams — the server answers it, the stream stays
-  ui.input.value = '';
-  ui.input.style.height = '';
-  st.items.push({ k: 'msg', role: 'user', text });
+  setDraft(st, '');
+  if (text) st.items.push({ k: 'msg', role: 'user', text });
   const sent = st.attachments;
   const file_ids = sent.map((a) => a.id);
-  if (sent.length) st.items.push({ k: 'note', text: `📎 ${sent.map((a) => a.name).join(', ')}` });
+  if (sent.length) st.items.push({ k: 'note', icon: 'attach', text: sent.map((a) => a.name).join(', ') });
   st.attachments = [];
   void post(st, file_ids.length ? { message: text, file_ids } : { message: text }, { files: sent });
 }
@@ -799,11 +848,17 @@ function decide(st: State, action: 'confirm' | 'decline'): void {
 }
 
 async function clearChat(st: State): Promise<void> {
-  if (st.busy) return;
-  await postJson(`/api/agent/${encodeURIComponent(st.w.i)}`, { action: 'clear' });
+  if (st.busy || st.remote || st.clearing || st.uploading) return;
+  st.clearing = true;
+  paint(st);
+  const { ok, data } = await postJson(`/api/agent/${encodeURIComponent(st.w.i)}`, { action: 'clear' });
+  st.clearing = false;
+  if (!ok) { fail(st, data?.error ?? 'Could not start a new chat. Try again.', {}); return; }
   st.items = [];
   st.pending = null;
   st.attachments = [];
+  setDraft(st, '');
+  for (const ui of st.uis) ui.follow = true;
   paint(st);
 }
 
@@ -839,7 +894,7 @@ async function addFiles(st: State, picked: FileList | File[]): Promise<void> {
 
 function autoGrow(input: HTMLTextAreaElement): void {
   input.style.height = 'auto';
-  input.style.height = `${Math.min(input.scrollHeight, 128)}px`;
+  input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
 }
 
 /**
@@ -856,6 +911,10 @@ function wireCommandMenu(ui: Ui, run: () => void): void {
   anchor.style.position = 'relative'; // set here, not as a class — this is the one thing that needs it
   const menu = el('div', 'fd-cmd hidden');
   menu.setAttribute('role', 'listbox');
+  menu.id = 'ag-commands-' + crypto.randomUUID();
+  ui.input.setAttribute('aria-controls', menu.id);
+  ui.input.setAttribute('aria-autocomplete', 'list');
+  ui.input.setAttribute('aria-expanded', 'false');
   anchor.append(menu);
 
   let items: CommandSpec[] = [];
@@ -864,6 +923,7 @@ function wireCommandMenu(ui: Ui, run: () => void): void {
 
   function close(): void {
     menu.classList.add('hidden');
+    ui.input.setAttribute('aria-expanded', 'false');
     ui.input.removeAttribute('aria-activedescendant');
   }
 
@@ -872,6 +932,8 @@ function wireCommandMenu(ui: Ui, run: () => void): void {
     items.forEach((c, i) => {
       const row = el('button', `fd-cmd-row${i === active ? ' fd-cmd-active' : ''}`);
       row.type = 'button';
+      row.id = `${menu.id}-${i}`;
+      row.tabIndex = -1;
       row.setAttribute('role', 'option');
       row.setAttribute('aria-selected', String(i === active));
       row.append(el('span', 'fd-cmd-name', `/${c.name}`));
@@ -885,6 +947,7 @@ function wireCommandMenu(ui: Ui, run: () => void): void {
       });
       menu.append(row);
     });
+    ui.input.setAttribute('aria-activedescendant', `${menu.id}-${active}`);
     menu.scrollTop = 0;
     menu.children[active]?.scrollIntoView({ block: 'nearest' });
   }
@@ -904,7 +967,7 @@ function wireCommandMenu(ui: Ui, run: () => void): void {
     if (now) run();
     else {
       ui.input.focus();
-      autoGrow(ui.input);
+      ui.input.dispatchEvent(new Event('input'));
     }
   }
 
@@ -914,12 +977,13 @@ function wireCommandMenu(ui: Ui, run: () => void): void {
     items = next;
     active = 0;
     menu.classList.remove('hidden');
+    ui.input.setAttribute('aria-expanded', 'true');
     paint();
   }
 
   // Registered before the composer's own Enter handler, so it can claim the key.
   ui.input.addEventListener('keydown', (e) => {
-    if (!isOpen()) return;
+    if (!isOpen() || e.isComposing || e.keyCode === 229) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       move(e.key === 'ArrowDown' ? 1 : -1);
@@ -957,12 +1021,36 @@ function wireComposer(ui: Ui, cur: () => State | undefined): void {
   wireCommandMenu(ui, go);
   ui.send.addEventListener('click', go);
   ui.input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229 &&
+        (!matchMedia('(pointer: coarse)').matches || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       go();
     }
   });
-  ui.input.addEventListener('input', () => autoGrow(ui.input));
+  ui.input.addEventListener('input', () => {
+    const st = cur();
+    if (st) setDraft(st, ui.input.value);
+  });
+  ui.input.addEventListener('paste', e => {
+    const st = cur();
+    if (st && e.clipboardData?.files.length) {
+      e.preventDefault();
+      void addFiles(st, e.clipboardData.files);
+    }
+  });
+  ui.log.addEventListener('scroll', () => {
+    ui.follow = ui.log.scrollHeight - ui.log.scrollTop - ui.log.clientHeight < 64;
+    ui.jump.hidden = ui.follow;
+  }, { passive: true });
+  ui.jump.onclick = () => {
+    ui.follow = true;
+    ui.log.scrollTop = ui.log.scrollHeight;
+    ui.jump.hidden = true;
+  };
+  ui.root.querySelector('[data-ag-clear]')?.addEventListener('click', () => {
+    const st = cur();
+    if (st) void clearChat(st);
+  });
   ui.stop.addEventListener('click', () => {
     const st = cur();
     if (st) void interrupt(st);
@@ -990,6 +1078,60 @@ function wireComposer(ui: Ui, cur: () => State | undefined): void {
   });
 }
 
+/** Compact and expanded chat share the same controls and behavior. */
+function createUi(root: HTMLElement, host: HTMLElement, status: HTMLElement): Ui {
+  const stage = el('div', 'ag-stage');
+  const log = el('div', 'ag-log');
+  log.dataset.agLog = '';
+  log.setAttribute('role', 'log');
+  log.setAttribute('aria-label', 'Conversation');
+  // Status has its own live region; do not re-announce the transcript on every tool event.
+  log.setAttribute('aria-live', 'off');
+  log.tabIndex = 0;
+  const jump = el('button', 'ag-jump');
+  const down = el('span', 'ag-jump-icon'); down.append(icon('right'));
+  jump.append(down, document.createTextNode(' Latest')); jump.setAttribute('aria-label', 'Latest');
+  jump.type = 'button';
+  jump.hidden = true;
+  stage.append(log, jump);
+  const footer = el('div', 'ag-footer');
+  const pendingBox = el('div', 'ag-approval hidden');
+  pendingBox.setAttribute('role', 'status');
+  const pendingText = el('span', 'ag-approval-text');
+  const approve = el('button', 'btn-primary', 'Confirm');
+  approve.type = 'button'; approve.dataset.agConfirm = '';
+  const decline = el('button', 'btn', 'Cancel');
+  decline.type = 'button'; decline.dataset.agDecline = '';
+  pendingBox.append(pendingText, approve, decline);
+  const form = el('form', 'ag-composer');
+  form.addEventListener('submit', e => e.preventDefault());
+  const chips = el('div', 'ag-chips hidden');
+  const input = el('textarea', 'ag-input');
+  input.rows = 1;
+  input.maxLength = 8000;
+  input.dataset.agInput = '';
+  input.setAttribute('aria-label', 'Message Rime');
+  const controls = el('div', 'ag-compose-controls');
+  const attach = el('button', 'ag-icon-button');
+  attach.type = 'button'; attach.dataset.agAttach = '';
+  attach.title = 'Attach files'; attach.setAttribute('aria-label', 'Attach files');
+  attach.append(icon('attach'));
+  const file = el('input', 'hidden'); file.type = 'file'; file.multiple = true;
+  const hint = el('span', 'ag-hint', 'Type / for commands');
+  const stop = el('button', 'ag-icon-button ag-stop hidden');
+  stop.type = 'button'; stop.title = 'Stop response'; stop.setAttribute('aria-label', 'Stop response');
+  stop.append(icon('stop'));
+  const send = el('button', 'ag-send');
+  send.type = 'button'; send.title = 'Send message'; send.setAttribute('aria-label', 'Send message');
+  send.append(icon('send'));
+  controls.append(attach, file, hint, stop, send);
+  form.append(chips, input, controls);
+  const help = el('p', 'ag-composer-help', matchMedia('(pointer: coarse)').matches ? 'Tap send when you’re ready' : 'Enter to send · Shift + Enter for a new line');
+  footer.append(pendingBox, form, help);
+  host.append(stage, footer);
+  return { root, log, input, send, stop, chips, pendingBox, pendingText, status, jump, follow: true, rendered: [] };
+}
+
 // ------------------------------------------------------------ shared dialog
 
 let dialogWard: string | null = null;
@@ -1002,24 +1144,11 @@ function ensureDialog(): HTMLDialogElement | null {
   if (!dlg) return null;
   agentDialog = dlg;
   const q = <T extends HTMLElement>(sel: string) => dlg.querySelector<T>(sel)!;
-  const ui: Ui = {
-    root: dlg,
-    log: q('[data-ag-log]'),
-    input: q<HTMLTextAreaElement>('[data-ag-input]'),
-    send: q<HTMLButtonElement>('[data-ag-send]'),
-    stop: q<HTMLButtonElement>('[data-ag-stop]'),
-    chips: q('[data-ag-chips]'),
-    pendingBox: q('[data-ag-pending]'),
-    pendingText: q('[data-ag-pending-text]'),
-  };
+  const ui = createUi(dlg, q('[data-ag-body]'), q('[data-ag-status]'));
   dialogUi = ui;
   const cur = () => (dialogWard ? states.get(dialogWard) : undefined);
   wireComposer(ui, cur);
   q('[data-ag-close]').addEventListener('click', () => dlg.close());
-  q('[data-ag-clear]').addEventListener('click', () => {
-    const st = cur();
-    if (st) void clearChat(st);
-  });
   dlg.addEventListener('close', () => {
     const st = cur();
     dialogWard = null;
@@ -1037,7 +1166,10 @@ function openDialog(st: State): void {
   if (dialogWard && dialogWard !== st.w.i) states.get(dialogWard)?.uis.delete(dialogUi);
   // The dialog is a singleton: a draft typed for one ward must never be sent
   // into another ward's conversation.
-  dialogUi.input.value = '';
+  dialogUi.input.value = st.draft;
+  dialogUi.rendered = [];
+  dialogUi.log.replaceChildren();
+  dialogUi.follow = true;
   dialogUi.input.style.height = '';
   dialogWard = st.w.i;
   st.uis.add(dialogUi);
@@ -1046,7 +1178,8 @@ function openDialog(st: State): void {
   dlg.showModal();
   clearUnread(st.w.i); // they're reading it now
   paint(st);
-  dialogUi.input.focus();
+  autoGrow(dialogUi.input);
+  if (!matchMedia('(pointer: coarse)').matches) dialogUi.input.focus();
 }
 
 // ------------------------------------------------------- automation notices
@@ -1070,7 +1203,7 @@ const remoteRuns = new Map<string, Run>();
 
 function paintBadge(ward: string): void {
   const span = document.querySelector<HTMLElement>(`[data-wd="${ward}"] .wd-status`);
-  if (span) span.textContent = unread.get(ward) ? `⚡${unread.get(ward)}` : '';
+  if (span) { span.replaceChildren(); if (unread.get(ward)) span.append(icon('flow'), document.createTextNode(String(unread.get(ward)))); }
 }
 
 function clearUnread(ward: string): void {
@@ -1094,7 +1227,7 @@ function logVisible(ward: string): boolean {
 function announce(st: State, p: AgentPing): void {
   const summary = (p.summary ?? '').replace(/\s+/g, ' ').trim();
   const said = summary.length > 70 ? `${summary.slice(0, 69)}…` : summary || 'a turn ran on its own';
-  tapToast(`${p.source === 'wake' ? '⏰' : p.source === 'agent' ? '🤝' : '⚡'} Agent: ${said}`, () => openDialog(st));
+  tapToast(`Agent: ${said}`, () => openDialog(st));
 }
 
 // ------------------------------------------------------------------ renderer
@@ -1116,7 +1249,7 @@ document.addEventListener('fd:layout-saved', () => {
 async function renderAgent(w: WardInstance): Promise<void> {
   ensureStream();
   const st = stateFor(w);
-  const { status, data } = await getJson(`/api/agent/${encodeURIComponent(w.i)}`);
+  const { status, data } = await getJson(`/api/agent/${encodeURIComponent(w.i)}`).catch(() => ({ status: 0, data: null }));
   const b = body(w.i);
   if (!b) return;
   if (status === 400) {
@@ -1130,14 +1263,23 @@ async function renderAgent(w: WardInstance): Promise<void> {
   unsaved.delete(w.i);
   saveRetries.delete(w.i);
   if (status !== 200 || !data) {
-    note(w.i, 'Agent unavailable.');
+    const unavailable = el('div', 'ag-empty');
+    const retry = el('button', 'btn', 'Try again');
+    retry.type = 'button';
+    retry.onclick = () => { retry.disabled = true; void renderAgent(w); };
+    unavailable.append(el('h3', undefined, 'Couldn’t load this conversation'), el('p', undefined, 'Check your connection and try again.'), retry);
+    b.replaceChildren(unavailable);
     return;
   }
   if (!data.configured) {
-    b.textContent = '';
-    const a = el('a', 'wd-note btn text-xs', 'Set up in Account');
-    a.setAttribute('href', '/account');
-    b.append(el('p', 'wd-note text-xs text-ink-faint', `No ${data.provider === 'codex' ? 'Codex' : 'OpenRouter'} credentials yet.`), a);
+    const setup = el('div', 'ag-empty ag-setup');
+    const mark = el('div', 'ag-empty-mark');
+    mark.append(icon('sparkle'));
+    const link = el('a', 'btn', 'Set up your agent');
+    link.href = '/account#agent';
+    setup.append(mark, el('h3', undefined, 'Meet your workspace agent'),
+      el('p', undefined, `Connect ${data.provider === 'codex' ? 'Codex' : 'OpenRouter'} in Account to start a conversation with Rime.`), link);
+    b.replaceChildren(setup);
     return;
   }
 
@@ -1153,49 +1295,28 @@ async function renderAgent(w: WardInstance): Promise<void> {
   b.textContent = '';
   b.classList.add('flex');
   b.classList.remove('overflow-y-auto');
-  const wrap = el('div', 'flex h-full w-full flex-col gap-1.5');
-  const log = el('div', 'min-h-0 flex-1 overflow-y-auto space-y-1.5');
-  log.dataset.log = '';
-
-  const pendingBox = el('div', 'banner banner-warn mb-0 hidden items-center gap-2 px-2 py-1.5 text-xs');
-  const pendingText = el('span', 'min-w-0 flex-1');
-  const confirmBtn = el('button', 'btn-primary min-h-0 px-2 py-1 text-xs', 'Confirm');
-  confirmBtn.type = 'button';
-  confirmBtn.setAttribute('data-ag-confirm', '');
-  const declineBtn = el('button', 'btn min-h-0 px-2 py-1 text-xs', 'Cancel');
-  declineBtn.type = 'button';
-  declineBtn.setAttribute('data-ag-decline', '');
-  pendingBox.append(pendingText, confirmBtn, declineBtn);
-
-  const chips = el('div', 'hidden flex-wrap gap-1.5');
-  const form = el('form', 'flex items-end gap-1');
-  const input = el('textarea', 'input min-h-0 flex-1 resize-none px-2 py-1 text-xs');
-  input.rows = 1;
-  input.placeholder = 'Ask Rime…';
-  const mkBtn = (cls: string, iconId: string, title: string) => {
-    const btn = el('button', cls);
-    btn.append(icon(iconId));
-    btn.type = 'button';
-    btn.title = title;
-    btn.setAttribute('aria-label', title);
-    return btn;
-  };
-  const attach = mkBtn('btn min-h-0 shrink-0 px-1.5 py-1 text-xs', 'attach', 'Attach files');
-  attach.setAttribute('data-ag-attach', '');
-  const file = el('input', 'hidden');
-  file.type = 'file';
-  file.multiple = true;
-  const stop = mkBtn('btn hidden min-h-0 shrink-0 px-1.5 py-1 text-xs', 'stop', 'Stop');
-  const send = mkBtn('btn-primary min-h-0 shrink-0 px-2 py-1 text-xs', 'send', 'Send');
-  const expand = mkBtn('btn min-h-0 shrink-0 px-1.5 py-1 text-xs', 'resize', 'Expand');
-  form.append(input, attach, file, stop, send, expand);
-  form.addEventListener('submit', (e) => e.preventDefault());
-
-  wrap.append(log, pendingBox, chips, form);
+  const wrap = el('div', 'ag-shell');
+  const top = el('div', 'ag-toolbar');
+  const statusLine = el('span', 'ag-status');
+  statusLine.setAttribute('role', 'status');
+  const fresh = el('button', 'ag-icon-button');
+  fresh.type = 'button';
+  fresh.dataset.agClear = '';
+  fresh.title = 'New chat · archives the current conversation';
+  fresh.setAttribute('aria-label', 'New chat');
+  fresh.append(icon('plus'));
+  const expand = el('button', 'ag-icon-button');
+  expand.type = 'button';
+  expand.title = 'Expand chat';
+  expand.setAttribute('aria-label', 'Expand chat');
+  expand.append(icon('resize'));
+  top.append(statusLine, fresh, expand);
+  const content = el('div', 'ag-body');
+  wrap.append(top, content);
   b.append(wrap);
-
-  const ui: Ui = { root: wrap, log, input, send, stop, chips, pendingBox, pendingText };
-  st.uis.add(ui); // stale ward uis fall out via the isConnected prune in paint()
+  const ui = createUi(wrap, content, statusLine);
+  st.uis.add(ui);
+  ui.input.value = st.draft;
   wireComposer(ui, () => states.get(w.i));
   expand.addEventListener('click', () => openDialog(stateFor(w)));
   // Touching the ward at all counts as having seen it.
@@ -1235,7 +1356,7 @@ async function renderAgent(w: WardInstance): Promise<void> {
       live.remote = false;
       for (const it of live.items) if (it.k === 'step') it.running = false;
       live.items = live.items.filter((it) => it.k !== 'thinking');
-      if (d.event.error) live.items.push({ k: 'note', err: true, text: `⚠️ ${d.event.error}` });
+      if (d.event.error) live.items.push({ k: 'note', err: true, text: d.event.error });
       paint(live);
       return;
     }

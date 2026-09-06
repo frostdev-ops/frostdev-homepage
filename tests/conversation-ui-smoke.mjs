@@ -1,0 +1,189 @@
+// Built UI, disposable account and synthetic agent events; never calls a provider.
+// Run after npm run build. Chromium comes from the staged desktop runtime.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import readline from 'node:readline';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const screenshotDir=process.env.RIMEWARD_GOLDEN_DIR ?? os.tmpdir();
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'rimeward-chat-ui-'));
+process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.join(repo, 'desktop/runtime/browsers');
+const { chromium } = await import('playwright-core');
+const server = spawn(process.execPath, ['--input-type=module', '-e', `
+  import {createUser} from './src/lib/users.ts';
+  import {createSession} from './src/lib/auth.ts';
+  import {saveDashboard} from './src/lib/dashboard.ts';
+  const id=createUser('ui@example.com',null);
+  saveDashboard(id,[{i:'rime',type:'agent',title:'Rime',size:'3x4',config:{}},{i:'reviewer',type:'agent',title:'Reviewer',size:'3x4',config:{}},{i:'messages',type:'push',size:'3x2',config:{}}]);
+  const cookie=createSession(id).id;
+  const {httpServer}=await import('./server.mjs');
+  if(!httpServer.listening)await new Promise(r=>httpServer.once('listening',r));
+  console.log(JSON.stringify({port:httpServer.address().port,cookie}));
+`], { cwd:repo, env:{PATH:process.env.PATH,HOME:process.env.HOME,HOMEPAGE_DATA_DIR:temp,TOKEN_ENC_KEY:Buffer.alloc(32,2).toString('base64'),HOST:'127.0.0.1',PORT:'0'}, stdio:['ignore','pipe','pipe'] });
+let browser, stderr='';
+server.stderr.on('data',d=>stderr+=d);
+try {
+  const info = await new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>reject(Error('Startup timeout '+stderr)),20000);
+    readline.createInterface({input:server.stdout}).on('line',line=>{try{const v=JSON.parse(line);if(v.port){clearTimeout(timer);resolve(v);}}catch{}});
+    server.once('exit',code=>{clearTimeout(timer);reject(Error('Server exited '+code+' '+stderr));});
+  });
+  const origin='http://127.0.0.1:'+info.port;
+  browser=await chromium.launch({headless:true,channel:'chromium',args:['--disable-gpu']});
+  const errors=[], requests=[];
+  let failClear=false, rejectMessage=false, transcript=[];
+  let commsPosts=0,commReads=0;
+  const configure = async (ctx) => {
+    await ctx.addCookies([{name:'rimeward_session',value:info.cookie,url:origin}]);
+    await ctx.addInitScript(()=>{
+      const Native=window.EventSource;
+      window.__streams=[];
+      window.EventSource=class extends EventTarget {
+        static CLOSED=2;
+        constructor(url){super();this.url=url;this.readyState=1;window.__streams.push(this);}
+        close(){this.readyState=2;}
+      };
+    });
+    await ctx.route('**/api/comms/**',async route=>{
+      if(route.request().method()==='POST'){commsPosts++;return route.fulfill({status:503,json:{error:'Delivery unavailable'}});}
+      commReads++;
+      return route.fulfill({json:route.request().url().includes('view=messages')?{messages:[]}:{type:'push',hasToken:true,tokenOptional:true,status:'ready',channel:'updates',self:{name:'Project updates'}}});
+    });
+    await ctx.route('**/api/agent/**',async route=>{
+      const req=route.request();
+      if(req.method()==='GET')return route.fulfill({json:{configured:true,provider:'codex',transcript:req.url().endsWith('reviewer')?[]:transcript,pending:null,busy:false}});
+      if(req.url().endsWith('/files'))return route.fulfill({json:{files:[{ok:true,id:'12',name:'example.txt'}]}});
+      const body=req.postDataJSON(); requests.push(body);
+      if(body.action==='clear')return route.fulfill({status:failClear?503:200,json:failClear?{error:'Try again shortly'}:{ok:true}});
+      if(body.action==='interrupt'||body.mode==='steer')return route.fulfill({json:{ok:true,steered:true}});
+      if(rejectMessage)return route.fulfill({status:503,json:{error:'Provider unavailable. Your draft is safe.'}});
+      return route.fulfill({contentType:'text/event-stream',body:'data: '+JSON.stringify({type:'reply',text:'A concise answer with **clear next steps**.'})+'\n\ndata: '+JSON.stringify({type:'done'})+'\n\n'});
+    });
+  };
+  const ctx=await browser.newContext({viewport:{width:1440,height:1040},permissions:['clipboard-read','clipboard-write']});
+  await configure(ctx);
+  const page=await ctx.newPage(); page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(origin+'/dash');
+  const ward=page.locator('[data-wd="rime"]');
+  await ward.getByRole('textbox',{name:'Message Rime'}).waitFor();
+  const comms=page.locator('[data-wd="messages"]');
+  const commsInput=comms.getByRole('textbox',{name:'Message as the bot'});
+  await commsInput.fill('Keep this unsent message');
+  await ward.getByRole('textbox',{name:'Message Rime'}).focus();
+  const reads=commReads;
+  await page.evaluate(()=>window.__streams.find(s=>s.url==='/api/logic/stream').dispatchEvent(new MessageEvent('refresh',{data:JSON.stringify({type:'push'})})));
+  await page.waitForFunction(()=>document.querySelector('[data-wd="messages"] textarea')?.value==='Keep this unsent message');
+  assert.ok(commReads>reads);
+  const commsReply=page.waitForResponse(r=>r.url().includes('/api/comms/')&&r.request().method()==='POST');
+  await commsInput.press('Enter');
+  await commsReply;
+  assert.equal(commsPosts,1);
+  assert.equal(await commsInput.inputValue(),'Keep this unsent message');
+  await ward.getByRole('button',{name:'Expand chat'}).click();
+  const dialog=page.getByRole('dialog',{name:'Rime',exact:true});
+  const input=dialog.getByRole('textbox',{name:'Message Rime'});
+  await page.screenshot({animations:'disabled',path:path.join(screenshotDir,'rimeward-chat-empty.png')});
+  assert.equal(await dialog.getByRole('button',{name:'Send message'}).isDisabled(),true);
+  await dialog.locator('.ag-starter').first().click();
+  assert.equal(requests.length,0,'starter must fill a draft, not execute it');
+  assert.ok(await input.inputValue());
+  await input.fill('A draft that stays with Rime');
+  await dialog.getByRole('button',{name:'Close chat'}).click();
+  assert.equal(await ward.getByRole('textbox',{name:'Message Rime'}).inputValue(),'A draft that stays with Rime');
+  await page.locator('[data-wd="reviewer"]').getByRole('button',{name:'Expand chat'}).click();
+  assert.equal(await page.locator('#agent-dialog .ag-input').inputValue(),'','draft cannot leak across wards');
+  await page.getByRole('button',{name:'Close chat'}).click();
+  await ward.getByRole('button',{name:'Expand chat'}).click();
+  assert.equal(await input.inputValue(),'A draft that stays with Rime');
+  await input.dispatchEvent('keydown',{key:'Enter',isComposing:true});
+  assert.equal(requests.length,0,'IME confirmation must not send');
+  await input.press('Shift+Enter');
+  assert.equal(requests.length,0,'Shift Enter must not send');
+  await input.fill('Explain the architecture');
+  await input.press('Enter');
+  await dialog.locator('.ag-assistant').waitFor();
+  assert.equal(requests.at(-1).message,'Explain the architecture');
+  await dialog.locator('.ag-assistant').getByRole('button',{name:'Copy message',exact:true}).click();
+  assert.match(await page.evaluate(()=>navigator.clipboard.readText()),/clear next steps/);
+  rejectMessage=true;
+  await input.fill('Recover this message');
+  await input.press('Enter');
+  await dialog.getByText('Provider unavailable. Your draft is safe.',{exact:false}).waitFor();
+  assert.equal(await input.inputValue(),'Recover this message');
+  rejectMessage=false;
+  failClear=true;
+  await dialog.getByRole('button',{name:'New chat'}).click();
+  await dialog.getByText('Try again shortly',{exact:false}).waitFor();
+  assert.equal(await dialog.locator('.ag-assistant').count(),1,'failed clear must preserve transcript');
+  failClear=false;
+  await dialog.getByRole('button',{name:'New chat'}).click();
+  await dialog.locator('.ag-empty').waitFor();
+  assert.equal(await input.inputValue(),'');
+  // File-only sends and pasted files use the same attachment path.
+  await dialog.locator('input[type="file"]').setInputFiles({name:'example.txt',mimeType:'text/plain',buffer:Buffer.from('fixture')});
+  await dialog.getByRole('button',{name:'Remove example.txt'}).waitFor();
+  assert.equal(await dialog.getByRole('button',{name:'Send message'}).isEnabled(),true);
+  await dialog.getByRole('button',{name:'Send message'}).click();
+  await dialog.locator('.ag-assistant').waitFor();
+  assert.deepEqual(requests.at(-1).file_ids,['12']);
+  await dialog.getByRole('button',{name:'New chat'}).click();
+  await dialog.locator('.ag-empty').waitFor();
+  // Slash completion still supports Tab, and updates the shared draft.
+  await input.fill('/si'); await input.press('Tab');
+  assert.equal(await input.inputValue(),'/size ');
+  await input.fill('');
+  const emit=event=>page.evaluate(event=>window.__streams.find(s=>s.url==='/api/logic/stream').dispatchEvent(new MessageEvent('agent-live',{data:JSON.stringify({ward:'rime',source:'chat',event})})),event);
+  await emit({type:'user',text:'Help me connect a desktop without losing my dashboard.'});
+  await emit({type:'step_start',id:'one',tool:'read_file',kind:'read',reason:'Checking the connection flow'});
+  await emit({type:'step',step:{id:'one',tool:'read_file',kind:'read',reason:'Checked the connection flow',result:'The browser approval route is ready.',ms:182}});
+  await emit({type:'reply',text:'## Your dashboard stays right where it is\n\nConnect once in your browser, then switch between **This desktop** and your server from the header.\n\n1. Enter your server address.\n2. Sign in and approve this desktop.\n3. Open your existing dashboard.\n\n```ts\nconst workspace = await connectDesktop(server);\nawait workspace.open();\n```\n\nYour local projects remain available when the server is offline.'});
+  await emit({type:'end'});
+  await dialog.locator('.ag-code').getByRole('button',{name:'Copy code'}).click();
+  assert.match(await page.evaluate(()=>navigator.clipboard.readText()),/connectDesktop/);
+  await page.screenshot({animations:'disabled',path:path.join(screenshotDir,'rimeward-chat-desktop.png')});
+  await page.locator('html').evaluate(el=>el.classList.remove('dark'));
+  await page.screenshot({animations:'disabled',path:path.join(screenshotDir,'rimeward-chat-light.png')});
+  await page.locator('html').evaluate(el=>el.classList.add('dark'));
+  // Long transcript: readers retain their position and tool expansion during live output.
+  for(let i=0;i<9;i++)await emit({type:'reply',text:'Earlier reply '+i+'\n\n'+('Reading content with useful context. '.repeat(30))});
+  const log=dialog.getByRole('log');
+  await log.evaluate(el=>{el.scrollTop=0;el.dispatchEvent(new Event('scroll'));});
+  await emit({type:'reply',text:'A new reply while you read the earlier messages.'});
+  assert.equal(await log.evaluate(el=>el.scrollTop),0,'live output must not steal scroll position');
+  await dialog.locator('.ag-activity > summary').click();
+  await emit({type:'thinking'});
+  assert.equal(await dialog.locator('.ag-activity').evaluate(el=>el.open),true);
+  await dialog.getByRole('button',{name:'Latest'}).click();
+  assert.ok(await log.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight<70));
+  await emit({type:'pending',pending:{confirmId:'review',summary:'Send the prepared update to the project channel?'}});
+  assert.equal(await dialog.getByRole('button',{name:'Confirm',exact:true}).isVisible(),true);
+  await emit({type:'end'});
+  await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
+  assert.equal(requests.at(-1).action,'decline');
+  await page.emulateMedia({reducedMotion:'reduce'});
+  assert.equal(await dialog.locator('.ag-message').first().evaluate(el=>getComputedStyle(el).animationName),'none');
+  const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+  await configure(mobile);
+  const phone=await mobile.newPage();phone.on('pageerror',e=>errors.push(e.message));
+  transcript=[{role:'user',text:'Where do my projects live?'},{role:'assistant',text:'Your projects live on **this desktop**. Connect your server to access them from your phone while the desktop is online.\n\nThe server dashboard stays available independently.'}];
+  await phone.goto(origin+'/dash');
+  await phone.locator('[data-wd="rime"]').getByRole('button',{name:'Expand chat'}).click();
+  const phoneInput=phone.locator('#agent-dialog .ag-input');
+  const before=requests.length;
+  await phoneInput.fill('First line');await phoneInput.press('Enter');
+  assert.equal(requests.length,before,'mobile Enter must not send');
+  assert.match(await phoneInput.inputValue(),/\n/);
+  assert.equal(await phone.locator('#agent-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1),true);
+  assert.equal(await phoneInput.evaluate(el=>getComputedStyle(el).fontSize),'16px');
+  await phone.screenshot({animations:'disabled',path:path.join(screenshotDir,'rimeward-chat-phone.png')});
+  assert.deepEqual(errors,[]);
+  console.log('Conversation UI passed: drafts, IME, mobile Enter, markdown/copy, send recovery, new chat, slash menu, live scrolling, activity, approvals, reduced motion; no provider calls.');
+} finally {
+  await browser?.close();
+  server.kill('SIGTERM');
+  await new Promise(resolve=>{if(server.exitCode!==null)return resolve();server.once('exit',resolve);setTimeout(()=>{server.kill('SIGKILL');resolve();},4000).unref();});
+  fs.rmSync(temp,{recursive:true,force:true});
+}

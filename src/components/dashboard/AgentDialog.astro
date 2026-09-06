@@ -1,36 +1,17 @@
 ---
 import Icon from '../Icon.astro';
-// One dialog serves every agent ward: the expand button stamps the title,
-// repaints the log and rebinds the composer to its ward (agent.ts owns all
-// behavior — everything here is inert markup).
+// The ward and expanded view share their composer in agent.ts.
 ---
-
-<dialog id="agent-dialog" class="fd-dialog fd-dialog-wide">
-  <form method="dialog" class="flex flex-col gap-3 p-4">
-    <div class="flex items-center justify-between gap-2">
-      <h2 class="section-title truncate" data-ag-title>Rime</h2>
-      <div class="flex shrink-0 items-center gap-2">
-        <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-ag-clear>Clear</button>
-        <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-ag-close aria-label="Close"><Icon id="close" /></button>
-      </div>
+<dialog id="agent-dialog" class="fd-dialog ag-dialog" aria-labelledby="agent-dialog-title">
+  <header class="ag-dialog-header">
+    <div class="ag-dialog-identity">
+      <span class="ag-avatar"><Icon id="sparkle" /></span>
+      <div><h2 id="agent-dialog-title" data-ag-title>Rime</h2><p class="ag-status" data-ag-status role="status">Rimeward agent</p></div>
     </div>
-
-    <div class="flex max-h-[60vh] min-h-[16rem] flex-col gap-1.5 overflow-y-auto text-sm" data-ag-log></div>
-
-    <div class="banner banner-warn mb-0 hidden items-center gap-2" data-ag-pending>
-      <span class="min-w-0 flex-1" data-ag-pending-text></span>
-      <button type="button" class="btn-primary min-h-0 px-2 py-1 text-xs" data-ag-confirm>Confirm</button>
-      <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-ag-decline>Cancel</button>
+    <div class="ag-dialog-actions">
+      <button type="button" class="ag-new-chat" data-ag-clear aria-label="New chat" title="Archives this conversation and starts a new one"><Icon id="plus" /> New chat</button>
+      <button type="button" class="ag-icon-button" data-ag-close aria-label="Close chat" title="Close chat"><Icon id="close" /></button>
     </div>
-
-    <div class="hidden flex-wrap gap-1.5" data-ag-chips></div>
-
-    <div class="flex items-end gap-2">
-      <textarea class="input min-h-0 flex-1 resize-none" rows="1" placeholder="Ask Rime…" data-ag-input></textarea>
-      <button type="button" class="btn min-h-0 px-2 py-2 text-sm" data-ag-attach title="Attach files" aria-label="Attach files"><Icon id="attach" /></button>
-      <input type="file" multiple class="hidden" data-ag-file />
-      <button type="button" class="btn hidden min-h-0 px-2 py-2 text-sm" data-ag-stop title="Stop" aria-label="Stop"><Icon id="stop" /></button>
-      <button type="button" class="btn-primary min-h-0 px-3 py-2 text-sm" data-ag-send>Send</button>
-    </div>
-  </form>
+  </header>
+  <div class="ag-body" data-ag-body></div>
 </dialog>

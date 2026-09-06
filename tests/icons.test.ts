@@ -5,6 +5,7 @@ import { GENERAL_ICON_SETS, ICON_IDS, ICON_SETS, ICONS, WMO_ICON, iconRef, type 
 import { iconSvg } from '../src/lib/icons.ts';
 import { iconConfig, normalizeTheme, themeHtmlAttrs, themeStyle } from '../src/lib/theme.ts';
 import { CATALOG } from '../src/lib/wards.ts';
+import { TRIGGERS, CONDITIONS, ACTIONS } from '../src/lib/logic.ts';
 
 test('every semantic id resolves in every set, in every style', () => {
   for (const set of Object.keys(ICON_SETS) as IconSet[]) {
@@ -26,6 +27,7 @@ test('every semantic id resolves in every set, in every style', () => {
 
 test('catalog and WMO map name real ids', () => {
   for (const [type, c] of Object.entries(CATALOG)) assert.ok(c.icon in ICONS, `${type} → ${c.icon}`);
+  for (const [type, spec] of Object.entries({ ...TRIGGERS, ...CONDITIONS, ...ACTIONS })) assert.ok(spec.icon in ICONS, `${type} → ${spec.icon}`);
   for (const id of Object.values(WMO_ICON)) assert.ok(ICONS[id][6], `weather id ${id} needs a meteocons name`);
 });
 

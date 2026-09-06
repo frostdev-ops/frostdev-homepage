@@ -1,13 +1,13 @@
 {
   "build": {
-    "frontendDist": "http://localhost:4321/dash"
+    "frontendDist": "frontend"
   },
   "app": {
     "windows": [
       {
         "label": "main",
         "title": "Rimeward (dev)",
-        "url": "http://localhost:4321/dash",
+        "url": "index.html",
         "width": 1280,
         "height": 860,
         "minWidth": 480,

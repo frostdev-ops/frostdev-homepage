@@ -1,4 +1,5 @@
 ---
+import { isDesktop } from '../lib/dev/runtime.ts';
 import BaseLayout from './BaseLayout.astro';
 import { Font } from 'astro:assets';
 import { fontVar, normalizeTheme, parseTheme, type FontId } from '../lib/theme.ts';
@@ -75,6 +76,7 @@ const declared = [...new Set([brand.uiFont, brand.brandFont, ...(Astro.props.fon
         <div class="app-hdr-mid mx-auto"></div>
       )}
 
+      <span id="runtime-picker" data-desktop={isDesktop()?'1':'0'}></span>
       <span id="clock" class="hidden text-sm text-ink-muted tabular-nums md:inline"></span>
 
       <button id="theme-toggle" type="button" class="btn min-h-9 px-2 py-1" aria-label="Toggle theme" title="Toggle theme">
@@ -91,6 +93,7 @@ const declared = [...new Set([brand.uiFont, brand.brandFont, ...(Astro.props.fon
         <summary class="btn min-h-9 cursor-pointer list-none px-2 py-1 text-xs">{me.email.split('@')[0]}</summary>
         <div class="card absolute right-0 z-30 mt-1 flex w-44 flex-col gap-1 p-2 shadow-lg">
           <a href="/account" class="btn w-full text-xs">Account</a>
+          <button type="button" id="manage-environments" class="btn w-full text-xs">Environments</button>
           {me.role === 'admin' && <a href="/admin/users" class="btn w-full text-xs">Users</a>}
           <form method="post" action="/api/logout">
             <button type="submit" class="btn w-full text-xs">Sign out</button>
@@ -111,6 +114,7 @@ const declared = [...new Set([brand.uiFont, brand.brandFont, ...(Astro.props.fon
   </style>
 
   <script>
+    import '../scripts/app/runtime-picker.ts';
     import { bootNotionSearch } from '../scripts/app/notion-search.ts';
     bootNotionSearch();
 

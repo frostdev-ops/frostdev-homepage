@@ -3,7 +3,7 @@ import { bootWards } from './wards.ts';
 import { bootPages } from './pages.ts';
 import './mail.ts';
 import './charts.ts';
-import './logic.ts';
+import { ensureStream } from './logic.ts';
 import './notion.ts';
 import './agent.ts';
 import './browser.ts';
@@ -11,6 +11,11 @@ import './note.ts';
 import './store.ts';
 import './mcp.ts';
 import './chat.ts';
+import { RENDERERS } from './wards.ts';
+import {toast} from './dom.ts';
+import { DEV_WARDS } from '../../lib/dev/types.ts';
+for(const type of DEV_WARDS)RENDERERS[type]={render:async w=>{await import('./development.ts');return RENDERERS[type]!.render(w);}};
+document.getElementById('dev-open-project')?.addEventListener('click',()=>{void import('./workspace-dialogs.ts').then(m=>m.openProjectWorkspace()).catch(e=>toast(e.message,undefined,true));});
 import { bootEdit } from './edit.ts';
 import { bootLogicEdit } from './logic-edit.ts';
 
@@ -21,6 +26,7 @@ import { bootLogicEdit } from './logic-edit.ts';
 
 bootStatus();
 bootPages(); // stages the current page before any ward boots
+ensureStream(); // layout and theme updates also reach pages with only development wards
 bootWards();
 bootEdit();
 bootLogicEdit();

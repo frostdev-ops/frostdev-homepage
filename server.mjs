@@ -5,9 +5,11 @@
 process.env.ASTRO_NODE_AUTOSTART = 'disabled';
 const { startServer } = await import('./dist/server/entry.mjs');
 const { server } = startServer();
+export const httpServer=server.server;
 server.server.on('upgrade', async (req, sock, head) => {
   // The middleware (which publishes __fdUpgrade) loads on the first request;
   // one self-request boots it if the app connects before anyone browses.
   if (!globalThis.__fdUpgrade) await fetch(`http://127.0.0.1:${server.server.address().port}/login`).catch(() => {});
+  if(req.url==='/api/devices/connect') { (globalThis.__fdDeviceUpgrade ?? ((_,s)=>s.destroy()))(req,sock,head);return; }
   (globalThis.__fdUpgrade ?? ((_, s) => s.destroy()))(req, sock, head);
 });

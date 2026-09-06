@@ -9,6 +9,7 @@
 // Everything is built with createElement/textContent: subjects, sender names
 // and file names are hostile input.
 
+import { icon } from './icon.ts';
 import { rowsOf, sizeParts, type MailAccount, type WardInstance } from '../../lib/wards.ts';
 import { RENDERERS, body, handled, note } from './wards.ts';
 import { el, getJson, postJson } from './dom.ts';
@@ -97,12 +98,12 @@ function when(iso: string, long = false): string {
 
 function fileIcon(name: string): string {
   const ext = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'svg', 'avif'].includes(ext)) return '🖼️';
-  if (ext === 'pdf') return '📄';
-  if (['doc', 'docx', 'rtf', 'txt', 'md'].includes(ext)) return '📝';
-  if (['xls', 'xlsx', 'csv'].includes(ext)) return '📊';
-  if (['zip', '7z', 'rar', 'gz', 'tar'].includes(ext)) return '🗜️';
-  return '📎';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'svg', 'avif'].includes(ext)) return 'image';
+  if (ext === 'pdf') return 'page';
+  if (['doc', 'docx', 'rtf', 'txt', 'md'].includes(ext)) return 'note';
+  if (['xls', 'xlsx', 'csv'].includes(ext)) return 'chart';
+  if (['zip', '7z', 'rar', 'gz', 'tar'].includes(ext)) return 'archive';
+  return 'attach';
 }
 
 const fileSize = (b: number): string =>
@@ -135,8 +136,8 @@ function renderMessages(id: string, account: Account, data: any, refresh: () => 
       top.append(dot);
       top.append(el('span', `min-w-0 flex-1 truncate text-xs ${m.unread ? 'font-semibold' : 'text-ink-muted'}`, displayName(m.from)));
       if (addresses && m.account) top.append(el('span', 'shrink-0 text-[10px] text-ink-faint', GLYPH[m.account]));
-      if (m.starred) top.append(el('span', 'shrink-0 text-[10px]', '★'));
-      if (m.hasAttachments) top.append(el('span', 'shrink-0 text-[10px] text-ink-faint', '📎'));
+      if (m.starred) top.append(icon('star', 'shrink-0 text-[10px]', 'Starred'));
+      if (m.hasAttachments) top.append(icon('attach', 'shrink-0 text-[10px] text-ink-faint', 'Has attachments'));
       top.append(el('span', 'shrink-0 text-[10px] tabular-nums text-ink-faint', when(m.at)));
       li.append(top);
 
@@ -316,7 +317,7 @@ async function openMessage(next: Inbox, images = false): Promise<void> {
     const link = el('a', 'btn min-h-0 max-w-full gap-1 px-2 py-1 text-xs');
     link.href = `/api/mail/attachment?account=${acct(next)}&id=${encodeURIComponent(m.id)}&a=${encodeURIComponent(a.id)}&name=${encodeURIComponent(a.name)}`;
     link.setAttribute('download', a.name);
-    link.append(el('span', '', fileIcon(a.name)), el('span', 'min-w-0 truncate', a.name));
+    link.append(icon(fileIcon(a.name)), el('span', 'min-w-0 truncate', a.name));
     if (a.size) link.append(el('span', 'text-ink-faint', fileSize(a.size)));
     att.append(link);
   }

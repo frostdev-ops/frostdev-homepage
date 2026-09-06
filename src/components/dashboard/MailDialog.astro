@@ -1,4 +1,5 @@
 ---
+import Icon from '../Icon.astro';
 // The email reader — the PMA Office viewer, as a dashboard dialog. Clicking a
 // message opens THIS; replying is a deliberate second step. The body renders
 // in a sandboxed iframe with no allow-scripts, so nothing in a message can
@@ -22,7 +23,7 @@
       <div class="flex shrink-0 items-center gap-1">
         <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-mv-prev title="Newer" aria-label="Newer message">↑</button>
         <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-mv-next title="Older" aria-label="Older message">↓</button>
-        <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-mv-close aria-label="Close">✕</button>
+        <button type="button" class="btn min-h-0 px-2 py-1 text-xs" data-mv-close aria-label="Close"><Icon id="close" /></button>
       </div>
     </header>
 

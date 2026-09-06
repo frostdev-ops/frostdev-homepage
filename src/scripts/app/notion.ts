@@ -8,6 +8,7 @@
 // browser on purpose: the client decides which editor a type gets from the
 // same table the server writes with.
 
+import { icon } from './icon.ts';
 import type { WardInstance } from '../../lib/wards.ts';
 import { editorFor, type PropValue } from '../../lib/notion-props.ts';
 import { WRITABLE, blockLabel, type NBlock } from '../../lib/notion-blocks.ts';
@@ -213,7 +214,7 @@ function refEditor(pv: PropValue, save: (v: unknown) => Promise<boolean>): HTMLE
     wrap.textContent = '';
     items.forEach((it, i) => {
       const chip = el('span', 'nchip', it.name || it.url || it.id || '?');
-      const x = el('button', 'ml-1 text-ink-faint hover:text-err', '✕');
+      const x = el('button', 'ml-1 text-ink-faint hover:text-err'); x.append(icon('close')); x.setAttribute('aria-label', 'Remove reference');
       x.type = 'button';
       x.addEventListener('click', async () => {
         const before = current();
@@ -405,7 +406,7 @@ function blockRow(b: NBlock & { depth: number }, reload: () => void, n = 1): HTM
   show();
   row.append(slot);
 
-  const del = el('button', 'shrink-0 px-1 text-[10px] text-ink-faint opacity-0 group-hover:opacity-100 hover:text-err', '✕');
+  const del = el('button', 'shrink-0 px-1 text-[10px] text-ink-faint opacity-0 group-hover:opacity-100 hover:text-err'); del.append(icon('close')); del.setAttribute('aria-label', 'Delete block');
   del.type = 'button';
   del.title = `Delete this ${blockLabel(b.type).toLowerCase()} (Notion keeps it in trash)`;
   del.addEventListener('click', async () => {
@@ -472,7 +473,7 @@ async function load(w: WardInstance, parts: string): Promise<PageBundle | null> 
     b.textContent = '';
     b.append(
       el('p', 'wd-note text-xs text-ink-faint', 'No page picked yet.'),
-      el('p', 'wd-note text-[10px] text-ink-faint', 'Edit mode → ⚙ on this ward.')
+      el('p', 'wd-note text-[10px] text-ink-faint', 'Configure this ward in edit mode.')
     );
     return null;
   }

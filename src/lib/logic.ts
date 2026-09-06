@@ -7,6 +7,7 @@
 // validator and wire pills all render from these specs, nothing is hardcoded.
 
 import { CHECKLIST_PAGE_SIZE, MAIL_ACCOUNTS, TASK_WARDS, httpUrl, notionIdFrom, type WardInstance } from './wards.ts';
+import type { IconId } from './icon-names.ts';
 import { TARGETS } from './targets.ts';
 import { COMMS_INBOUND, COMMS_TYPES } from './comms/types.ts';
 
@@ -45,7 +46,7 @@ export interface ParamSpec {
 
 export interface TriggerSpec {
   label: string;
-  icon: string;
+  icon: IconId;
   /** Ward type(s) the source ward may have. */
   wardType: string | string[];
   params: Record<string, ParamSpec>;
@@ -59,7 +60,7 @@ export const wardTypes = (t: { wardType?: string | string[] }): string[] =>
 
 export interface ConditionSpec {
   label: string;
-  icon: string;
+  icon: IconId;
   params: Record<string, ParamSpec>;
   /** Extra semantic check after generic param validation (pure). */
   verify?: (params: Record<string, unknown>) => boolean;
@@ -67,7 +68,7 @@ export interface ConditionSpec {
 
 export interface ActionSpec {
   label: string;
-  icon: string;
+  icon: IconId;
   /** 'client' actions execute in an open dashboard tab, delivered over SSE. */
   side: 'server' | 'client';
   adminOnly?: boolean;
@@ -87,23 +88,23 @@ export const TRIGGERS: Record<string, TriggerSpec> = {
   // Endogenous — events born inside the engine.
   // A routine's steps fire this with match.step; a plain timer fires it bare,
   // so a step-filtered edge never matches a plain timer (existing edges: wildcard).
-  'timer-finished': { label: 'Timer finished', icon: '⏰', wardType: 'timer', params: { step: { kind: 'select', options: ['Focus', 'Break', 'Long break'], filter: true } } },
+  'timer-finished': { label: 'Timer finished', icon: 'timer', wardType: 'timer', params: { step: { kind: 'select', options: ['Focus', 'Break', 'Long break'], filter: true } } },
   // Endogenous: the button route fires it; the ward IS the switch.
-  'button-pressed': { label: 'Button pressed', icon: '🔘', wardType: 'button', params: {} },
-  'routine-finished': { label: 'Routine finished', icon: '🍅', wardType: 'timer', params: {} },
-  'packet-arrived': { label: 'Packet arrived', icon: '📥', wardType: 'flow', params: { channel: { kind: 'channel', filter: true } } },
-  'packet-passed': { label: 'Packet passed along', icon: '📤', wardType: 'flow', params: { channel: { kind: 'channel', filter: true } } },
+  'button-pressed': { label: 'Button pressed', icon: 'button', wardType: 'button', params: {} },
+  'routine-finished': { label: 'Routine finished', icon: 'timer', wardType: 'timer', params: {} },
+  'packet-arrived': { label: 'Packet arrived', icon: 'mail', wardType: 'flow', params: { channel: { kind: 'channel', filter: true } } },
+  'packet-passed': { label: 'Packet passed along', icon: 'folder-out', wardType: 'flow', params: { channel: { kind: 'channel', filter: true } } },
   // Exogenous — watchers in logic-engine.ts poll external state on the engine
   // tick and fire on transitions (see WATCHERS there; one entry each side).
-  every: { label: 'Every N minutes', icon: '🔁', wardType: ['timer', 'note'], params: { minutes: { kind: 'minutes', required: true } } },
+  every: { label: 'Every N minutes', icon: 'reset', wardType: ['timer', 'note'], params: { minutes: { kind: 'minutes', required: true } } },
   'service-status': {
     label: 'Service goes up/down',
-    icon: '📡',
+    icon: 'radio',
     wardType: 'service-group',
     params: { to: { kind: 'select', options: ['down', 'up'], filter: true } },
   },
   // One trigger for every mailbox: the account is a filter (absent = any).
-  'mail-arrived': { label: 'New mail arrives', icon: '✉️', wardType: 'mail', params: { account: { kind: 'select', options: [...MAIL_ACCOUNTS], filter: true } } },
+  'mail-arrived': { label: 'New mail arrives', icon: 'mail', wardType: 'mail', params: { account: { kind: 'select', options: [...MAIL_ACCOUNTS], filter: true } } },
   // The chat wards (lib/comms): the connection manager fires these itself
   // from the live feed, so none has a watcher. `channel` is matched against
   // ev.channel (kind text — Slack ids and phone numbers are not slugs);
@@ -111,7 +112,7 @@ export const TRIGGERS: Record<string, TriggerSpec> = {
   // every DM / private chat, i.e. "addressed to the bot".
   'message-arrived': {
     label: 'Message arrives',
-    icon: '💬',
+    icon: 'sms',
     wardType: [...COMMS_INBOUND],
     params: {
       channel: { kind: 'text', max: 64, filter: true },
@@ -121,25 +122,25 @@ export const TRIGGERS: Record<string, TriggerSpec> = {
   },
   'reaction-added': {
     label: 'Reaction added',
-    icon: '👍',
+    icon: 'check',
     wardType: [...COMMS_INBOUND],
     params: { channel: { kind: 'text', max: 64, filter: true }, emoji: { kind: 'text', max: 64, filter: true } },
   },
-  'member-joined': { label: 'Member joined', icon: '👋', wardType: [...COMMS_INBOUND], params: {} },
+  'member-joined': { label: 'Member joined', icon: 'teams', wardType: [...COMMS_INBOUND], params: {} },
   'weather-turned': {
     label: 'Weather turns',
-    icon: '⛅',
+    icon: 'sun-cloud',
     wardType: 'weather',
     params: { to: { kind: 'select', options: [...WEATHER_KINDS], filter: true } },
   },
   // Kept for graphs saved before the omnibus notion-item trigger — a lenient
   // read silently drops edges whose trigger id vanished. Same cache, costs nothing.
-  'checklist-done': { label: 'Item checked off', icon: '☑️', wardType: 'checklist', params: {} },
+  'checklist-done': { label: 'Item checked off', icon: 'check', wardType: 'checklist', params: {} },
   // Endogenous: the agent ward fires this itself when a turn lands (chat or
   // unattended), so it needs no watcher.
   'agent-replied': {
     label: 'Agent replied',
-    icon: '🤖',
+    icon: 'bot',
     wardType: 'agent',
     // The reply is a value: filter by what prompted it, then route
     // {{agent.reply}} onward (a packet, mail, a capture line, another ask).
@@ -147,7 +148,7 @@ export const TRIGGERS: Record<string, TriggerSpec> = {
   },
   'notion-item': {
     label: 'Item added / changed / removed',
-    icon: '📋',
+    icon: 'tasks',
     wardType: [...TASK_WARDS],
     params: {
       what: { kind: 'select', filter: true, options: ['added', 'checked', 'unchecked', 'renamed', 'changed', 'removed'] },
@@ -155,7 +156,7 @@ export const TRIGGERS: Record<string, TriggerSpec> = {
   },
   'notion-item-due': {
     label: 'Item due / overdue',
-    icon: '📆',
+    icon: 'calendar',
     wardType: [...TASK_WARDS],
     params: { when: { kind: 'select', filter: true, options: ['today', 'tomorrow', 'overdue'] } },
   },
@@ -163,7 +164,7 @@ export const TRIGGERS: Record<string, TriggerSpec> = {
   // own edits, any property change, and new comments.
   'notion-page-changed': {
     label: 'Page edited / property / comment',
-    icon: '📄',
+    icon: 'page',
     wardType: 'notion-page',
     params: {
       what: { kind: 'select', filter: true, options: ['edited', 'property', 'comment'] },
@@ -172,14 +173,14 @@ export const TRIGGERS: Record<string, TriggerSpec> = {
   },
   'notion-page-touched': {
     label: 'Any page created / edited',
-    icon: '🕘',
+    icon: 'history',
     wardType: 'notion-recent',
     params: { what: { kind: 'select', filter: true, options: ['created', 'edited'] } },
   },
-  'notion-capture-appended': { label: 'Capture page appended', icon: '✍️', wardType: 'notion-page', params: {} },
+  'notion-capture-appended': { label: 'Capture page appended', icon: 'pen', wardType: 'notion-page', params: {} },
   'notion-count-crossed': {
     label: 'Item count crosses N',
-    icon: '🔢',
+    icon: 'list-ol',
     wardType: [...TASK_WARDS],
     params: {
       n: { kind: 'count', required: true },
@@ -191,10 +192,10 @@ export const TRIGGERS: Record<string, TriggerSpec> = {
     verify: (p) => Number(p.n) < CHECKLIST_PAGE_SIZE,
   },
   // Endogenous: fired from the complete paths (UI + flow.complete action).
-  'packet-completed': { label: 'Packet completed', icon: '✅', wardType: 'flow', params: { channel: { kind: 'channel', filter: true } } },
+  'packet-completed': { label: 'Packet completed', icon: 'check', wardType: 'flow', params: { channel: { kind: 'channel', filter: true } } },
   'packet-idle': {
     label: 'Packet waiting too long',
-    icon: '🐌',
+    icon: 'timer',
     wardType: 'flow',
     params: { minutes: { kind: 'minutes', required: true }, channel: { kind: 'channel', filter: true } },
   },
@@ -203,13 +204,13 @@ export const TRIGGERS: Record<string, TriggerSpec> = {
     // schedule costs no grid slot), or off the memory ward (its nightly
     // reflection). Timers stay valid for graphs saved before.
     label: 'Every day at',
-    icon: '🕗',
+    icon: 'timer',
     wardType: ['note', 'timer', 'memory'],
     params: { at: { kind: 'time', required: true } },
   },
   'host-crossed': {
     label: 'Host metric crosses',
-    icon: '📈',
+    icon: 'chart',
     wardType: 'service-group',
     params: {
       metric: { kind: 'select', required: true, options: ['cpu', 'mem', 'disk'] },
@@ -219,31 +220,31 @@ export const TRIGGERS: Record<string, TriggerSpec> = {
   },
   'service-slow': {
     label: 'Service latency crosses',
-    icon: '🐢',
+    icon: 'timer',
     wardType: 'service-group',
     params: { ms: { kind: 'count', required: true }, to: { kind: 'select', options: ['above', 'below'], filter: true } },
   },
   // A pm2 restart count going up — the crash loop pm2 still reports as
   // online. Anchors on a single-service ward (soleService in the engine).
-  'service-restarted': { label: 'Process restarted', icon: '🔁', wardType: 'service-group', params: {} },
+  'service-restarted': { label: 'Process restarted', icon: 'reset', wardType: 'service-group', params: {} },
   // Fires once per user on the first tick after a server (re)start; the
   // watcher's state is a settings row, since memory is empty on every boot.
-  'deploy-landed': { label: 'Server restarted', icon: '🚀', wardType: 'service-group', params: {} },
+  'deploy-landed': { label: 'Server restarted', icon: 'send', wardType: 'service-group', params: {} },
   'service-down-for': {
     label: 'Service down for N minutes',
-    icon: '🚨',
+    icon: 'incident',
     wardType: 'service-group',
     params: { minutes: { kind: 'minutes', required: true } },
   },
   'group-status': {
     label: 'Any service in group up/down',
-    icon: '🗂️',
+    icon: 'folders',
     wardType: 'service-group',
     params: { to: { kind: 'select', options: ['down', 'up'], filter: true } },
   },
   'event-starting-soon': {
     label: 'Event starts soon',
-    icon: '📅',
+    icon: 'calendar',
     wardType: ['calendar', 'next-up'],
     params: {
       withinMinutes: { kind: 'minutes', required: true },
@@ -252,20 +253,20 @@ export const TRIGGERS: Record<string, TriggerSpec> = {
   },
   'event-added': {
     label: 'Event added to calendar',
-    icon: '🗓️',
+    icon: 'calendar',
     wardType: ['calendar', 'next-up'],
     params: { calendar: { kind: 'select', options: ['google', 'microsoft', 'icloud', 'notion'], filter: true } },
   },
   'weather-daily': {
     // The morning briefing: fires with the full weather var set in scope.
     label: 'Daily weather report at',
-    icon: '🌤️',
+    icon: 'weather',
     wardType: 'weather',
     params: { at: { kind: 'time', required: true } },
   },
   'temp-crossed': {
     label: 'Temperature crosses',
-    icon: '🌡️',
+    icon: 'weather',
     wardType: 'weather',
     params: { tempF: { kind: 'degrees', required: true }, to: { kind: 'select', options: ['above', 'below'], filter: true } },
   },
@@ -366,7 +367,7 @@ export const TEMPLATE_VARS: { key: string; label: string; triggers?: string[] }[
 export const CONDITIONS: Record<string, ConditionSpec> = {
   'notion-task-done': {
     label: 'Notion task is done',
-    icon: '✅',
+    icon: 'check',
     params: { pageId: { kind: 'notion-id', required: true } },
   },
   'packet-text-matches': {
@@ -374,12 +375,12 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
     // backtracking would hand the single shared event loop to whoever typed
     // the pattern (a safe engine like RE2 could lift this later).
     label: 'Packet text contains',
-    icon: '🔎',
+    icon: 'search',
     params: { pattern: { kind: 'text', required: true, max: 100 } },
   },
   'host-above': {
     label: 'Host metric above/below',
-    icon: '🖥️',
+    icon: 'host',
     params: {
       metric: { kind: 'select', required: true, options: ['cpu', 'mem', 'disk'] },
       // OPTIONAL (absent = above): required would silently drop shipped edges.
@@ -389,7 +390,7 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
   },
   'service-is': {
     label: 'Service state is',
-    icon: '📡',
+    icon: 'radio',
     params: {
       service: { kind: 'select', required: true, get options() { return TARGETS.map((t) => t.id); } },
       state: { kind: 'select', required: true, options: ['up', 'down'] },
@@ -397,7 +398,7 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
   },
   'weather-is': {
     label: 'Weather is',
-    icon: '🌦️',
+    icon: 'weather',
     params: { kind: { kind: 'select', required: true, options: [...WEATHER_KINDS] } },
   },
   'template-matches': {
@@ -405,12 +406,12 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
     // equality, this tests any template against any trigger's vars.
     // Substring only — same ReDoS reasoning as packet-text-matches.
     label: 'Text contains',
-    icon: '🔎',
+    icon: 'search',
     params: { text: { kind: 'template', required: true, max: 500 }, pattern: { kind: 'text', required: true, max: 100 } },
   },
   'notion-prop-is': {
     label: 'Notion property is…',
-    icon: '🏷️',
+    icon: 'tag',
     params: {
       pageId: { kind: 'notion-id', required: true },
       prop: { kind: 'text', required: true, max: 100 },
@@ -422,7 +423,7 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
   },
   'notion-count': {
     label: 'Database count is',
-    icon: '🔢',
+    icon: 'list-ol',
     params: {
       db: { kind: 'notion-id', required: true },
       only: { kind: 'select', required: true, options: ['open', 'done', 'all'] },
@@ -433,14 +434,14 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
   },
   'notion-task-due-within': {
     label: 'Notion task due within',
-    icon: '📆',
+    icon: 'calendar',
     params: { pageId: { kind: 'notion-id', required: true }, days: { kind: 'count', required: true } },
   },
   'var-contains': {
     // The generic "…and it contains X" over any trigger's vars — replaces a
     // family of would-be per-trigger conditions. Substring only (ReDoS).
     label: 'Trigger value contains',
-    icon: '🔤',
+    icon: 'note',
     params: {
       key: { kind: 'select', required: true, options: TEMPLATE_VARS.map((v) => v.key) },
       mode: { kind: 'select', required: true, options: ['contains', 'not-contains'] },
@@ -451,39 +452,39 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
     // THE quiet-hours guard, expressed positively: 07:00 → 22:00 on the noisy
     // edge. Wraps past midnight when from > to.
     label: 'Time is between',
-    icon: '🕰️',
+    icon: 'timer',
     params: { from: { kind: 'time', required: true }, to: { kind: 'time', required: true } },
   },
   'day-is': {
     label: 'Day of week is',
-    icon: '📆',
+    icon: 'calendar',
     params: { days: { kind: 'select', required: true, options: ['weekday', 'weekend', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] } },
   },
   'calendar-busy-now': {
     label: 'Calendar is busy/free now',
-    icon: '📅',
+    icon: 'calendar',
     params: { state: { kind: 'select', required: true, options: ['busy', 'free'] } },
   },
   'calendar-free-for': {
     label: 'Calendar clear for next',
-    icon: '🕳️',
+    icon: 'calendar',
     params: { minutes: { kind: 'minutes', required: true } },
   },
   'rain-chance-above': {
     label: 'Rain chance above',
-    icon: '☔',
+    icon: 'weather',
     params: { day: { kind: 'select', required: true, options: ['today', 'tomorrow'] }, pct: { kind: 'percent', required: true } },
   },
   'rain-within': {
     label: 'Rain within N hours',
-    icon: '🌧️',
+    icon: 'weather',
     params: { hours: { kind: 'count', required: true }, pct: { kind: 'percent', required: true } },
   },
   'service-flapped': {
     // Durable: reads status_history, survives restarts. The pattern to copy
     // instead of in-memory fire counters.
     label: 'Service flapped recently',
-    icon: '〰️',
+    icon: 'chart',
     params: {
       service: { kind: 'select', required: true, get options() { return TARGETS.map((t) => t.id); } },
       hours: { kind: 'count', required: true },
@@ -492,7 +493,7 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
   },
   'service-uptime-below': {
     label: 'Service uptime below %',
-    icon: '📉',
+    icon: 'chart',
     params: {
       service: { kind: 'select', required: true, get options() { return TARGETS.map((t) => t.id); } },
       hours: { kind: 'count', required: true },
@@ -503,24 +504,24 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
   // with every action, not only the sorter.
   'model-says': {
     label: 'Rime says yes to',
-    icon: '🤖',
+    icon: 'bot',
     params: { agent: { kind: 'ward', required: true, wardType: 'agent' }, question: { kind: 'template', required: true, max: 500 } },
   },
   'packet-count-above': {
     label: 'Waiting packets above',
-    icon: '📚',
+    icon: 'skill',
     params: { ward: { kind: 'ward', required: true, wardType: 'flow' }, count: { kind: 'count', required: true } },
   },
   'packet-text-unique': {
     // The dedupe primitive: packets are rows, so flow wards are the system's
     // memory — "don't tell me twice" without any new persistence.
     label: 'Packet text not seen recently',
-    icon: '🎯',
+    icon: 'button',
     params: { hours: { kind: 'count', required: true } },
   },
   'mail-unread-above': {
     label: 'Unread mail above',
-    icon: '📥',
+    icon: 'mail',
     params: {
       account: { kind: 'select', required: true, options: [...MAIL_ACCOUNTS] },
       count: { kind: 'count', required: true },
@@ -531,31 +532,31 @@ export const CONDITIONS: Record<string, ConditionSpec> = {
 export const ACTIONS: Record<string, ActionSpec> = {
   'timer.start': {
     label: 'Start timer',
-    icon: '▶️',
+    icon: 'right',
     side: 'server',
     wardType: 'timer',
     params: { durationSec: { kind: 'seconds' } },
   },
-  'timer.stop': { label: 'Pause timer', icon: '⏸️', side: 'server', wardType: 'timer', params: {} },
-  'timer.reset': { label: 'Reset timer', icon: '⏮️', side: 'server', wardType: 'timer', params: {} },
+  'timer.stop': { label: 'Pause timer', icon: 'stop', side: 'server', wardType: 'timer', params: {} },
+  'timer.reset': { label: 'Reset timer', icon: 'reset', side: 'server', wardType: 'timer', params: {} },
   'flow.emit': {
     label: 'Emit packet',
-    icon: '📦',
+    icon: 'flow',
     side: 'server',
     wardType: 'flow',
     params: { channel: { kind: 'channel', required: true }, text: { kind: 'template', required: true, max: 500 } },
   },
   'flow.move': {
     label: 'Move this packet',
-    icon: '➡️',
+    icon: 'right',
     side: 'server',
     wardType: 'flow',
     params: { channel: { kind: 'channel', required: true } },
   },
-  'flow.pass-waiting': { label: 'Pass all waiting packets', icon: '📤', side: 'server', wardType: 'flow', params: {} },
+  'flow.pass-waiting': { label: 'Pass all waiting packets', icon: 'folder-out', side: 'server', wardType: 'flow', params: {} },
   'notion.capture-append': {
     label: 'Append to a Notion page',
-    icon: '✍️',
+    icon: 'pen',
     side: 'server',
     // pageId absent → the configured capture page; type absent → a paragraph
     params: {
@@ -566,7 +567,7 @@ export const ACTIONS: Record<string, ActionSpec> = {
   },
   'notion.set-prop': {
     label: 'Set a Notion property',
-    icon: '🏷️',
+    icon: 'tag',
     side: 'server',
     // Any writable column: text, number, date, select, status, multi-select,
     // checkbox, url/email/phone. The value is coerced to the column's type.
@@ -578,19 +579,19 @@ export const ACTIONS: Record<string, ActionSpec> = {
   },
   'notion.add-comment': {
     label: 'Comment on a Notion page',
-    icon: '💬',
+    icon: 'sms',
     side: 'server',
     params: { pageId: { kind: 'notion-id', required: true }, text: { kind: 'template', required: true, max: 2000 } },
   },
   'notion.check-task': {
     label: 'Set a Notion checkbox',
-    icon: '☑️',
+    icon: 'check',
     side: 'server',
     params: { pageId: { kind: 'notion-id', required: true }, checked: { kind: 'select', options: ['yes', 'no'] } },
   },
   'checklist.add': {
     label: 'Add checklist item',
-    icon: '➕',
+    icon: 'plus',
     side: 'server',
     wardType: [...TASK_WARDS],
     // due: YYYY-MM-DD, "today", or "+Nd"
@@ -598,15 +599,15 @@ export const ACTIONS: Record<string, ActionSpec> = {
   },
   'checklist.set': {
     label: 'Check an item by title',
-    icon: '☑️',
+    icon: 'check',
     side: 'server',
     wardType: [...TASK_WARDS],
     params: { title: { kind: 'template', required: true, max: 200 }, checked: { kind: 'select', options: ['yes', 'no'] } },
   },
-  'checklist.archive-done': { label: 'Archive checked items', icon: '🧹', side: 'server', wardType: [...TASK_WARDS], params: {} },
+  'checklist.archive-done': { label: 'Archive checked items', icon: 'archive', side: 'server', wardType: [...TASK_WARDS], params: {} },
   'notion.create-page': {
     label: 'Create a Notion page',
-    icon: '📄',
+    icon: 'page',
     side: 'server',
     // db = the database (or data source) to add a row to; ds picks one list
     // inside a multi-list database. Only a title column is required.
@@ -619,15 +620,15 @@ export const ACTIONS: Record<string, ActionSpec> = {
   },
   'notion.archive-page': {
     label: 'Archive a Notion page',
-    icon: '🗄️',
+    icon: 'database',
     side: 'server',
     params: { pageId: { kind: 'notion-id', required: true } },
   },
   // Act on ctx.packet (no wardType — the packet knows its own ward): dock actions.
-  'flow.complete': { label: 'Complete this packet', icon: '✅', side: 'server', params: {} },
+  'flow.complete': { label: 'Complete this packet', icon: 'check', side: 'server', params: {} },
   'flow.annotate': {
     label: 'Annotate this packet',
-    icon: '🏷️',
+    icon: 'tag',
     side: 'server',
     params: { note: { kind: 'template', required: true, max: 200 } },
   },
@@ -635,7 +636,7 @@ export const ACTIONS: Record<string, ActionSpec> = {
   // describe, and fires packet-passed with it — the channel filters route it on.
   'flow.sort': {
     label: 'Sort this packet (Rime)',
-    icon: '🗂️',
+    icon: 'folders',
     side: 'server',
     params: { agent: { kind: 'ward', required: true, wardType: 'agent' }, channels: { kind: 'text', required: true, max: 500 } },
     verify: (p) => parseChannels(p.channels) !== null,
@@ -644,19 +645,19 @@ export const ACTIONS: Record<string, ActionSpec> = {
     // Visible across the room on a parked tab; no permission prompt, no sound —
     // works inside quiet hours.
     label: 'Flash the tab title',
-    icon: '💡',
+    icon: 'eye',
     side: 'client',
     params: { text: { kind: 'template', required: true, max: 60 } },
   },
   'speak.say': {
     label: 'Speak aloud',
-    icon: '🗣️',
+    icon: 'sms',
     side: 'client',
     params: { text: { kind: 'template', required: true, max: 200 } },
   },
   'mail.send': {
     label: 'Send mail',
-    icon: '✉️',
+    icon: 'mail',
     side: 'server',
     params: {
       account: { kind: 'select', required: true, options: [...MAIL_ACCOUNTS] },
@@ -672,7 +673,7 @@ export const ACTIONS: Record<string, ActionSpec> = {
     // channel the triggering message came from (msg.channel), else the
     // ward's default — a message can only ever be answered where it was sent.
     label: 'Send a chat message',
-    icon: '💬',
+    icon: 'sms',
     side: 'server',
     wardType: [...COMMS_TYPES],
     params: {
@@ -683,20 +684,20 @@ export const ACTIONS: Record<string, ActionSpec> = {
   },
   'chat.react': {
     label: 'React to the message',
-    icon: '👍',
+    icon: 'check',
     side: 'server',
     wardType: [...COMMS_INBOUND],
     params: { emoji: { kind: 'text', required: true, max: 64 } },
   },
   'audio.play': {
     label: 'Play a sound',
-    icon: '🔔',
+    icon: 'push',
     side: 'client',
     params: { sound: { kind: 'select', required: true, options: ['chime', 'alarm', 'ping'] } },
   },
   'youtube.play': {
     label: 'Play a YouTube video',
-    icon: '▶️',
+    icon: 'right',
     side: 'client',
     params: { videoId: { kind: 'text', required: true, max: 11 } },
     verify: (p) => /^[A-Za-z0-9_-]{11}$/.test(String(p.videoId ?? '')),
@@ -707,7 +708,7 @@ export const ACTIONS: Record<string, ActionSpec> = {
     // and returns; the per-ward hourly cap in agent/core.ts is the loop brake
     // (agent.ask → agent-replied → agent.ask is legal but bounded).
     label: 'Ask Rime',
-    icon: '🤖',
+    icon: 'bot',
     side: 'server',
     wardType: 'agent',
     params: {
@@ -725,7 +726,7 @@ export const ACTIONS: Record<string, ActionSpec> = {
     // Any MCP server's tool, no model in the loop: the arguments are a JSON
     // template, the text of the result is the run record.
     label: 'Call an MCP tool',
-    icon: '🔌',
+    icon: 'mcp',
     side: 'server',
     wardType: 'mcp',
     params: { tool: { kind: 'text', required: true, max: 120 }, arguments: { kind: 'template', max: 2000 } },
@@ -733,7 +734,7 @@ export const ACTIONS: Record<string, ActionSpec> = {
   'webhook.post': {
     // The "trigger an agent" seam: point it at anything that speaks JSON.
     label: 'POST to a webhook',
-    icon: '🪝',
+    icon: 'link',
     side: 'server',
     adminOnly: true,
     params: { url: { kind: 'url', required: true }, text: { kind: 'template', max: 2000 } },

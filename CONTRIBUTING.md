@@ -28,5 +28,40 @@ routes, tables and CSS classes keep their engineering names (`WardInstance`, log
 - One concern per pull request, with the test that fails without it.
 - Nothing instance-specific in the tree: names, domains, addresses and the monitor list are
   settings, environment or `data/` (see `.env.example`, `src/lib/site.ts`, `src/lib/brand-files.ts`,
-  `src/lib/targets.example.json`).
-- `npm test` and `npx tsc --noEmit` green; the Tests workflow runs both on every push.
+  the admin monitor registry).
+- `npm test`, `npm run typecheck`, and `npm run build` green; the Tests workflow runs these on every push.
+
+## Desktop and remote workspaces
+
+`npm run desktop:build` stages the pinned Node runtime, Chromium, application assets, and
+native dependencies before Tauri builds. Build on the target platform; do not copy another
+Node version's `better-sqlite3` or `node-pty` binaries into the payload. The desktop process
+owns `workspaces.db`, recovery, PTYs, and agent tasks. The ordinary server must reject native
+execution and persist only device pairing metadata. Keep relay paths free of payload logging
+and persistent caching. See [the runtime contract and checks](docs/development-workspaces.md).
+
+After a web build, run `npm run test:ui` with the staged Chromium available. These checks
+exercise real editor/PTY behavior, shared-client control, recovery, and isolated HTTPS
+handoff. Conversation provider responses and native desktop UI operations are test adapters;
+they do not authorize model calls or validate OS webviews. `npm run test:standalone` checks
+the staged app with its bundled Node. Actual macOS, Windows, and Linux release behavior still
+needs platform validation.
+
+New UI controls use `icon()` or `<Icon>` with a semantic ID from `src/lib/icon-names.ts`.
+Register the ID in every icon set. Keep user-authored emoji as content. CodeMirror's native
+folding and diagnostic controls use the same theme contract. Preserve keyboard access,
+reduced motion, editor recovery, and explicit terminal input ownership.
+
+## Screenshots and release documentation
+
+`npm run goldens` regenerates every image in `docs/goldens` from disposable users, projects,
+and synthetic conversation data. It builds the app, captures the original dashboard screens,
+and runs the editor, terminal, and conversation UI checks for desktop/phone screenshots.
+It needs Chromium (`npx playwright-core install chromium` or `desktop/prebuild.mjs`) and
+uses software rendering. Review every generated image before committing it. Goldens are
+documentation screenshots, not pixel-diff assertions.
+
+Update README, this guide, the security boundaries, and the workspace guide together when
+changing setup or ownership. `docs/pages-spec.md` records the page model and its workspace
+extension. Keep private deployment instructions (`AGENTS.md`, `CLAUDE.md`, local deployment
+scripts) out of the public repository.

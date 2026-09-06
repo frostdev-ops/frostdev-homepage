@@ -64,7 +64,7 @@ function specFor(edge: LogicEdge, forGhost = false): wires.WireSpec | null {
   if (!src.getClientRects().length || !dst.getClientRects().length) return null;
   const trig = TRIGGERS[edge.source.trigger];
   const act = ACTIONS[edge.action.type];
-  const label = `${trig?.icon ?? '?'}${edge.conditions.length ? ' ⋯' : ''} → ${act?.icon ?? '?'}`;
+  const label = `${trig?.label ?? 'Trigger'}${edge.conditions.length ? ' ⋯' : ''} → ${act?.label ?? 'Action'}`;
   return { id: edge.id, label, error: runs[edge.id]?.result === 'error', disabled: !edge.enabled, src, dst };
 }
 
@@ -180,7 +180,7 @@ function buildDock(): void {
   list.addEventListener('click', () => (listEl ? closeList() : openList()));
   dock.append(list);
   for (const [id, spec] of globalActions()) {
-    const chip = el('button', 'chip', `${spec.icon} ${spec.label}`) as HTMLButtonElement;
+    const chip = el('button', 'chip'); chip.append(icon(spec.icon), el('span', undefined, spec.label));
     chip.type = 'button';
     chip.dataset.chip = id;
     chip.title = 'Drag a leyline here';
@@ -349,7 +349,7 @@ function openPopover(edge: LogicEdge, x: number, y: number): void {
   const head = el('div', 'flex items-center justify-between gap-2');
   const title = dstW ? `${wardTitle(srcW)} → ${wardTitle(dstW)}` : `${wardTitle(srcW)} → ${ACTIONS[edge.action.type]?.label ?? edge.action.type}`;
   head.append(el('div', 'section-title truncate', title));
-  const close = el('button', 'btn min-h-0 px-2 py-1 text-xs', '✕') as HTMLButtonElement;
+  const close = el('button', 'btn min-h-0 px-2 py-1 text-xs'); close.append(icon('close')); close.setAttribute('aria-label', 'Close');
   close.type = 'button';
   close.addEventListener('click', () => closePopover());
   head.append(close);
@@ -389,7 +389,7 @@ function openPopover(edge: LogicEdge, x: number, y: number): void {
   for (const [id, t] of triggersFor(srcW.type)) {
     const o = document.createElement('option');
     o.value = id;
-    o.textContent = `${t.icon} ${t.label}`;
+    o.textContent = t.label;
     trigSel.append(o);
   }
   trigSel.value = edge.source.trigger;
@@ -421,11 +421,11 @@ function openPopover(edge: LogicEdge, x: number, y: number): void {
     for (const [id, c] of Object.entries(CONDITIONS)) {
       const o = document.createElement('option');
       o.value = id;
-      o.textContent = `${c.icon} ${c.label}`;
+      o.textContent = c.label;
       typeSel.append(o);
     }
     typeSel.value = type;
-    const rm = el('button', 'btn min-h-0 px-2 py-1 text-xs', '✕') as HTMLButtonElement;
+    const rm = el('button', 'btn min-h-0 px-2 py-1 text-xs'); rm.append(icon('close')); rm.setAttribute('aria-label', 'Remove condition');
     rm.type = 'button';
     top.append(typeSel, rm);
     root.append(top);
@@ -469,7 +469,7 @@ function openPopover(edge: LogicEdge, x: number, y: number): void {
     for (const [id, a] of dst ? actionsFor(dst.type) : globalActions()) {
       const o = document.createElement('option');
       o.value = id;
-      o.textContent = `${a.icon} ${a.label}`;
+      o.textContent = a.label;
       actSel.append(o);
     }
   };
@@ -714,7 +714,7 @@ function refreshList(): void {
       el(
         'span',
         'wire-row-text',
-        `${trig?.icon ?? '?'} ${trig?.label ?? e.source.trigger}${e.conditions.length ? ' ⋯' : ''} → ${act?.icon ?? '?'} ${act?.label ?? e.action.type}${e.action.ward ? ` @ ${title(e.action.ward)}` : ''}`
+        `${trig?.label ?? e.source.trigger}${e.conditions.length ? ' ⋯' : ''} → ${act?.label ?? e.action.type}${e.action.ward ? ` @ ${title(e.action.ward)}` : ''}`
       )
     );
     const run = runs[e.id];

@@ -1,0 +1,26 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import { isDesktop } from '../lib/dev/runtime.ts';
+if(isDesktop())return Astro.redirect('/desktop/start?setup=1');
+const server=(import.meta.env.PUBLIC_BASE_URL||Astro.url.origin);
+---
+<AppLayout title="Rimeward environments" search={false}>
+  <main class="mx-auto max-w-3xl p-6">
+    <h1 class="mb-4 text-2xl">Connected desktops</h1>
+    <p class="mb-4">In the Rimeward desktop app, choose <strong>Connect to my server</strong> and enter this server’s address. Sign in and approve the desktop when your browser opens.</p>
+    <label class="flex flex-col gap-2 mb-4">Server address<input class="input" id="server-address" value={server} readonly /></label>
+    <p class="mb-4">Your server dashboard stays here. Connected desktops keep their own projects and become available for live access while online.</p>
+    <p id="device-message" class="my-4" role="status"></p>
+    <div id="device-list" class="flex flex-col gap-3"></div>
+    <details class="mt-6"><summary class="btn">Older desktop clients</summary><p class="my-3">Clients without browser sign-in can still use an enrollment code.</p><button class="btn" id="enroll" type="button">Create manual enrollment code</button></details>
+  </main>
+  <script>
+    import {el,toast} from '../scripts/app/dom.ts';
+    const message=document.getElementById('device-message')!;
+    (document.getElementById('server-address') as HTMLInputElement).value=location.origin;
+    const request=async(path:string,body?:unknown,method='POST')=>{const r=await fetch(path,body===undefined?{cache:'no-store'}:{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw new Error(data.error??'Request failed.');return data;};
+    const refresh=async()=>{const pairs=await request('/api/devices/list');const list=document.getElementById('device-list')!;list.replaceChildren();if(!pairs.length)list.append(el('p',undefined,'No desktops connected yet. Your server dashboard is ready to use.'));for(const p of pairs){const row=el('div','card p-3');row.append(el('span',undefined,`${p.name} · ${p.online?'Online':'Offline'} · ${p.platform}`));if(p.online){const link=el('a','btn ml-3','Open desktop');link.href='/runtime/'+p.id+'/dash';row.append(link);}const remove=el('button','btn ml-3','Revoke');remove.onclick=async()=>{try{await request('/api/devices/revoke',{id:p.id},'DELETE');await refresh();}catch(e){toast((e as Error).message);}};row.append(remove);list.append(row);}};
+    document.getElementById('enroll')!.onclick=async()=>{try{const {code}=await request('/api/devices/enroll',{});message.textContent='Use this code in an older desktop client within 10 minutes: ';const value=el('input','input');value.value=code;value.readOnly=true;value.setAttribute('aria-label','Enrollment code');message.append(value);}catch(e){toast((e as Error).message);}};
+    void refresh().catch(e=>{message.textContent=e.message;});
+  </script>
+</AppLayout>

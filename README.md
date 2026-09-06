@@ -3,9 +3,9 @@
 </p>
 
 <p align="center">
-  An agentic harness with a dashboard for a face: Rime, leylines, wards. And a desktop app that lends it your own connection.
+  An agentic harness with a dashboard for a face: Rime, leylines, wards. And a standalone desktop development environment.
   <br>
-  <a href="https://github.com/frostdev-ops/rimeward/releases/latest">Latest desktop release</a> · macOS (signed, universal) · Windows · Linux
+  <a href="https://github.com/frostdev-ops/rimeward/releases/latest">Published desktop installers</a> · macOS (Apple silicon / Intel) · Windows · Linux
 </p>
 
 Rimeward is an agentic harness in the shape of a personal dashboard. **Rime**, the built-in
@@ -45,6 +45,12 @@ agent may do on its own.
   sets; eighteen animated shader backgrounds or your own photo, and a header banner that runs
   the same scenes; pages, containers and a Configure dialog on every ward. The splash, the
   name and the brand art belong to the instance, not the repo.
+- **Develop on your desktop, pick up on your phone.** Open a local project into an editor
+  with a left-hand file explorer, tabs, search/replace, recovery diffs, and bundled Biome
+  linting and formatting. Real terminals run your shell, Codex, or Claude Code; Rime can
+  coordinate their assignments and Git worktrees. A paired server relays the same live
+  desktop environment. If that desktop disconnects, its projects are unavailable remotely;
+  the server's own dashboard keeps working.
 
 ## The words
 
@@ -57,7 +63,7 @@ side of things; Rimeward is where you keep watch.
 A **ward** is one card on the dashboard. Every ward is one thing to watch or one thing to do: the
 weather, an inbox, a Notion database, a routine timer, a real browser. Wards come from a catalog,
 grouped by what they are for: *At a glance*, *Mail*, *Chat & messaging*, *Notion*, *Write &
-capture*, *Leylines & automation*, *Rime*, and *Layout & looks*. Wards live on **pages**, the tabs
+capture*, *Leylines & automation*, *Rime* (including development wards), and *Layout & looks*. Wards live on **pages**, the tabs
 across the top; a **container** groups wards; a **spacer** is breathing room.
 
 <p align="center">
@@ -80,7 +86,10 @@ memory and skills as wards, drives the same browser you drive, and asks before a
 the building: mail, chat, and the rest of the outbound tools wait for a confirm. A **routine** is
 a timer with rounds. A **packet** is what moves between flow wards. The **home route** is the
 desktop app's tunnel: a browser ward on the server egressing from your own connection, or running
-its Chromium on your machine entirely.
+its Chromium on your machine entirely. It remains compatible with earlier clients. An
+**environment** selects the server or a paired desktop; each owns its own pages, credentials,
+and agent conversations. A **project** is an approved local folder referenced by a page's
+development wards.
 
 <p align="center">
   <img src="docs/goldens/rime.png" alt="The Rime ward" width="430">
@@ -95,7 +104,8 @@ User-facing copy always says ward, leyline, Rime.
 ## Stack
 
 Astro 5 (SSR, Node adapter) · TypeScript · Tailwind 4 · SQLite (`better-sqlite3`) · three.js
-for the splash · Playwright for the browser wards · Tauri 2 (Rust) for the desktop app.
+for the splash · Playwright for the browser wards · Tauri 2 (Rust) for the desktop app ·
+CodeMirror 6 + Biome for editing · xterm.js + node-pty for terminals.
 Node 22.18 or newer.
 
 ## Run it
@@ -153,8 +163,13 @@ sibling container by its public name or with host networking.
 `server.mjs` is the production entry: Astro's standalone server plus the websocket upgrade the
 desktop app needs. Run it under a process manager with `.env` loaded
 (`node --env-file=.env server.mjs`, `TZ` set there too) behind a reverse proxy that does not
-buffer `/api/status/stream` and `/api/browser/stream` and passes `Upgrade` on `/api/tunnel`.
-`ops/nginx.example.conf` is that proxy. Give the process ten seconds to stop: browser wards
+buffer live event streams and passes `Upgrade` on `/api/tunnel` and `/api/devices/connect`.
+`ops/nginx.example.conf` includes `ops/runtime-relay.nginx.conf`: install that file at the
+path named by the include. `/runtime/` must have request/response buffering, disk spill,
+caching, and payload logging disabled at the origin and edge. The application adds
+`Cache-Control: no-store`; review CDN overrides before enabling remote access. See the
+[deployment and verification steps](docs/development-workspaces.md#server-configuration-required-for-remote-access).
+Give the process ten seconds to stop: browser wards
 close Chromium gracefully so a fresh login's cookies are not lost.
 
 **Docker.** `compose.yaml` builds the image, keeps the data directory in a volume, and runs
@@ -177,30 +192,52 @@ proxy's — stricter than trusting a forwarded header without a trusted-proxy li
 
 ## Desktop app
 
-`desktop/` is a Rust-only Tauri 2 app whose window loads the dashboard. It keeps a tunnel open
-to the server so a browser ward can either egress from your own connection or run its Chromium
-on your machine entirely, driven from the dashboard and by the agent alike.
+`desktop/` is a standalone Tauri 2 installation of the same backend and Rimeward harness. It bundles Node and Chromium, owns its projects and recovery data locally, and provides modular project, editor, terminal, and Git wards. Browser and phone clients can access a paired desktop through an independently usable remote server; desktop content is relayed without a server replica.
 
 ```sh
 cargo install tauri-cli --locked
-npm run desktop:dev             # against the dev server
-RIMEWARD_ORIGIN=https://dash.example.com npm run desktop:build
+npm run desktop:dev
+npm run desktop:build
 ```
 
-The server a build opens is compiled in (`RIMEWARD_ORIGIN`, default the upstream instance):
-`desktop/prebuild.mjs` writes it into the window URL and the capability that lets that page
-reach the app. Releases are built by `.github/workflows/desktop.yml` on a `desktop-v*` tag; a
-fork sets the `RIMEWARD_ORIGIN` repository variable, its own bundle identifier in
-`desktop/tauri.conf.json`, and the Apple secrets the workflow lists.
+Pair servers in **Environments** after launch. See [development workspace setup and validation](docs/development-workspaces.md), including the required proxy privacy configuration. The desktop release workflow builds separately for Apple silicon, Intel macOS, Windows, and Linux on a `desktop-v*` tag; signing uses the Apple secrets listed in that workflow. Native release validation remains required before publishing.
+
+First launch offers **Bring your dashboard** or **Start right here**. To connect, enter your
+server address and approve the desktop in your normal browser; the remote dashboard is
+still there. **Open project** reuses an existing project page or creates Editor, Terminal,
+and Changes wards. There is no separate development page type. Integrations and CLI
+credentials remain independent on each installation; connecting does not copy them.
+
+<p align="center">
+  <img src="docs/goldens/editor.png" alt="Editor with project files and Biome diagnostics" width="880">
+  <img src="docs/goldens/terminal.png" alt="A live shell in the streamlined terminal" width="880">
+  <img src="docs/goldens/chat.png" alt="Expanded Rime conversation with activity and code" width="880">
+</p>
+<p align="center">
+  <img src="docs/goldens/editor-phone.png" alt="The same desktop-owned editor on a phone" width="260">
+  <img src="docs/goldens/terminal-phone.png" alt="Phone terminal with shared control and extra keys" width="260">
+  <img src="docs/goldens/chat-phone.png" alt="Rime conversation on a phone" width="260">
+</p>
+
+All interface icons follow the selected icon or emoji pack, style, tint, size, opacity, and
+stroke settings. New terminal sessions use Human permission mode; changing launch policy is
+an explicit user action and takes effect on the next start. Language servers, cross-file
+type checking, debugging, and VS Code extensions remain outside this release. The published
+installer link may lag the source; build this checkout for the new workspace experience
+until a corresponding desktop release is published.
 
 ## Layout
 
 - `src/pages` routes · `src/lib` the server (auth, site, brand, wards, status, logic engine,
-  agent, tunnel, browser sessions, comms) · `src/scripts/app` the dashboard client ·
-  `src/styles/frost.css` the token system
+  agent, tunnel, browser sessions, comms, device relay and local development runtime) ·
+  `src/scripts/app` the dashboard client · `src/styles/frost.css` the token system,
+  `development.css` and `conversation.css` the focused workspace surfaces
 - `bin/rimeward.mjs` the CLI · `migrations/` numbered SQL, applied on first open
 - `desktop/` the Tauri app · `ops/` the nginx example, the seccomp profile, the brand and
   goldens generators
+
+Regenerate the screenshots with `npm run goldens`; the generator uses disposable data and
+the browser/UI smoke tests, without personal accounts or model calls. See [Contributing](CONTRIBUTING.md).
 
 ## License
 

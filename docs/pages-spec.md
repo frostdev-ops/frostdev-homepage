@@ -1,5 +1,14 @@
 # Pages — spec (draft 1, 2026-09-03)
 
+> Workspace extension, 2026-09-06: each runtime owns its own pages and layout. A page may
+> reference a default `project` ID. **Open project** reuses that project's editor page or
+> creates an ordinary page containing Editor, Terminal, and Changes; it is not a new page
+> type. Development wards inherit the page project unless configured explicitly. Editor
+> includes a left file explorer; a separate Project files ward remains optional. Native
+> processes and recovery data stay on the desktop when a page/view detaches. Remote clients
+> operate that runtime through `/runtime/<device>/…`, with no server-side layout replica.
+> See [development workspaces](development-workspaces.md) for the current implementation.
+
 > Status 2026-09-03: shipped, all phases. Deviations: the list editor lives in
 > `logic-edit.ts` (same session graph, no second module); the tab strip also
 > shows with one page while editing (the `+` chip is how a second page gets
@@ -21,7 +30,7 @@ interface WardInstance {
    *  one pointer, and the layout stays ONE flat list. */
   page?: string;
 }
-interface PageDef { id: string; title: string; icon?: IconId }
+interface PageDef { id: string; title: string; icon?: IconId; project?: string }
 ```
 
 - The layout stays one flat list per user. Every key in the system is
@@ -44,7 +53,7 @@ interface PageDef { id: string; title: string; icon?: IconId }
 - `saveDashboard` / `PUT /api/dashboard` carry `pages` beside `layout`.
 - `/dash` SSR renders every ward's SHELL (the card chrome, no data) so the
   first paint of any page needs no request, but stamps `data-page` and hides
-  the off-page ones with the existing `[data-wd-hidden]` rule. `#layout-data`
+  the off-page ones with `[data-wd-off]` (`data-wd-hidden` is the separate tray state). `#layout-data`
   keeps the whole layout — `readLayout()` consumers depend on it.
 - Nothing else: the engine, the comms manager and the watchers read the stored
   layout and never look at `page`.
@@ -88,7 +97,7 @@ interface PageDef { id: string; title: string; icon?: IconId }
   booted per tab.
 
 ### 3.3 Swap animation
-- Rule from CLAUDE.md stands: never animate cards through motion's JS driver,
+- Animation rule: never animate cards through motion's JS driver,
   never leave a WAAPI fill on a card. The swap therefore animates the GRID,
   not the cards: outgoing grid `translateX(-24px)` + fade over 160ms, incoming
   grid from `translateX(24px)` over 200ms, direction from the tab order

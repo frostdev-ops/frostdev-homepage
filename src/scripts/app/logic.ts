@@ -165,7 +165,7 @@ export function flushPendingLayout(): void {
   pendingLayoutReload = false;
   // Edit mode never gets reloaded out from under the user — there the toast is right.
   if (document.getElementById('wd-grid')?.classList.contains('editing')) {
-    tapToast('🤖 The agent changed your layout — tap to reload', () => location.reload());
+    tapToast('The agent changed your layout — tap to reload', () => location.reload());
   } else {
     location.reload();
   }
@@ -222,7 +222,7 @@ const CLIENT_ACTS: Record<string, (params: Record<string, unknown>) => void> = {
     if (!['chime', 'alarm', 'ping'].includes(sound)) return;
     const audio = new Audio(`/sounds/${sound}.wav`);
     // Autoplay policy: without a prior gesture the play() rejects — offer a tap.
-    audio.play().catch(() => tapToast('🔔 Logic fired — tap for the sound', () => void audio.play().catch(() => {})));
+    audio.play().catch(() => tapToast('Logic fired — tap for the sound', () => void audio.play().catch(() => {})));
   },
   'youtube.play': (p) => {
     const id = String(p.videoId ?? '');
@@ -236,7 +236,7 @@ const CLIENT_ACTS: Record<string, (params: Record<string, unknown>) => void> = {
     const original = document.title;
     let on = false;
     const timer = setInterval(() => {
-      document.title = (on = !on) ? `🔔 ${msg}` : original;
+      document.title = (on = !on) ? `${msg}` : original;
     }, 1200);
     let timeout: ReturnType<typeof setTimeout>;
     const stop = () => {
@@ -255,7 +255,7 @@ const CLIENT_ACTS: Record<string, (params: Record<string, unknown>) => void> = {
     stopFlash = stop;
     document.addEventListener('visibilitychange', onVis);
     timeout = setTimeout(stop, 60_000);
-    tapToast(`🔔 ${msg}`, () => {}); // also visible when the tab IS focused
+    tapToast(`${msg}`, () => {}); // also visible when the tab IS focused
   },
   'speak.say': (p) => {
     const text = String(p.text ?? '').slice(0, 200);
@@ -452,20 +452,20 @@ async function renderFlow(w: WardInstance): Promise<void> {
         await postJson(`/api/flow/${p.id}`, { op, ...extra });
         void renderFlow(w);
       };
-      const mkAct = (icon: string, title: string, fn: () => void) => {
-        const btn = el('button', 'btn min-h-0 shrink-0 px-1.5 py-0.5 text-[10px]', icon) as HTMLButtonElement;
+      const mkAct = (id: string, title: string, fn: () => void) => {
+        const btn = el('button', 'btn min-h-0 shrink-0 px-1.5 py-0.5 text-[10px]'); btn.append(icon(id)); btn.setAttribute('aria-label', title);
         btn.type = 'button';
         btn.title = title;
         btn.addEventListener('click', fn);
         return btn;
       };
       li.append(
-        mkAct('✎', 'Add a note', () => {
+        mkAct('pen', 'Add a note', () => {
           const n = prompt('Add a note to this packet');
           if (n?.trim()) void act('annotate', { note: n })();
         }),
-        mkAct('→', 'Pass along', () => void act('pass')()),
-        mkAct('✓', 'Complete', () => void act('complete')())
+        mkAct('right', 'Pass along', () => void act('pass')()),
+        mkAct('check', 'Complete', () => void act('complete')())
       );
     }
     list.append(li);
@@ -500,11 +500,11 @@ async function renderButton(w: WardInstance): Promise<void> {
   btn.append(icon(typeof w.config?.icon === 'string' ? w.config.icon : 'button', rows === 1 ? 'text-2xl' : 'text-3xl'), el('span', 'truncate text-xs', wardTitle(w)));
   wrap.append(btn);
   const side = cols >= 2 ? el('div', 'flex min-w-0 flex-1 flex-col justify-center gap-0.5 text-[10px] text-ink-faint') : null;
-  const wired = el('div', 'truncate', edges.length ? edges.map((e) => `🔘${e.conditions.length ? ' ⋯' : ''} → ${ACTIONS[e.action.type]?.icon ?? '?'}`).join('  ') : 'Draw a leyline to me in Leylines mode.');
+  const wired = el('div', 'truncate', edges.length ? edges.map((e) => `${e.conditions.length ? 'When matched → ' : ''}${ACTIONS[e.action.type]?.label ?? e.action.type}`).join(' · ') : 'Draw a leyline to me in Leylines mode.');
   const run = el('div', 'truncate');
   if (side) {
     side.append(wired, run);
-    if (rows >= 2) for (const e of edges) side.append(el('div', 'truncate', `${ACTIONS[e.action.type]?.icon ?? '?'} ${ACTIONS[e.action.type]?.label ?? e.action.type}`));
+    if (rows >= 2) for (const e of edges) { const row = el('div', 'truncate'); row.append(icon(ACTIONS[e.action.type]?.icon ?? 'flow'), document.createTextNode(' ' + (ACTIONS[e.action.type]?.label ?? e.action.type))); side.append(row); }
     wrap.append(side);
   } else btn.title = wired.textContent ?? '';
   b.append(wrap);
@@ -622,7 +622,7 @@ export function pickDbNote(w: WardInstance, b: HTMLElement): void {
   b.textContent = '';
   b.append(
     el('p', 'wd-note text-xs text-ink-faint', 'No database picked yet.'),
-    el('p', 'wd-note text-[10px] text-ink-faint', 'Edit mode → ⚙ on this ward, or set a default in Account → Notion.')
+    el('p', 'wd-note text-[10px] text-ink-faint', 'Configure this ward in edit mode, or set a default in Account → Notion.')
   );
 }
 

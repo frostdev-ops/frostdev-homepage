@@ -4,6 +4,7 @@ import {
   SSO_STATE_COOKIE,
   createSession,
   sessionCookieOptions,
+  afterLogin,
 } from '../../../../lib/auth.ts';
 import { getUserByEmail, createUser, setDisplayName, userCount } from '../../../../lib/users.ts';
 import { takeState } from '../../../../lib/oauth.ts';
@@ -44,6 +45,5 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
 
   const session = createSession(userId);
   for (const name of SESSION_COOKIES) cookies.set(name, session.id, sessionCookieOptions(session.expiresAt));
-  // Hard-coded destination: the callback never honors a return-to parameter.
-  return redirect('/dash', 303);
+  return redirect(afterLogin(cookies), 303);
 };

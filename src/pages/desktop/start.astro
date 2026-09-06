@@ -1,0 +1,54 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import Icon from '../../components/Icon.astro';
+import {isDesktop} from '../../lib/dev/runtime.ts';
+if(!isDesktop())return new Response('Desktop setup is available in the app.',{status:404});
+Astro.response.headers.set('cache-control','no-store');
+---
+<AppLayout title="Welcome to Rimeward" search={false}>
+  <main class="desktop-setup" data-setup={Astro.url.searchParams.has('setup')?'1':'0'} data-step="connect">
+    <header class="setup-intro">
+      <p class="setup-eyebrow"><span></span> YOUR WORKSPACE, CONNECTED</p>
+      <h1>Make yourself at home.</h1>
+      <p>Bring your Rimeward dashboard with you.<br />Build on this desktop, and pick up from anywhere.</p>
+    </header>
+    <p id="setup-status" role="status" aria-live="polite"></p>
+    <section id="setup-connected" hidden class="setup-connected" aria-label="Connected servers"></section>
+    <div class="setup-options">
+      <section class="setup-card setup-primary" id="setup-connect">
+        <span class="setup-card-icon"><Icon id="route" /></span>
+        <div><p class="setup-eyebrow">ALREADY USE RIMEWARD?</p><h2>Bring your dashboard.</h2></div>
+        <p>Connect your server to open your existing wards, conversations, and integrations.</p>
+        <ol class="setup-progress" aria-label="Connection progress">
+          <li data-step="connect" aria-current="step"><span>1</span> Connect</li>
+          <li data-step="approve"><span>2</span> Approve</li>
+          <li data-step="ready"><span>3</span> Ready</li>
+        </ol>
+        <form id="setup-form">
+          <label for="setup-server">Rimeward server address</label>
+          <input id="setup-server" class="input" name="server" type="text" inputmode="url" autocomplete="url" autocapitalize="none" spellcheck="false" aria-describedby="setup-address-help" placeholder="rimeward.example.com" required />
+          <p id="setup-address-help" class="setup-help">Sign in securely in your browser. No tokens to copy.</p>
+          <button class="btn-primary" id="setup-submit" aria-label="Continue in browser" type="submit">Continue in browser <Icon id="right" /></button>
+        </form>
+        <div id="setup-wait" hidden>
+          <p>Approve this desktop in your browser.</p><p class="setup-help">Match this request code:</p><strong id="setup-code"></strong>
+          <div class="flex flex-wrap gap-2"><button class="btn" id="setup-reopen" type="button">Open browser again</button><button class="btn" id="setup-cancel" type="button">Cancel connection</button></div>
+          <a id="setup-link" target="_blank" rel="noopener noreferrer">Open approval page <span aria-hidden="true">↗</span></a>
+        </div>
+      </section>
+      <section class="setup-card">
+        <span class="setup-card-icon"><Icon id="code" /></span>
+        <div><p class="setup-eyebrow">READY TO BUILD?</p><h2>Start right here.</h2></div>
+        <p>Your files, terminals, and agents. One workspace on your computer, ready whenever you are.</p>
+        <ul class="setup-features">
+          <li><Icon id="folder" /><span><strong>A home for your projects</strong><small>Open a folder or create something new.</small></span></li>
+          <li><Icon id="code" /><span><strong>Your tools, together</strong><small>Editor, terminal, browser, and agents.</small></span></li>
+          <li><Icon id="sparkle" /><span><strong>Works on its own</strong><small>Keep working when your server is offline.</small></span></li>
+        </ul>
+        <div class="setup-local-actions"><button class="btn" id="setup-project" aria-label="Open or create a project" type="button"><Icon id="plus" /> Open or create a project</button><button class="setup-text-button" id="setup-local" type="button">Use this desktop for now <span aria-hidden="true">→</span></button></div>
+      </section>
+    </div>
+    <p class="setup-footnote">Your server dashboard stays on your server. Desktop projects stay on this computer.<br />Switch environments at any time from the header.</p>
+  </main>
+  <script>import '../../scripts/app/desktop-setup.ts';</script>
+</AppLayout>

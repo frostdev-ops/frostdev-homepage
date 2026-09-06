@@ -1,0 +1,641 @@
+import { terminalEnv } from "./environment.ts";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import crypto from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { DATA_DIR } from "../db.ts";
+import {
+  workDb,
+  DevError,
+  emitDev,
+  leaseOwner,
+  claimLease,
+} from "./runtime.ts";
+import type { Project, BufferView } from "./types.ts";
+
+const exec = promisify(execFile);
+const MAX_FILE = 5 * 1024 * 1024;
+const hash = (b: Buffer) => crypto.createHash("sha256").update(b).digest("hex");
+const inside = (root: string, file: string) =>
+  file === root ||
+  (!path.relative(root, file).startsWith(".." + path.sep) &&
+    path.relative(root, file) !== ".." &&
+    !path.isAbsolute(path.relative(root, file)));
+export function projectOf(user: number, id: string): Project {
+  const p = workDb()
+    .prepare("SELECT id,name,root FROM projects WHERE id=? AND user_id=?")
+    .get(id, user) as Project | undefined;
+  if (!p) throw new DevError("Project not found.", 404);
+  return p;
+}
+export const listProjects = (user: number): Project[] =>
+  workDb()
+    .prepare(
+      "SELECT id,name,root FROM projects WHERE user_id=? AND archived=0 ORDER BY name",
+    )
+    .all(user) as Project[];
+export const defaultProjectParent = () => path.join(os.homedir(), "Projects");
+export function createProject(
+  user: number,
+  parent: string,
+  name: string,
+): Project {
+  workDb(); // Enforce desktop execution before creating anything on disk.
+  name = name.trim();
+  if (
+    !name ||
+    name.length > 100 ||
+    /[\x00-\x1f<>:"/\\|?*]/.test(name) ||
+    /[. ]$/.test(name) ||
+    name === "." ||
+    name === ".."
+  )
+    throw new DevError(
+      "Use a project name without path separators or reserved characters.",
+    );
+  if (!path.isAbsolute(parent))
+    throw new DevError("Choose an absolute parent folder.");
+  if (parent === defaultProjectParent() && !fs.existsSync(parent))
+    fs.mkdirSync(parent);
+  let real: string;
+  try {
+    real = fs.realpathSync(parent);
+  } catch {
+    throw new DevError(
+      "The parent folder does not exist. Choose another folder.",
+    );
+  }
+  const root = path.join(real, name);
+  if (!fs.statSync(real).isDirectory() || inside(fs.realpathSync(DATA_DIR), root))
+    throw new DevError("Choose a folder outside Rimeward application data.");
+  if (fs.existsSync(root))
+    throw new DevError(
+      "That folder already exists. Open it as an existing project instead.",
+      409,
+    );
+  fs.mkdirSync(root);
+  return addProject(user, root, name);
+}
+export function addProject(user: number, root: string, name?: string): Project {
+  if (!path.isAbsolute(root))
+    throw new DevError("Choose an absolute project folder.");
+  const real = fs.realpathSync(root);
+  if (!fs.statSync(real).isDirectory() || inside(fs.realpathSync(DATA_DIR), real))
+    throw new DevError("Choose a project outside Rimeward application data.");
+  const db = workDb();
+  const id = crypto.randomUUID();
+  db.prepare(
+    "INSERT OR IGNORE INTO projects(id,user_id,name,root) VALUES(?,?,?,?)",
+  ).run(id, user, (name?.trim() || path.basename(real)).slice(0, 100), real);
+  const p = db
+    .prepare("SELECT id,name,root FROM projects WHERE user_id=? AND root=?")
+    .get(user, real) as Project;
+  db.prepare("UPDATE projects SET archived=0 WHERE id=?").run(p.id);
+  emitDev(user, "project", p.id);
+  return p;
+}
+export function projectPath(
+  user: number,
+  id: string,
+  relative = "",
+  create = false,
+): string {
+  const p = projectOf(user, id);
+  if (
+    relative.includes("\0") ||
+    relative.includes("\\") ||
+    path.isAbsolute(relative) ||
+    relative.split("/").includes("..")
+  )
+    throw new DevError("Path is outside the project.", 403);
+  const target = path.resolve(p.root, relative);
+  let real: string;
+  try {
+    real = fs.realpathSync(target);
+  } catch (err) {
+    if (!create || (err as NodeJS.ErrnoException).code !== "ENOENT")
+      throw new DevError("File not found.", 404);
+    let ancestor = path.dirname(target);
+    while (!fs.existsSync(ancestor)) {
+      if (fs.lstatSync(ancestor, { throwIfNoEntry: false })?.isSymbolicLink())
+        throw new DevError("Unresolvable project symlink.", 403);
+      const next = path.dirname(ancestor);
+      if (next === ancestor) throw new DevError("File not found.", 404);
+      ancestor = next;
+    }
+    real = path.resolve(
+      fs.realpathSync(ancestor),
+      path.relative(ancestor, target),
+    );
+  }
+  if (!inside(p.root, real) || inside(fs.realpathSync(DATA_DIR), real))
+    throw new DevError("Path is outside the approved project.", 403);
+  return real;
+}
+export function tree(user: number, project: string, dir = "") {
+  const base = projectPath(user, project, dir);
+  return fs
+    .readdirSync(base, { withFileTypes: true })
+    .filter((e) => e.name !== ".git")
+    .slice(0, 2000)
+    .map((e) => {
+      const relative = path.posix.join(dir, e.name);
+      try {
+        const file = projectPath(user, project, relative);
+        const st = fs.statSync(file);
+        return {
+          name: e.name,
+          path: relative,
+          directory: st.isDirectory(),
+          bytes: st.size,
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter((e) => e !== null)
+    .sort(
+      (a, b) =>
+        Number(b.directory) - Number(a.directory) ||
+        a.name.localeCompare(b.name),
+    );
+}
+export function createFile(
+  user: number,
+  project: string,
+  file: string,
+  directory = false,
+): void {
+  const target = projectPath(user, project, file, true);
+  if (directory) fs.mkdirSync(target);
+  else fs.writeFileSync(target, "", { flag: "wx" });
+  emitDev(user, "project", project);
+}
+export function renameFile(
+  user: number,
+  project: string,
+  from: string,
+  to: string,
+): void {
+  const source = projectPath(user, project, from);
+  const lexical = path.resolve(projectOf(user, project).root, from);
+  const link = fs.lstatSync(lexical).isSymbolicLink();
+  const sourceKey = path
+    .relative(projectOf(user, project).root, source)
+    .split(path.sep)
+    .join("/");
+  const dest = projectPath(user, project, to, true);
+  if (source === projectOf(user, project).root || fs.existsSync(dest))
+    throw new DevError("Destination exists or source is the project root.");
+  const dirty = workDb()
+    .prepare(
+      "SELECT path FROM buffers WHERE user_id=? AND project=? AND dirty=1",
+    )
+    .all(user, project) as { path: string }[];
+  if (
+    !link &&
+    dirty.some(
+      (b) => b.path === sourceKey || b.path.startsWith(sourceKey + "/"),
+    )
+  )
+    throw new DevError("Save open changes before renaming.", 409);
+  fs.renameSync(link ? lexical : source, dest);
+  const rows = workDb()
+    .prepare("SELECT path FROM buffers WHERE user_id=? AND project=?")
+    .all(user, project) as { path: string }[];
+  for (const row of rows)
+    if (
+      !link &&
+      (row.path === sourceKey || row.path.startsWith(sourceKey + "/"))
+    )
+      workDb()
+        .prepare("DELETE FROM buffers WHERE user_id=? AND project=? AND path=?")
+        .run(user, project, row.path);
+  emitDev(user, "project", project);
+}
+export async function searchFiles(
+  user: number,
+  project: string,
+  query: string,
+) {
+  if (!query.trim() || query.length > 200) return [];
+  const matches: { path: string; line: number; text: string }[] = [];
+  const pending = [""];
+  const seen = new Set<string>();
+  let visited = 0;
+  // ponytail: bounded project scan; use a bundled search index if large-repo latency matters.
+  while (pending.length && visited < 10_000 && matches.length < 200) {
+    const dir = pending.pop()!;
+    const real = projectPath(user, project, dir);
+    if (seen.has(real)) continue;
+    seen.add(real);
+    for (const e of tree(user, project, dir)) {
+      if (++visited > 10_000) break;
+      if (e.directory) {
+        if (!["node_modules", "dist", "target", ".git"].includes(e.name))
+          pending.push(e.path);
+        continue;
+      }
+      if (e.path.toLowerCase().includes(query.toLowerCase()))
+        matches.push({ path: e.path, line: 1, text: e.name });
+      if (e.bytes > MAX_FILE || matches.length >= 200) continue;
+      const d = decode(fs.readFileSync(projectPath(user, project, e.path)));
+      if (d.readonly) continue;
+      const lines = d.text.split("\n");
+      for (let i = 0; i < lines.length && matches.length < 200; i++)
+        if (lines[i]!.toLowerCase().includes(query.toLowerCase()))
+          matches.push({
+            path: e.path,
+            line: i + 1,
+            text: lines[i]!.slice(0, 300),
+          });
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  return matches;
+}
+function decode(raw: Buffer) {
+  let encoding = "utf8",
+    bytes = raw;
+  if (raw.subarray(0, 3).equals(Buffer.from([239, 187, 191]))) {
+    encoding = "utf8-bom";
+    bytes = raw.subarray(3);
+  } else if (raw.subarray(0, 2).equals(Buffer.from([255, 254]))) {
+    encoding = "utf16le";
+    bytes = raw.subarray(2);
+  } else if (raw.subarray(0, 2).equals(Buffer.from([254, 255]))) {
+    encoding = "utf16be";
+    bytes = Buffer.from(raw.subarray(2));
+    if (bytes.length % 2)
+      return {
+        text: "Unsupported encoding.",
+        encoding,
+        newline: "\n",
+        readonly: true,
+      };
+    bytes.swap16();
+  }
+  if (encoding.startsWith("utf16") && bytes.length % 2)
+    return {
+      text: "Unsupported encoding.",
+      encoding,
+      newline: "\n",
+      readonly: true,
+    };
+  let text = bytes.toString(encoding.startsWith("utf16") ? "utf16le" : "utf8");
+  const readonly =
+    raw.length > MAX_FILE || text.includes("\0") || text.includes("\ufffd");
+  const crlf = text.includes("\r\n"),
+    lf = /(?<!\r)\n/.test(text),
+    cr = /\r(?!\n)/.test(text);
+  const mixed = Number(crlf) + Number(lf) + Number(cr) > 1;
+  const newline = crlf ? "\r\n" : cr ? "\r" : "\n";
+  text = readonly
+    ? "Binary, unsupported encoding, or file larger than 5 MiB. Open it with an external tool."
+    : text.replace(/\r\n?|\n/g, "\n");
+  return { text, encoding, newline, readonly: readonly || mixed };
+}
+function encode(text: string, encoding: string, newline: string): Buffer {
+  const normalized = text.replace(/\r\n?|\n/g, "\n").replace(/\n/g, newline);
+  if (encoding.startsWith("utf16")) {
+    const b = Buffer.from(normalized, "utf16le");
+    return Buffer.concat([
+      Buffer.from(encoding === "utf16be" ? [254, 255] : [255, 254]),
+      encoding === "utf16be" ? b.swap16() : b,
+    ]);
+  }
+  return Buffer.concat([
+    encoding === "utf8-bom" ? Buffer.from([239, 187, 191]) : Buffer.alloc(0),
+    Buffer.from(normalized),
+  ]);
+}
+interface BufferRow {
+  text: string;
+  base_hash: string;
+  revision: number;
+  dirty: number;
+  encoding: string;
+  newline: string;
+  readonly: number;
+}
+const bufferKey = (u: number, p: string, f: string) => `buffer:${u}:${p}:${f}`;
+export function readBuffer(
+  user: number,
+  project: string,
+  file: string,
+): BufferView {
+  const target = projectPath(user, project, file, true);
+  file = path
+    .relative(projectOf(user, project).root, target)
+    .split(path.sep)
+    .join("/");
+  if (!fs.existsSync(target)) {
+    const recovery = workDb()
+      .prepare("SELECT * FROM buffers WHERE user_id=? AND project=? AND path=?")
+      .get(user, project, file) as BufferRow | undefined;
+    if (!recovery) throw new DevError("File not found.", 404);
+    return {
+      project,
+      path: file,
+      text: recovery.text,
+      revision: recovery.revision,
+      dirty: !!recovery.dirty,
+      readonly: !recovery.dirty,
+      conflict: !!recovery.dirty,
+      diskText: "",
+      owner: leaseOwner(bufferKey(user, project, file)),
+    };
+  }
+  if (!fs.statSync(target).isFile()) throw new DevError("Not a file.");
+  const db = workDb();
+  const size = fs.statSync(target).size;
+  if (size > MAX_FILE) {
+    const recovery = db
+      .prepare(
+        "SELECT * FROM buffers WHERE user_id=? AND project=? AND path=? AND dirty=1",
+      )
+      .get(user, project, file) as BufferRow | undefined;
+    return {
+      project,
+      path: file,
+      text:
+        recovery?.text ??
+        "File larger than 5 MiB. Open it with an external tool.",
+      revision: recovery?.revision ?? 0,
+      dirty: !!recovery,
+      readonly: true,
+      conflict: !!recovery,
+      ...(recovery
+        ? {
+            diskText:
+              "The disk file now exceeds 5 MiB. Your unsaved version is retained; use an external tool to compare the disk file.",
+          }
+        : {}),
+      owner: null,
+    };
+  }
+  const raw = fs.readFileSync(target),
+    digest = hash(raw),
+    d = decode(raw);
+  let row = db
+    .prepare("SELECT * FROM buffers WHERE user_id=? AND project=? AND path=?")
+    .get(user, project, file) as BufferRow | undefined;
+  if (!row) {
+    db.prepare(
+      "INSERT INTO buffers(user_id,project,path,text,base_hash,encoding,newline,readonly) VALUES(?,?,?,?,?,?,?,?)",
+    ).run(
+      user,
+      project,
+      file,
+      d.text,
+      digest,
+      d.encoding,
+      d.newline,
+      Number(d.readonly),
+    );
+  } else if (!row.dirty && row.base_hash !== digest) {
+    db.prepare(
+      "UPDATE buffers SET text=?,base_hash=?,encoding=?,newline=?,readonly=?,revision=revision+1 WHERE user_id=? AND project=? AND path=?",
+    ).run(
+      d.text,
+      digest,
+      d.encoding,
+      d.newline,
+      Number(d.readonly),
+      user,
+      project,
+      file,
+    );
+    emitDev(user, "buffer", project, { path: file });
+  }
+  row = db
+    .prepare("SELECT * FROM buffers WHERE user_id=? AND project=? AND path=?")
+    .get(user, project, file) as BufferRow;
+  const conflict = !!row.dirty && row.base_hash !== digest;
+  return {
+    project,
+    path: file,
+    text: row.text,
+    revision: row.revision,
+    encoding: row.encoding,
+    newline: row.newline,
+    dirty: !!row.dirty,
+    readonly: !!row.readonly || d.readonly,
+    conflict,
+    ...(conflict ? { diskText: d.text } : {}),
+    owner: leaseOwner(bufferKey(user, project, file)),
+  };
+}
+export function editBuffer(
+  user: number,
+  project: string,
+  file: string,
+  owner: string,
+  opts: {
+    text?: string;
+    revision?: number;
+    takeover?: boolean;
+    save?: boolean;
+    resolve?: "disk" | "mine";
+  },
+): BufferView {
+  if (
+    opts.resolve !== undefined &&
+    !(["disk", "mine"] as unknown[]).includes(opts.resolve)
+  )
+    throw new DevError("Invalid conflict resolution.");
+  if (
+    opts.text !== undefined &&
+    (typeof opts.text !== "string" || !Number.isInteger(opts.revision))
+  )
+    throw new DevError("Editing requires the current buffer revision.", 409);
+  const view = readBuffer(user, project, file);
+  file = view.path;
+  if (view.readonly) throw new DevError("This file is read-only.");
+  claimLease(bufferKey(user, project, file), owner, opts.takeover);
+  if (opts.revision !== undefined && opts.revision !== view.revision)
+    throw new DevError("The buffer changed. Reload before editing.", 409);
+  const db = workDb();
+  if (opts.text !== undefined) {
+    if (Buffer.byteLength(opts.text) > MAX_FILE)
+      throw new DevError("Buffer exceeds 5 MiB.");
+    db.prepare(
+      "UPDATE buffers SET text=?,dirty=1,revision=revision+1 WHERE user_id=? AND project=? AND path=?",
+    ).run(opts.text, user, project, file);
+  }
+  if (opts.save || opts.resolve) {
+    const current = readBuffer(user, project, file);
+    if (current.conflict && !opts.resolve)
+      throw new DevError(
+        "The file changed on disk. Compare and resolve before saving.",
+        409,
+      );
+    const row = db
+      .prepare("SELECT * FROM buffers WHERE user_id=? AND project=? AND path=?")
+      .get(user, project, file) as BufferRow;
+    if (opts.resolve)
+      db.prepare(
+        "INSERT INTO buffer_copies(user_id,project,path,text) VALUES(?,?,?,?)",
+      ).run(
+        user,
+        project,
+        file,
+        opts.resolve === "disk" ? row.text : (current.diskText ?? ""),
+      );
+    const target = projectPath(user, project, file, true);
+    if (opts.resolve === "disk") {
+      const raw = fs.existsSync(target)
+          ? fs.readFileSync(target)
+          : Buffer.alloc(0),
+        d = decode(raw);
+      db.prepare(
+        "UPDATE buffers SET text=?,base_hash=?,dirty=0,revision=revision+1,encoding=?,newline=?,readonly=? WHERE user_id=? AND project=? AND path=?",
+      ).run(
+        d.text,
+        hash(raw),
+        d.encoding,
+        d.newline,
+        Number(d.readonly),
+        user,
+        project,
+        file,
+      );
+    } else {
+      if (fs.existsSync(target))
+        db.prepare(
+          "INSERT INTO buffer_copies(user_id,project,path,text) VALUES(?,?,?,?)",
+        ).run(user, project, file, decode(fs.readFileSync(target)).text);
+      const bytes = encode(row.text, row.encoding, row.newline);
+      const tmp = target + ".rimeward-" + crypto.randomBytes(6).toString("hex");
+      try {
+        fs.writeFileSync(tmp, bytes, {
+          flag: "wx",
+          mode: fs.existsSync(target) ? fs.statSync(target).mode : 0o600,
+        });
+        fs.renameSync(tmp, target);
+      } finally {
+        fs.rmSync(tmp, { force: true });
+      }
+      db.prepare(
+        "UPDATE buffers SET base_hash=?,dirty=0,revision=revision+1 WHERE user_id=? AND project=? AND path=?",
+      ).run(hash(bytes), user, project, file);
+    }
+  }
+  emitDev(user, "buffer", project, { path: file });
+  return readBuffer(user, project, file);
+}
+export function bufferCopies(user: number, project: string, file: string) {
+  projectOf(user, project);
+  return workDb()
+    .prepare(
+      "SELECT id,text,saved_at FROM buffer_copies WHERE user_id=? AND project=? AND path=? ORDER BY id DESC LIMIT 20",
+    )
+    .all(user, project, file);
+}
+export function keepBufferCopy(user: number, project: string, file: string, text: unknown) {
+  const current = readBuffer(user, project, file);
+  if (typeof text !== "string" || Buffer.byteLength(text) > MAX_FILE)
+    throw new DevError("Recovery copy exceeds 5 MiB.");
+  workDb().prepare("INSERT INTO buffer_copies(user_id,project,path,text) VALUES(?,?,?,?)")
+    .run(user, project, current.path, text);
+  return { ok: true };
+}
+const gitQueues = new Map<string, Promise<unknown>>();
+export async function git(
+  user: number,
+  project: string,
+  args: string[],
+): Promise<string> {
+  const p = projectOf(user, project);
+  const { stdout } = await exec("git", args, {
+    cwd: projectPath(user, project),
+    timeout: 30_000,
+    maxBuffer: 2 * 1024 * 1024,
+    env: { ...terminalEnv(), GIT_TERMINAL_PROMPT: "0" },
+  });
+  return stdout;
+}
+export async function gitView(user: number, project: string) {
+  return {
+    status: await git(user, project, ["status", "--short"]),
+    diff: await git(user, project, [
+      "diff",
+      "--no-ext-diff",
+      "HEAD",
+      "--",
+    ]).catch(() =>
+      git(user, project, ["diff", "--no-ext-diff", "--cached", "--"]),
+    ),
+    worktrees: await git(user, project, ["worktree", "list", "--porcelain"]),
+  };
+}
+export async function worktreeOp(
+  user: number,
+  project: string,
+  op: "add" | "remove",
+  name: string,
+) {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,70}$/.test(name))
+    throw new DevError("Use a simple worktree name.");
+  const p = projectOf(user, project),
+    key = (
+      await git(user, project, [
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+      ])
+    ).trim();
+  const run = (gitQueues.get(key) ?? Promise.resolve())
+    .catch(() => {})
+    .then(async () => {
+      const dir = path.join(
+        path.dirname(p.root),
+        ".rimeward-worktrees",
+        path.basename(p.root),
+        name,
+      );
+      if (op === "add") {
+        fs.mkdirSync(path.dirname(dir), { recursive: true });
+        await git(user, project, [
+          "worktree",
+          "add",
+          "-b",
+          `rimeward/${name}`,
+          dir,
+        ]);
+        return addProject(user, dir, name);
+      }
+      const saved = workDb()
+        .prepare("SELECT id FROM projects WHERE user_id=? AND root=?")
+        .get(user, dir) as { id: string } | undefined;
+      if (
+        saved &&
+        (workDb()
+          .prepare("SELECT 1 FROM buffers WHERE project=? AND dirty=1")
+          .get(saved.id) ||
+          workDb()
+            .prepare(
+              "SELECT 1 FROM terminal_sessions WHERE project=? AND state='running'",
+            )
+            .get(saved.id))
+      )
+        throw new DevError(
+          "Save recovery buffers and stop running sessions before removing this worktree.",
+          409,
+        );
+      await git(user, project, ["worktree", "remove", dir]);
+      if (saved)
+        workDb()
+          .prepare("UPDATE projects SET archived=1 WHERE id=?")
+          .run(saved.id); // no --force: dirty worktrees remain recoverable
+      return { removed: true };
+    });
+  gitQueues.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (gitQueues.get(key) === run) gitQueues.delete(key);
+  }
+}

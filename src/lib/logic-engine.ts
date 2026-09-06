@@ -1,3 +1,4 @@
+import { isDesktop, emitDev } from './dev/runtime.ts';
 // The logic engine: server-side heart of the automation system. Schedules
 // timers (own setTimeout wheel — the 60s status tick is too coarse), fires
 // the per-user logic graph when triggers occur, executes actions through
@@ -102,6 +103,7 @@ export function subscribeLogic(userId: number, fn: Listener): () => void {
 
 /** Returns whether anyone was listening; undelivered 'act' events queue 60s. */
 export function broadcast(userId: number, event: string, data: unknown): boolean {
+  if(isDesktop())emitDev(userId,'ward',event,data);
   const set = subs.get(userId);
   if (!set || set.size === 0) {
     if (event === 'act') {
@@ -211,12 +213,14 @@ const armed = new Map<string, ReturnType<typeof setTimeout>>();
 export function armTimer(userId: number, ward: string, endsAt: number): void {
   const key = `${userId}:${ward}`;
   clearTimeout(armed.get(key));
+  // Timers are durable; the HTTP server owns process lifetime, and restart
+  // catch-up handles due timers after shutdown.
   armed.set(
     key,
     setTimeout(() => {
       armed.delete(key);
       handleExpiry(userId, ward, endsAt);
-    }, Math.max(0, endsAt - Date.now()))
+    }, Math.max(0, endsAt - Date.now())).unref()
   );
 }
 

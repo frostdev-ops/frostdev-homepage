@@ -1,0 +1,34 @@
+[
+  {
+    "name": "Rimeward live relay cache policy",
+    "kind": "zone",
+    "phase": "http_request_cache_settings",
+    "rules": [{
+      "ref": "rimeward_relay_no_cache",
+      "description": "Never cache desktop-owned content",
+      "expression": "starts_with(http.request.uri.path, \"/runtime/\") or http.request.uri.path eq \"/api/devices/connect\"",
+      "action": "set_cache_settings",
+      "action_parameters": { "cache": false }
+    }]
+  },
+  {
+    "name": "Rimeward live relay privacy",
+    "kind": "zone",
+    "phase": "http_config_settings",
+    "rules": [{
+      "ref": "rimeward_relay_no_transform",
+      "description": "Stream desktop payloads without analytics or content rewriting",
+      "expression": "starts_with(http.request.uri.path, \"/runtime/\") or http.request.uri.path eq \"/api/devices/connect\"",
+      "action": "set_config",
+      "action_parameters": {
+        "disable_rum": true,
+        "disable_zaraz": true,
+        "rocket_loader": false,
+        "email_obfuscation": false,
+        "automatic_https_rewrites": false,
+        "request_body_buffering": "none",
+        "response_body_buffering": "none"
+      }
+    }]
+  }
+]

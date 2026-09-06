@@ -200,7 +200,7 @@ npm run desktop:dev
 npm run desktop:build
 ```
 
-Pair servers in **Environments** after launch. See [development workspace setup and validation](docs/development-workspaces.md), including the required proxy privacy configuration. The desktop release workflow builds separately for Apple silicon, Intel macOS, Windows, and Linux on a `desktop-v*` tag; signing uses the Apple secrets listed in that workflow. Native release validation remains required before publishing.
+Pair servers in **Environments** after launch. See [development workspace setup and validation](docs/development-workspaces.md), including the required proxy privacy configuration. The desktop release workflow builds separately for Apple silicon, Intel macOS, Windows, and Linux on a `desktop-v*` tag: macOS DMGs, Windows installers, and Linux DEB/AppImage packages. Signing uses the Apple secrets listed in that workflow; publication waits for every platform to pass.
 
 First launch offers **Bring your dashboard** or **Start right here**. To connect, enter your
 server address and approve the desktop in your normal browser; the remote dashboard is

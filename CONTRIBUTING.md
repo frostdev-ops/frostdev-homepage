@@ -46,8 +46,11 @@ bundled backend. After staging, run `npm run desktop:check`: Biome, Rust formatt
 as errors, and native unit tests. Desktop release Actions run this on each target; the release remains a draft until every platform succeeds. On macOS,
 `desktop/sign-runtime.mjs` signs and verifies bundled Chromium and native binaries before
 Tauri signs/notarizes the outer app. Build intermediates and other platforms' PTY prebuilds
-are excluded. Linux RPMs use Zstandard level 3 to keep packaging time bounded for the
-bundled runtime. `desktop/entitlements.plist` supplies the Node/Chromium JIT entitlements.
+are excluded. macOS copies the runtime as a whole directory to preserve signed framework
+links. Linux builds DEB and AppImage packages; RPM is excluded because its packager stalls
+on the bundled runtime, even with Zstandard compression. `desktop/entitlements.plist`
+supplies the Node/Chromium JIT entitlements. Manual release dispatches must select the
+version's existing tag; every build verifies that tag against its checked-out commit.
 
 Install-script permissions are pinned in `package.json` for native dependencies. The SDK's
 network-based model-type freshness check is disabled; models are discovered at runtime.

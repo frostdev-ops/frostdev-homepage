@@ -14,7 +14,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "node --env-file-if-exists=.env ./server.mjs",
-    "test": "node --test 'tests/*.test.ts'",
+    "test": "node --test \"tests/*.test.ts\"",
     "dev:env": "node --env-file-if-exists=.env node_modules/astro/bin/astro.mjs dev",
     "desktop:dev": "node desktop/prebuild.mjs && cd desktop && tauri dev",
     "desktop:build": "node desktop/prebuild.mjs && cd desktop && tauri build",
